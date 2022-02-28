@@ -24,3 +24,17 @@ The table below list all the possible configuration option of the kafka plugin.
 | kafkaSSLCertificateLocation | path where the SSL client certificate is located | `/path/to/client.crt` |
 | kafkaSSLKeyLocation | path where the SSL cilent key is located | `/path/to/client.key` |
 | kafkaSSLKeyPassword | optional password for the client key |  |
+
+## Edit config.ini
+```
+
+...
+
+# Plugins to load as root, usually just readers
+rootPlugins=kafka.so
+kafkaBootstrapServers=localhost:9092
+kafkaTopic=arkime-json
+
+...
+
+```
