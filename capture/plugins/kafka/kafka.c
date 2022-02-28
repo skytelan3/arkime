@@ -35,7 +35,7 @@ LOCAL rd_kafka_conf_t *conf; /* Temporary configuration object */
 LOCAL char errstr[512];      /* librdkafka API error reporting buffer */
 LOCAL const char *brokers;   /* Argument: broker list */
 LOCAL const char *topic;     /* Argument: topic to produce to */
-LOCAL const char kafkaSSL;
+LOCAL char kafkaSSL;
 LOCAL const char *kafkaSSLCALocation;
 LOCAL const char *kafkaSSLCertificateLocation;
 LOCAL const char *kafkaSSLKeyLocation;
@@ -215,7 +215,7 @@ void moloch_plugin_init()
         kafkaSSLCALocation = moloch_config_str(NULL, "kafkaSSLCALocation", NULL);
         if (kafkaSSLCALocation)
         {
-            if (rd_kafka_conf_set(conf, "ssl.ca.location", ca_cert,
+            if (rd_kafka_conf_set(conf, "ssl.ca.location", kafkaSSLCALocation,
                                   errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
             {
                 LOGEXIT("Error configuring kafka:ssl.ca.location, error = %s\n", errstr);
@@ -225,7 +225,7 @@ void moloch_plugin_init()
         kafkaSSLCertificateLocation = moloch_config_str(NULL, "kafkaSSLCertificateLocation", NULL);
 	    if (kafkaSSLCertificateLocation)
 	    {
-	        if (rd_kafka_conf_set(conf, "ssl.certificate.location", client_cert,
+	        if (rd_kafka_conf_set(conf, "ssl.certificate.location", kafkaSSLCertificateLocation,
                                   errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
             {
                 LOGEXIT("Error configuring kafka:ssl.certificate.location, error = %s\n", errstr);
@@ -234,7 +234,7 @@ void moloch_plugin_init()
 
         kafkaSSLKeyLocation = moloch_config_str(NULL, "kafkaSSLKeyLocation", NULL);
         if (kafkaSSLKeyLocation) {
-            if (rd_kafka_conf_set(conf, "ssl.key.location", client_key,
+            if (rd_kafka_conf_set(conf, "ssl.key.location", kafkaSSLKeyLocation,
                                   errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
             {
                 LOGEXIT("Error configuring kafka:ssl.key.location, error = %s\n", errstr);
@@ -243,7 +243,7 @@ void moloch_plugin_init()
 
         kafkaSSLKeyPassword = moloch_config_str(NULL, "kafkaSSLKeyPassword", NULL);
         if (kafkaSSLKeyPassword) {
-             if (rd_kafka_conf_set(conf, "ssl.key.password", client_key_password,
+             if (rd_kafka_conf_set(conf, "ssl.key.password", kafkaSSLKeyPassword,
                                   errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
             {
                 LOGEXIT("Error configuring kafka:ss.key.password, error = %s\n", errstr);
