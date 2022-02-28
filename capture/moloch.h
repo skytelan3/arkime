@@ -496,6 +496,14 @@ typedef struct moloch_config {
     char      enablePacketLen;
     char      gapPacketPos;
     char      enablePacketDedup;
+
+    char      kafkaBootstrapServers;
+    char      kafkaTopic;
+    char      kafkaSSL;
+    char      kafkaSSLCALocation;
+    char      kafkaSSLCertificateLocation;
+    char      kafkaSSLKeyLocation;
+    char      kafkaSSLKeyPassword;
 } MolochConfig_t;
 
 typedef struct {
