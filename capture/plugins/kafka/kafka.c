@@ -200,8 +200,8 @@ void moloch_plugin_init()
     if (config.debug)
         LOG("%% kafka broker %s", brokers);
 
-    kafkaSSL = moloch_config_boolean(NULL, "kafkaSSL", false);
-    if kafkaSSL
+    kafkaSSL = moloch_config_boolean(NULL, "kafkaSSL", FALSE);
+    if (kafkaSSL)
     {
         if (config.debug)
             LOG("%% kafka SSL is turned on");
@@ -213,7 +213,7 @@ void moloch_plugin_init()
         }
 
         kafkaSSLCALocation = moloch_config_str(NULL, "kafkaSSLCALocation", NULL);
-        if kafkaSSLCALocation
+        if (kafkaSSLCALocation)
         {
             if (rd_kafka_conf_set(conf, "ssl.ca.location", ca_cert,
                                   errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
@@ -223,7 +223,7 @@ void moloch_plugin_init()
         }
 
         kafkaSSLCertificateLocation = moloch_config_str(NULL, "kafkaSSLCertificateLocation", NULL);
-	    if kafkaSSLCertificateLocation
+	    if (kafkaSSLCertificateLocation)
 	    {
 	        if (rd_kafka_conf_set(conf, "ssl.certificate.location", client_cert,
                                   errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
@@ -233,7 +233,7 @@ void moloch_plugin_init()
 	    }
 
         kafkaSSLKeyLocation = moloch_config_str(NULL, "kafkaSSLKeyLocation", NULL);
-        if kafkaSSLKeyLocation {
+        if (kafkaSSLKeyLocation) {
             if (rd_kafka_conf_set(conf, "ssl.key.location", client_key,
                                   errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
             {
@@ -242,7 +242,7 @@ void moloch_plugin_init()
         }
 
         kafkaSSLKeyPassword = moloch_config_str(NULL, "kafkaSSLKeyPassword", NULL);
-        if kafkaSSLKeyPassword {
+        if (kafkaSSLKeyPassword) {
              if (rd_kafka_conf_set(conf, "ssl.key.password", client_key_password,
                                   errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK)
             {
