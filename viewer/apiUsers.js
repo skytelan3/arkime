@@ -106,6 +106,109 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   }
 
+  function userColumns (user) {
+    if (!user) { return []; }
+
+    // Fix for new names
+    if (user.columnConfigs) {
+      for (const key in user.columnConfigs) {
+        const item = user.columnConfigs[key];
+        item.columns = item.columns.map(ViewerUtils.oldDB2newDB);
+        if (item.order && item.order.length > 0) {
+          item.order[0][0] = ViewerUtils.oldDB2newDB(item.order[0][0]);
+        }
+      }
+    }
+
+    return user.columnConfigs || [];
+  }
+
+  function userSpiview (user) {
+    if (!user) { return []; }
+    return user.spiviewFieldConfigs || [];
+  }
+
+  uModule.getCurrentUser = (req) => {
+    const userProps = [
+      'createEnabled', 'emailSearch', 'enabled', 'removeEnabled',
+      'headerAuthEnabled', 'settings', 'userId', 'userName', 'webEnabled',
+      'packetSearch', 'hideStats', 'hideFiles', 'hidePcap',
+      'disablePcapDownload', 'welcomeMsgNum', 'lastUsed', 'timeLimit'
+    ];
+
+    const clone = {};
+
+    for (const prop of userProps) {
+      if (req.user[prop]) {
+        clone[prop] = req.user[prop];
+      }
+    }
+
+    clone.canUpload = internals.allowUploads;
+
+    // If esAdminUser is set use that, other wise use createEnable privilege
+    if (internals.esAdminUsersSet) {
+      clone.esAdminUser = internals.esAdminUsers.includes(req.user.userId);
+    } else {
+      clone.esAdminUser = req.user.createEnabled && Config.get('multiES', false) === false;
+    }
+
+    // If no settings, use defaults
+    if (clone.settings === undefined) { clone.settings = internals.settingDefaults; }
+
+    // Use settingsDefaults for any settings that are missing
+    for (const item in internals.settingDefaults) {
+      if (clone.settings[item] === undefined) {
+        clone.settings[item] = internals.settingDefaults[item];
+      }
+    }
+
+    return clone;
+  };
+
+  uModule.getViews = async (req, cb) => {
+    if (!req.settingUser) { return {}; }
+
+    // Clone the views so we don't modify that cached user
+    const views = JSON.parse(JSON.stringify(req.settingUser.views || {}));
+
+    Db.getUser('_moloch_shared', (err, sharedUser) => {
+      if (sharedUser && sharedUser.found) {
+        sharedUser = sharedUser._source;
+        for (const viewName in sharedUser.views) {
+          // check for views with the same name as a shared view so user specific views don't get overwritten
+          let sharedViewName = viewName;
+          if (views[sharedViewName] && !views[sharedViewName].shared) {
+            sharedViewName = `shared:${sharedViewName}`;
+          }
+          views[sharedViewName] = sharedUser.views[viewName];
+        }
+      }
+
+      // don't send error, just send views that we could get
+      return cb(null, views);
+    });
+  };
+
+  uModule.findUserState = (stateName, user) => {
+    if (!user.tableStates || !user.tableStates[stateName]) {
+      return {};
+    }
+
+    // Fix for new names
+    if (stateName === 'sessionsNew' && user.tableStates && user.tableStates.sessionsNew) {
+      const item = user.tableStates.sessionsNew;
+      if (item.visibleHeaders) {
+        item.visibleHeaders = item.visibleHeaders.map(ViewerUtils.oldDB2newDB);
+      }
+      if (item.order && item.order.length > 0) {
+        item.order[0][0] = ViewerUtils.oldDB2newDB(item.order[0][0]);
+      }
+    }
+
+    return user.tableStates[stateName];
+  };
+
   // --------------------------------------------------------------------------
   // APIs
   // --------------------------------------------------------------------------
@@ -211,41 +314,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @returns {ArkimeUser} user - The currently logged in user.
    */
   uModule.getUser = (req, res) => {
-    const userProps = [
-      'createEnabled', 'emailSearch', 'enabled', 'removeEnabled',
-      'headerAuthEnabled', 'settings', 'userId', 'userName', 'webEnabled',
-      'packetSearch', 'hideStats', 'hideFiles', 'hidePcap',
-      'disablePcapDownload', 'welcomeMsgNum', 'lastUsed', 'timeLimit'
-    ];
-
-    const clone = {};
-
-    for (const prop of userProps) {
-      if (req.user[prop]) {
-        clone[prop] = req.user[prop];
-      }
-    }
-
-    clone.canUpload = internals.allowUploads;
-
-    // If esAdminUser is set use that, other wise use createEnable privilege
-    if (internals.esAdminUsersSet) {
-      clone.esAdminUser = internals.esAdminUsers.includes(req.user.userId);
-    } else {
-      clone.esAdminUser = req.user.createEnabled && Config.get('multiES', false) === false;
-    }
-
-    // If no settings, use defaults
-    if (clone.settings === undefined) { clone.settings = internals.settingDefaults; }
-
-    // Use settingsDefaults for any settings that are missing
-    for (const item in internals.settingDefaults) {
-      if (clone.settings[item] === undefined) {
-        clone.settings[item] = internals.settingDefaults[item];
-      }
-    }
-
-    return res.send(clone);
+    return res.send(uModule.getCurrentUser(req));
   };
 
   /**
@@ -655,25 +724,8 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @returns {ArkimeView[]} views - A list of views a user has configured or has been shared.
    */
   uModule.getUserViews = (req, res) => {
-    if (!req.settingUser) { return res.send({}); }
-
-    // Clone the views so we don't modify that cached user
-    const views = JSON.parse(JSON.stringify(req.settingUser.views || {}));
-
-    Db.getUser('_moloch_shared', (err, sharedUser) => {
-      if (sharedUser && sharedUser.found) {
-        sharedUser = sharedUser._source;
-        for (const viewName in sharedUser.views) {
-          // check for views with the same name as a shared view so user specific views don't get overwritten
-          let sharedViewName = viewName;
-          if (views[sharedViewName] && !views[sharedViewName].shared) {
-            sharedViewName = `shared:${sharedViewName}`;
-          }
-          views[sharedViewName] = sharedUser.views[viewName];
-        }
-      }
-
-      return res.send(views);
+    uModule.getViews(req, (err, views) => {
+      res.send(views);
     });
   };
 
@@ -1191,20 +1243,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @returns {ArkimeColumnConfig[]} columnConfigs - The custom Sessions column configurations.
    */
   uModule.getUserColumns = (req, res) => {
-    if (!req.settingUser) { return res.send([]); }
-
-    // Fix for new names
-    if (req.settingUser.columnConfigs) {
-      for (const key in req.settingUser.columnConfigs) {
-        const item = req.settingUser.columnConfigs[key];
-        item.columns = item.columns.map(ViewerUtils.oldDB2newDB);
-        if (item.order && item.order.length > 0) {
-          item.order[0][0] = ViewerUtils.oldDB2newDB(item.order[0][0]);
-        }
-      }
-    }
-
-    return res.send(req.settingUser.columnConfigs || []);
+    return res.send(userColumns(req.settingUser));
   };
 
   /**
@@ -1365,9 +1404,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @returns {Array} spiviewFieldConfigs - User configured SPI View field configuration.
    */
   uModule.getUserSpiviewFields = (req, res) => {
-    if (!req.settingUser) { return res.send([]); }
-
-    return res.send(req.settingUser.spiviewFieldConfigs || []);
+    return res.send(userSpiview(req.settingUser));
   };
 
   /**
@@ -1562,22 +1599,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @returns {object} tableState - The table state requested.
    */
   uModule.getUserState = (req, res) => {
-    if (!req.user.tableStates || !req.user.tableStates[req.params.name]) {
-      return res.send('{}');
-    }
-
-    // Fix for new names
-    if (req.params.name === 'sessionsNew' && req.user.tableStates && req.user.tableStates.sessionsNew) {
-      const item = req.user.tableStates.sessionsNew;
-      if (item.visibleHeaders) {
-        item.visibleHeaders = item.visibleHeaders.map(ViewerUtils.oldDB2newDB);
-      }
-      if (item.order && item.order.length > 0) {
-        item.order[0][0] = ViewerUtils.oldDB2newDB(item.order[0][0]);
-      }
-    }
-
-    return res.send(req.user.tableStates[req.params.name]);
+    return res.send(uModule.findUserState(req.params.name, req.user));
   };
 
   /**
@@ -1615,6 +1637,66 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         }));
       });
     });
+  };
+
+  /**
+   * GET - /api/user/config/:page
+   *
+   * Fetches the configuration information for a UI page for a user.
+   * @name /user/config/:page
+   * @returns {object} config The configuration data for the page
+   */
+  uModule.getPageConfig = (req, res) => {
+    switch (req.params.page) {
+    case 'sessions': {
+      const colConfigs = userColumns(req.settingUser);
+      const tableState = uModule.findUserState('sessionsNew', req.user);
+      const colWidths = uModule.findUserState('sessionsColWidths', req.user);
+      return res.send({ colWidths, tableState, colConfigs });
+    }
+    case 'spiview': {
+      const fieldConfigs = userSpiview(req.settingUser);
+      const spiviewFields = uModule.findUserState('spiview', req.user);
+      return res.send({ fieldConfigs, spiviewFields });
+    }
+    case 'connections': {
+      const fieldHistoryConnectionsSrc = uModule.findUserState('fieldHistoryConnectionsSrc', req.user);
+      const fieldHistoryConnectionsDst = uModule.findUserState('fieldHistoryConnectionsDst', req.user);
+      return res.send({ fieldHistoryConnectionsSrc, fieldHistoryConnectionsDst });
+    }
+    case 'files': {
+      const tableState = uModule.findUserState('fieldsCols', req.user);
+      const columnWidths = uModule.findUserState('filesColWidths', req.user);
+      return res.send({ tableState, columnWidths });
+    }
+    case 'captureStats': {
+      const tableState = uModule.findUserState('captureStatsCols', req.user);
+      const columnWidths = uModule.findUserState('captureStatsColWidths', req.user);
+      return res.send({ tableState, columnWidths });
+    }
+    case 'esIndices': {
+      const tableState = uModule.findUserState('esIndicesCols', req.user);
+      const columnWidths = uModule.findUserState('esIndicesColWidths', req.user);
+      return res.send({ tableState, columnWidths });
+    }
+    case 'esNodes': {
+      const tableState = uModule.findUserState('esNodesCols', req.user);
+      const columnWidths = uModule.findUserState('esNodesColWidths', req.user);
+      return res.send({ tableState, columnWidths });
+    }
+    case 'esRecovery': {
+      const tableState = uModule.findUserState('esRecoveryCols', req.user);
+      const columnWidths = uModule.findUserState('esRecoveryColWidths', req.user);
+      return res.send({ tableState, columnWidths });
+    }
+    case 'esTasks': {
+      const tableState = uModule.findUserState('esTasksCols', req.user);
+      const columnWidths = uModule.findUserState('esTasksColWidths', req.user);
+      return res.send({ tableState, columnWidths });
+    }
+    default:
+      return res.serverError(501, 'Requested page is not supported');
+    }
   };
 
   return uModule;

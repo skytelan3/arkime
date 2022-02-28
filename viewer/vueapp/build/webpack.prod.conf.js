@@ -2,6 +2,7 @@
 
 const path = require('path')
 const utils = require('./utils')
+const { git } = require('./git')
 const webpack = require('webpack')
 const config = require('../config')
 const { merge } = require('webpack-merge')
@@ -25,11 +26,6 @@ const webpackConfig = merge(baseWebpackConfig, {
   },
   mode: 'production',
   devtool: config.build.productionSourceMap ? config.build.devtool : false,
-  output: {
-    path: config.build.assetsRoot,
-    filename: utils.assetsPath('js/[name].[chunkhash].js'),
-    chunkFilename: utils.assetsPath('js/[id].[chunkhash].js')
-  },
   performance: {
     maxAssetSize: 4000000
   },
@@ -44,7 +40,9 @@ const webpackConfig = merge(baseWebpackConfig, {
   plugins: [
     // http://vuejs.github.io/vue-loader/en/workflow/production.html
     new webpack.DefinePlugin({
-      'process.env': env
+      'process.env': env,
+      BUILD_VERSION: JSON.stringify(git('describe --tags')),
+      BUILD_DATE: JSON.stringify(git('log -1 --format=%aI'))
     }),
     new webpack.ProvidePlugin({
       $: 'jquery',
@@ -78,7 +76,9 @@ const webpackConfig = merge(baseWebpackConfig, {
       ]
     }),
     new VueLoaderPlugin(),
-    new MiniCssExtractPlugin()
+    new MiniCssExtractPlugin({
+      filename: utils.assetsPath('css/[name].[chunkhash].css')
+    })
   ]
 })
 

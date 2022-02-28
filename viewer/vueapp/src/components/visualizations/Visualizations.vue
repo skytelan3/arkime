@@ -241,18 +241,8 @@
 
 <script>
 // imports
+import StatsService from '../stats/StatsService';
 import moment from 'moment-timezone';
-
-// map imports
-import '../../../../public/jquery-jvectormap-1.2.2.min.js';
-import '../../../../public/jquery-jvectormap-world-en.js';
-
-// graph imports
-import '../../../../public/flot-0.7/jquery.flot';
-import '../../../../public/flot-0.7/jquery.flot.selection';
-import '../../../../public/flot-0.7/jquery.flot.navigate';
-import '../../../../public/flot-0.7/jquery.flot.resize';
-import '../../../../public/flot-0.7/jquery.flot.stack';
 
 // color vars
 let foregroundColor;
@@ -286,15 +276,6 @@ export default {
     timelineDataFilters: {
       type: Array,
       required: true
-    },
-    capStartTimes: {
-      type: Array,
-      default: () => {
-        return [{
-          nodeName: 'none',
-          startTime: 1
-        }];
-      }
     }
   },
   data: function () {
@@ -312,8 +293,7 @@ export default {
       graph: undefined,
       graphOptions: {},
       showMap: undefined,
-      stickyViz: false,
-      showCapStartTimes: true
+      stickyViz: false
     };
   },
   computed: {
@@ -369,6 +349,19 @@ export default {
     },
     timezone: function () {
       return this.$store.state.user.settings.timezone;
+    },
+    showCapStartTimes: {
+      get: function () {
+        return this.$store.state.showCapStartTimes;
+      },
+      set: function (newValue) {
+        if (this.primary) {
+          this.$store.commit('setShowCapStartTimes', newValue);
+        }
+      }
+    },
+    capStartTimes: function () {
+      return this.$store.state.capStartTimes;
     }
   },
   watch: {
@@ -383,10 +376,15 @@ export default {
     },
     graphType: function (newVal, oldVal) {
       function changeGraphType (that) {
-        that.setupGraphData();
-        that.plot.setData(that.graph);
-        that.plot.setupGrid();
-        that.plot.draw();
+        let interval = 0;
+        // need to wait for graph to load initially if there is a req for cap times
+        if (!that.graph) { interval = 100; }
+        setTimeout(() => {
+          that.setupGraphData();
+          that.plot.setData(that.graph);
+          that.plot.setupGrid();
+          that.plot.draw();
+        }, interval);
       }
       if (this.primary) {
         changeGraphType(this);
@@ -418,6 +416,12 @@ export default {
           this.showMap = newVal;
         }, id * 100);
       }
+    },
+    capStartTimes (newVal, oldVal) {
+      if (!this.primary) {
+        this.setupGraphData();
+        this.plot = $.plot(this.plotArea, this.graph, this.graphOptions);
+      }
     }
   },
   created: function () {
@@ -439,46 +443,59 @@ export default {
     }
   },
   mounted: function () {
-    function setupMapAndGraph (that) {
-      // create map
-      that.displayMap();
-      // create graph
-      // setup the graph data and options
-      that.setupGraphData();
-      // create flot graph
-      that.setupGraphElement();
-    }
+    // lazy load flot so it loads after data
+    import(/* webpackChunkName: "flot" */ 'public/flot-0.7/jquery.flot.min');
+    import(/* webpackChunkName: "flot" */ 'public/flot-0.7/jquery.flot.selection.min');
+    import(/* webpackChunkName: "flot" */ 'public/flot-0.7/jquery.flot.navigate.min');
+    import(/* webpackChunkName: "flot" */ 'public/flot-0.7/jquery.flot.resize');
+    import(/* webpackChunkName: "flot" */ 'public/flot-0.7/jquery.flot.stack.min');
 
-    basePath = this.$route.path.split('/')[1];
+    // lazy load jvector map so it loads after data
+    import(/* webpackChunkName: "jvectormap" */ 'public/jquery-jvectormap-1.2.2.min.js');
+    import(
+      /* webpackChunkName: "jvectormapworld" */ 'public/jquery-jvectormap-world-en.js'
+    ).then(() => {
+      function setupMapAndGraph (that) {
+        // create map
+        that.displayMap();
+        // create graph
+        // setup the graph data and options
+        that.setupGraphData();
+        // create flot graph
+        that.setupGraphElement();
+      }
 
-    const showMap = localStorage && localStorage[`${basePath}-open-map`] &&
-      localStorage[`${basePath}-open-map`] !== 'false';
+      basePath = this.$route.path.split('/')[1];
 
-    const stickyViz = localStorage && localStorage[`${basePath}-sticky-viz`] &&
-      localStorage[`${basePath}-sticky-viz`] !== 'false';
+      const showMap = localStorage && localStorage[`${basePath}-open-map`] &&
+        localStorage[`${basePath}-open-map`] !== 'false';
 
-    this.showCapStartTimes = localStorage && localStorage[`${basePath}-cap-times`] &&
-      localStorage[`${basePath}-cap-times`] !== 'false';
+      const stickyViz = localStorage && localStorage[`${basePath}-sticky-viz`] &&
+        localStorage[`${basePath}-sticky-viz`] !== 'false';
 
-    this.$store.commit('toggleStickyViz', stickyViz);
+      this.showCapStartTimes = localStorage && localStorage[`${basePath}-cap-times`] &&
+        localStorage[`${basePath}-cap-times`] !== 'false';
 
-    this.showMap = showMap;
-    this.stickyViz = stickyViz;
+      this.$store.commit('toggleStickyViz', stickyViz);
 
-    if (this.primary) {
-      this.$store.commit('toggleMaps', showMap);
+      this.showMap = showMap;
+      this.stickyViz = stickyViz;
 
-      this.graphType = this.getDefaultGraphType();
-      this.$store.commit('updateGraphType', this.graphType);
+      if (this.primary) {
+        this.$store.commit('toggleMaps', showMap);
 
-      this.seriesType = this.$route.query.seriesType || 'bars';
-      this.$store.commit('updateSeriesType', this.seriesType);
+        this.graphType = this.getDefaultGraphType();
+        this.$store.commit('updateGraphType', this.graphType);
 
-      setupMapAndGraph(this);
-    } else { // wait for values in store to be accessible
-      const id = parseInt(this.id);
-      setTimeout(() => { setupMapAndGraph(this); }, id * 100);
-    }
+        this.seriesType = this.$route.query.seriesType || 'bars';
+        this.$store.commit('updateSeriesType', this.seriesType);
+
+        StatsService.getCapRestartTimes(basePath).then(() => setupMapAndGraph(this));
+      } else { // wait for values in store to be accessible
+        const id = parseInt(this.id);
+        setTimeout(() => { setupMapAndGraph(this); }, id * 100);
+      }
+    });
   },
   methods: {
     getDefaultGraphType: function () {
@@ -566,8 +583,10 @@ export default {
     toggleCapStartTimes () {
       this.showCapStartTimes = !this.showCapStartTimes;
       localStorage[`${basePath}-cap-times`] = this.showCapStartTimes;
-      this.setupGraphData();
-      this.plot = $.plot(this.plotArea, this.graph, this.graphOptions);
+      StatsService.getCapRestartTimes(basePath).then(() => {
+        this.setupGraphData();
+        this.plot = $.plot(this.plotArea, this.graph, this.graphOptions);
+      });
     },
     /* helper functions ---------------------------------------------------- */
     debounce: function (func, funcParam, ms) {

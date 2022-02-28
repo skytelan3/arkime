@@ -69,6 +69,12 @@
 #define MOLOCH_ETHERTYPE_UNKNOWN 1
 // The first 2 bytes have the ethertype
 #define MOLOCH_ETHERTYPE_DETECT  2
+#define MOLOCH_ETHERTYPE_TEB     0x6558
+#define MOLOCH_ETHERTYPE_RAWFR   0x6559
+#define MOLOCH_ETHERTYPE_NSH     0x894F
+#define MOLOCH_ETHERTYPE_MPLS    0x8847
+#define MOLOCH_ETHERTYPE_QINQ    0x88a8
+
 #define MOLOCH_IPPROTO_UNKNOWN 255
 #define MOLOCH_IPPROTO_CORRUPT 256
 #define MOLOCH_IPPROTO_MAX     257
@@ -76,6 +82,8 @@
 #define MOLOCH_SESSION_v6(s) ((s)->sessionId[0] == 37)
 
 #define MOLOCH_VAR_ARG_SKIP (char *)1LL
+
+#define POINTER_TO_FLOAT(p) *(float *)&p
 
 /******************************************************************************/
 /*
@@ -180,7 +188,10 @@ typedef enum {
     MOLOCH_FIELD_TYPE_STR_GHASH,
     MOLOCH_FIELD_TYPE_IP,
     MOLOCH_FIELD_TYPE_IP_GHASH,
-    MOLOCH_FIELD_TYPE_CERTSINFO
+    MOLOCH_FIELD_TYPE_CERTSINFO,
+    MOLOCH_FIELD_TYPE_FLOAT,
+    MOLOCH_FIELD_TYPE_FLOAT_ARRAY,
+    MOLOCH_FIELD_TYPE_FLOAT_GHASH
 } MolochFieldType;
 
 /* These are ones you should set */
@@ -242,6 +253,8 @@ typedef struct {
         int                       i;
         GArray                   *iarray;
         MolochIntHashStd_t       *ihash;
+        float                     f;
+        GArray                   *farray;
         MolochCertsInfoHashStd_t *cihash;
         GHashTable               *ghash;
         struct in6_addr          *ip;
@@ -253,7 +266,10 @@ typedef struct {
 
 typedef struct {
     char                 *str;
-    int                   strLenOrInt;
+    union {
+      int                 strLenOrInt;
+      float               f;
+    };
     int16_t               fieldPos;
 } MolochFieldOp_t;
 
@@ -524,12 +540,15 @@ struct moloch_pcap_sf_pkthdr {
 };
 
 /******************************************************************************/
-#define MOLOCH_PACKET_TUNNEL_GRE    0x01
-#define MOLOCH_PACKET_TUNNEL_PPPOE  0x02
-#define MOLOCH_PACKET_TUNNEL_MPLS   0x04
-#define MOLOCH_PACKET_TUNNEL_PPP    0x08
-#define MOLOCH_PACKET_TUNNEL_GTP    0x10
-#define MOLOCH_PACKET_TUNNEL_VXLAN  0x20
+#define MOLOCH_PACKET_TUNNEL_GRE        0x01
+#define MOLOCH_PACKET_TUNNEL_PPPOE      0x02
+#define MOLOCH_PACKET_TUNNEL_MPLS       0x04
+#define MOLOCH_PACKET_TUNNEL_PPP        0x08
+#define MOLOCH_PACKET_TUNNEL_GTP        0x10
+#define MOLOCH_PACKET_TUNNEL_VXLAN      0x20
+#define MOLOCH_PACKET_TUNNEL_VXLAN_GPE  0x40
+#define MOLOCH_PACKET_TUNNEL_GENEVE     0x80
+// Increase tunnel size below
 
 typedef struct molochpacket_t
 {
@@ -553,7 +572,7 @@ typedef struct molochpacket_t
     uint32_t       v6:1;           // v6 or not
     uint32_t       copied:1;       // don't need to copy
     uint32_t       wasfrag:1;      // was a fragment
-    uint32_t       tunnel:6;       // tunnel type
+    uint32_t       tunnel:8;       // tunnel type
 } MolochPacket_t;
 
 typedef struct
@@ -1070,11 +1089,13 @@ uint32_t moloch_packet_dlt_to_linktype(int dlt);
 void     moloch_packet_drophash_add(MolochSession_t *session, int which, int min);
 
 void     moloch_packet_save_ethernet(MolochPacket_t * const packet, uint16_t type);
-int      moloch_packet_run_ethernet_cb(MolochPacketBatch_t * batch, MolochPacket_t * const packet, const uint8_t *data, int len, uint16_t type, const char *str);
+MolochPacketRC moloch_packet_run_ethernet_cb(MolochPacketBatch_t * batch, MolochPacket_t * const packet, const uint8_t *data, int len, uint16_t type, const char *str);
 void     moloch_packet_set_ethernet_cb(uint16_t type, MolochPacketEnqueue_cb enqueueCb);
 
-int      moloch_packet_run_ip_cb(MolochPacketBatch_t * batch, MolochPacket_t * const packet, const uint8_t *data, int len, uint16_t type, const char *str);
+MolochPacketRC moloch_packet_run_ip_cb(MolochPacketBatch_t * batch, MolochPacket_t * const packet, const uint8_t *data, int len, uint16_t type, const char *str);
 void     moloch_packet_set_ip_cb(uint16_t type, MolochPacketEnqueue_cb enqueueCb);
+
+void     moloch_packet_set_udpport_enqueue_cb(uint16_t port, MolochPacketEnqueue_cb enqueueCb);
 
 
 /******************************************************************************/
@@ -1243,6 +1264,7 @@ gboolean moloch_field_ip4_add(int pos, MolochSession_t *session, uint32_t i);
 gboolean moloch_field_ip6_add(int pos, MolochSession_t *session, const uint8_t *val);
 gboolean moloch_field_ip_add_str(int pos, MolochSession_t *session, char *str);
 gboolean moloch_field_certsinfo_add(int pos, MolochSession_t *session, MolochCertsInfo_t *certs, int len);
+gboolean moloch_field_float_add(int pos, MolochSession_t *session, float f);
 void moloch_field_macoui_add(MolochSession_t *session, int macField, int ouiField, const uint8_t *mac);
 
 int  moloch_field_count(int pos, MolochSession_t *session);

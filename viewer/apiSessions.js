@@ -488,6 +488,16 @@ module.exports = (Config, Db, internals, molochparser, Pcap, version, ViewerUtil
     req.query.base = req.query.base || 'ascii';
     req.query.showFrames = req.query.showFrames === 'true' || false;
 
+    req.query.packets = req.query.packets || 200;
+    if (req.query.needimage || req.query.needgzip) {
+      // displaying images & uncompressing require all packets from a session
+      req.query.packets = 10000;
+    }
+
+    if (Config.debug > 1) {
+      console.log('localSessionDetail query', req.query);
+    }
+
     const packets = [];
     sModule.processSessionId(req.params.id, !req.packetsOnly, null, (pcap, buffer, cb, i) => {
       let obj = {};
@@ -578,12 +588,18 @@ module.exports = (Config, Db, internals, molochparser, Pcap, version, ViewerUtil
         localSessionDetailReturn(req, res, session, []);
       }
     },
-    req.query.needimage ? 10000 : 400, 10);
+    // *2 because the packets can be out of order, we truncate again
+    // (using req.query.packets) in the reassemble call
+    +req.query.packets * 2, 10);
   }
 
   function processSessionIdDisk (session, headerCb, packetCb, endCb, limit) {
     function processFile (pcap, pos, i, nextCb) {
       pcap.ref();
+
+      if (Config.debug > 2) {
+        console.log('readPacket', pos);
+      }
       pcap.readPacket(pos, (packet) => {
         switch (packet) {
         case null:

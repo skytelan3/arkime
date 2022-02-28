@@ -11,16 +11,17 @@
 # * install arkime if --install
 
 
-GLIB=2.66.4
+GLIB=2.68.3
 YARA=4.0.2
 MAXMIND=1.4.3
 PCAP=1.9.1
 CURL=7.78.0
 LUA=5.3.6
 DAQ=2.0.7
-NODE=14.17.3
-NGHTTP2=1.42.0
+NODE=14.17.6
+NGHTTP2=1.44.0
 KAFKA=1.5.3
+
 
 TDIR="/opt/arkime"
 DOPFRING=0
@@ -244,7 +245,7 @@ else
 
   if [ ! -f "curl-$CURL/lib/.libs/libcurl.a" ]; then
     tar zxf curl-$CURL.tar.gz
-    ( cd curl-$CURL; ./configure --disable-ldap --disable-ldaps --without-libidn2 --without-librtmp --without-libpsl --without-nghttp2 --without-nghttp2 --without-nss; $MAKE)
+    ( cd curl-$CURL; ./configure --disable-ldap --disable-ldaps --without-libidn2 --without-librtmp --without-libpsl --without-nghttp2 --without-nghttp2 --without-nss --with-openssl; $MAKE)
     if [ $? -ne 0 ]; then
       echo "ARKIME: $MAKE failed"
       exit 1

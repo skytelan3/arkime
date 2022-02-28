@@ -33,11 +33,10 @@
 
     <!-- visualizations -->
     <moloch-visualizations
-      v-if="mapData && graphData && capStartTimes.length && showToolBars"
+      v-if="mapData && graphData && showToolBars"
       :graph-data="graphData"
       :map-data="mapData"
       :primary="true"
-      :cap-start-times="capStartTimes"
       :timelineDataFilters="timelineDataFilters"
       @fetchMapData="cancelAndLoad(true)">
     </moloch-visualizations> <!-- /visualizations -->
@@ -693,10 +692,8 @@ export default {
       colConfigError: '',
       colConfigSuccess: '',
       headers: [],
-      fields: [],
       graphData: undefined,
       mapData: undefined,
-      capStartTimes: [],
       colQuery: '', // query for columns to toggle visibility
       newColConfigName: '', // name of new custom column config
       viewChanged: false,
@@ -715,10 +712,7 @@ export default {
     };
   },
   created: function () {
-    this.getCaptureStats();
-    this.getColumnWidths();
-    this.getTableState(); // IMPORTANT: kicks off the initial search query!
-    this.getCustomColumnConfigurations();
+    this.getSessionsConfig(); // IMPORTANT: kicks off the initial search query!
 
     // watch for window resizing and update the info column width
     // this is only registered when the user has not set widths for any
@@ -777,6 +771,9 @@ export default {
     },
     showToolBars: function () {
       return this.$store.state.showToolBars;
+    },
+    fields: function () {
+      return this.$store.state.fieldsMap;
     }
   },
   watch: {
@@ -840,12 +837,11 @@ export default {
       };
 
       if (pendingPromise) {
-        ConfigService.cancelEsTask(pendingPromise.cancelId)
-          .then((response) => {
-            clientCancel();
-          }).catch((error) => {
-            clientCancel();
-          });
+        ConfigService.cancelEsTask(pendingPromise.cancelId).then((response) => {
+          clientCancel();
+        }).catch((error) => {
+          clientCancel();
+        });
       } else if (runNewQuery) {
         this.loadData(updateTable);
       }
@@ -1111,18 +1107,16 @@ export default {
         order: this.tableState.order.slice()
       };
 
-      UserService.createColumnConfig(data)
-        .then((response) => {
-          data.name = response.name; // update column config name
+      UserService.createColumnConfig(data).then((response) => {
+        data.name = response.name; // update column config name
 
-          this.colConfigs.push(data);
+        this.colConfigs.push(data);
 
-          this.newColConfigName = null;
-          this.colConfigError = false;
-        })
-        .catch((error) => {
-          this.colConfigError = error.text;
-        });
+        this.newColConfigName = null;
+        this.colConfigError = false;
+      }).catch((error) => {
+        this.colConfigError = error.text;
+      });
     },
     /**
      * Loads a previously saved custom column configuration and
@@ -1160,14 +1154,12 @@ export default {
      * @param {int} index       The index in the array of the column config to remove
      */
     deleteColumnConfiguration: function (colName, index) {
-      UserService.deleteColumnConfig(colName)
-        .then((response) => {
-          this.colConfigs.splice(index, 1);
-          this.colConfigError = false;
-        })
-        .catch((error) => {
-          this.colConfigError = error.text;
-        });
+      UserService.deleteColumnConfig(colName).then((response) => {
+        this.colConfigs.splice(index, 1);
+        this.colConfigError = false;
+      }).catch((error) => {
+        this.colConfigError = error.text;
+      });
     },
     /**
      * Updates a previously saved custom column configuration
@@ -1181,16 +1173,14 @@ export default {
         order: JSON.parse(JSON.stringify(this.tableState.order))
       };
 
-      UserService.updateColumnConfig(data)
-        .then((response) => {
-          this.colConfigs[index] = data;
-          this.colConfigError = false;
-          this.colConfigSuccess = response.text;
-          setTimeout(() => { this.colConfigSuccess = ''; }, 5000);
-        })
-        .catch((error) => {
-          this.colConfigError = error.text;
-        });
+      UserService.updateColumnConfig(data).then((response) => {
+        this.colConfigs[index] = data;
+        this.colConfigError = false;
+        this.colConfigSuccess = response.text;
+        setTimeout(() => { this.colConfigSuccess = ''; }, 5000);
+      }).catch((error) => {
+        this.colConfigError = error.text;
+      });
     },
     /**
      * Determines a field's visibility in the array provided
@@ -1395,51 +1385,30 @@ export default {
       this.destroyColResizable();
       this.$nextTick(() => { this.initializeColResizable(); });
     },
-    /* Gets the column widths of the table if they exist */
-    getColumnWidths: function () {
-      UserService.getState('sessionsColWidths')
-        .then((response) => {
-          this.colWidths = response.data || {};
-        });
-    },
-    /* Gets the state of the table (sort order and column order/visibility) */
-    getTableState: function () {
-      UserService.getState('sessionsNew')
-        .then((response) => {
-          this.tableState = response.data;
-          this.$store.commit('setSessionsTableState', this.tableState);
-          if (Object.keys(this.tableState).length === 0 ||
-            !this.tableState.visibleHeaders || !this.tableState.order) {
-            this.tableState = JSON.parse(JSON.stringify(Utils.getDefaultTableState()));
-          } else if (this.tableState.visibleHeaders[0] === '') {
-            this.tableState.visibleHeaders.shift();
-          }
+    /* gets all the information to display the table and custom col config dropdown
+       widths of columns, table columns and sort order, custom col configs */
+    getSessionsConfig: function () {
+      UserService.getPageConfig('sessions').then((response) => {
+        this.colWidths = response.colWidths;
+        this.colConfigs = response.colConfigs;
+        this.tableState = response.tableState;
 
-          // update the sort order for the session table query
-          this.sorts = this.tableState.order;
+        this.$store.commit('setSessionsTableState', this.tableState);
+        if (Object.keys(this.tableState).length === 0 ||
+          !this.tableState.visibleHeaders || !this.tableState.order) {
+          this.tableState = JSON.parse(JSON.stringify(Utils.getDefaultTableState()));
+        } else if (this.tableState.visibleHeaders[0] === '') {
+          this.tableState.visibleHeaders.shift();
+        }
 
-          FieldService.get()
-            .then((result) => {
-              this.fields = result;
-              this.setupUserSettings(); // IMPORTANT: kicks off the initial search query!
-            }).catch((error) => {
-              this.loading = false;
-              this.error = error;
-            });
-        }).catch((error) => {
-          this.loading = false;
-          this.error = error;
-        });
-    },
-    /* Gets the current user's custom column configurations */
-    getCustomColumnConfigurations: function () {
-      UserService.getColumnConfigs()
-        .then((response) => {
-          this.colConfigs = response;
-        })
-        .catch((error) => {
-          this.colConfigError = error.text;
-        });
+        // update the sort order for the session table query
+        this.sorts = this.tableState.order;
+
+        this.setupUserSettings(); // IMPORTANT: kicks off the initial search query!
+      }).catch((error) => {
+        this.error = error;
+        this.loading = false;
+      });
     },
     setupUserSettings: function () {
       // if settings has custom sort field and the custom sort field
@@ -1585,35 +1554,15 @@ export default {
         this.loading = false;
       });
     },
-    /* Fetches capture stats to show the last time each capture node started */
-    getCaptureStats: function () {
-      this.$http.get('api/stats')
-        .then((response) => {
-          for (const data of response.data.data) {
-            this.capStartTimes.push({
-              nodeName: data.nodeName,
-              startTime: data.startTime * 1000
-            });
-          }
-        })
-        .catch((error) => {
-          this.capStartTimes = [{
-            nodeName: 'none',
-            startTime: 1
-          }];
-        });
-    },
     /**
      * Saves the table state
      * @param {bool} stopLoading Whether to stop the loading state when promise returns
      */
     saveTableState: function (stopLoading) {
       this.$store.commit('setSessionsTableState', this.tableState);
-      UserService.saveState(this.tableState, 'sessionsNew')
-        .then(() => {
-          if (stopLoading) { this.loading = false; }
-        })
-        .catch((error) => { this.error = error; });
+      UserService.saveState(this.tableState, 'sessionsNew').then(() => {
+        if (stopLoading) { this.loading = false; }
+      }).catch((error) => { this.error = error; });
     },
     /**
      * Sets up the fields for the column visibility typeahead and column headers

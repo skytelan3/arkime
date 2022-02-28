@@ -39,6 +39,7 @@ const onHeaders = require('on-headers');
 const helmet = require('helmet');
 const uuid = require('uuidv4').default;
 const path = require('path');
+const dayMs = 60000 * 60 * 24;
 
 if (typeof express !== 'function') {
   console.log("ERROR - Need to run 'npm update' in viewer directory");
@@ -87,7 +88,7 @@ const huntAPIs = require('./apiHunts')(Config, Db, internals, notifierAPIs, Pcap
 const userAPIs = require('./apiUsers')(Config, Db, internals, ViewerUtils);
 const historyAPIs = require('./apiHistory')(Db);
 const shortcutAPIs = require('./apiShortcuts')(Db, internals, ViewerUtils);
-const miscAPIs = require('./apiMisc')(Config, Db, internals, sessionAPIs, ViewerUtils);
+const miscAPIs = require('./apiMisc')(Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils);
 
 // registers a get and a post
 app.getpost = (route, mw, func) => { app.get(route, mw, func); app.post(route, mw, func); };
@@ -136,27 +137,24 @@ app.use((req, res, next) => {
 });
 
 // define csp headers
+const cspDirectives = {
+  defaultSrc: ["'self'"],
+  // need unsafe-inline for jquery flot (https://github.com/flot/flot/issues/1574, https://github.com/flot/flot/issues/828)
+  styleSrc: ["'self'", "'unsafe-inline'"],
+  // need unsafe-eval for vue full build: https://vuejs.org/v2/guide/installation.html#CSP-environments
+  scriptSrc: ["'self'", "'unsafe-eval'", (req, res) => `'nonce-${res.locals.nonce}'`],
+  objectSrc: ["'none'"],
+  imgSrc: ["'self'", 'data:']
+};
 const cspHeader = helmet.contentSecurityPolicy({
-  directives: {
-    defaultSrc: ["'self'"],
-    /* can remove unsafe-inline for css when this is fixed
-    https://github.com/vuejs/vue-style-loader/issues/33 */
-    styleSrc: ["'self'", "'unsafe-inline'"],
-    scriptSrc: ["'self'", "'unsafe-eval'", (req, res) => `'nonce-${res.locals.nonce}'`],
-    objectSrc: ["'none'"],
-    imgSrc: ["'self'", 'data:']
-  }
+  directives: cspDirectives
 });
-
-const unsafeInlineCspHeader = helmet.contentSecurityPolicy({
+const cyberchefCspHeader = helmet.contentSecurityPolicy({
   directives: {
     defaultSrc: ["'self'"],
     styleSrc: ["'self'", "'unsafe-inline'"],
     scriptSrc: ["'self'", "'unsafe-eval'", "'unsafe-inline'"],
-    objectSrc: ["'self'", 'data:'],
-    workerSrc: ["'self'", 'data:', 'blob:'],
-    imgSrc: ["'self'", 'data:'],
-    fontSrc: ["'self'", 'data:']
+    objectSrc: ["'self'", 'data:']
   }
 });
 
@@ -197,11 +195,11 @@ app.use(favicon(path.join(__dirname, '/public/favicon.ico')));
 // handles 404s) and sending index.html is confusing
 app.use('/font-awesome', express.static(
   path.join(__dirname, '/../node_modules/font-awesome'),
-  { maxAge: 600 * 1000, fallthrough: false }
+  { maxAge: dayMs, fallthrough: false }
 ), missingResource);
 app.use(['/assets', '/logos'], express.static(
   path.join(__dirname, '../assets'),
-  { maxAge: 600 * 1000, fallthrough: false }
+  { maxAge: dayMs, fallthrough: false }
 ), missingResource);
 
 // password, testing, or anonymous mode setup ---------------------------------
@@ -1273,33 +1271,6 @@ app.get('/about', checkPermissions(['webEnabled']), (req, res) => {
   res.redirect('help');
 });
 
-app.get(['/remoteclusters', '/molochclusters'], function (req, res) {
-  function cloneClusters (clusters) {
-    const clone = {};
-
-    for (const key in clusters) {
-      if (clusters[key]) {
-        const cluster = clusters[key];
-        clone[key] = {
-          name: cluster.name,
-          url: cluster.url
-        };
-      }
-    }
-
-    return clone;
-  }
-
-  if (!internals.remoteClusters) {
-    res.status(404);
-    return res.send('Cannot locate remote clusters');
-  }
-
-  const clustersClone = cloneClusters(internals.remoteClusters);
-
-  return res.send(clustersClone);
-});
-
 // ============================================================================
 // APIS
 // ============================================================================
@@ -1491,6 +1462,12 @@ app.post( // update/create user state endpoint
   ['/api/user/state/:name', '/state/:name'],
   [noCacheJson, checkCookieToken, logAction()],
   userAPIs.updateUserState
+);
+
+app.get( // user page configuration endpoint
+  '/api/user/config/:page',
+  [noCacheJson, checkCookieToken, getSettingUserCache],
+  userAPIs.getPageConfig
 );
 
 // notifier apis --------------------------------------------------------------
@@ -1754,7 +1731,7 @@ app.getpost( // multiunique endpoint (POST or GET) - uses fillQueryFromBody to
 
 app.get( // session detail (SPI) endpoint
   ['/api/session/:nodeName/:id/detail', '/:nodeName/session/:id/detail'],
-  [cspHeader, logAction()],
+  [logAction()],
   sessionAPIs.getDetail
 );
 
@@ -2036,21 +2013,33 @@ app.get(
   miscAPIs.getClusters
 );
 
+app.get(
+  ['/remoteclusters', '/molochclusters'],
+  miscAPIs.getRemoteClusters
+);
+
+// app apis -------------------------------------------------------------------
+app.get(
+  '/api/appinfo',
+  [noCacheJson, checkCookieToken, getSettingUserCache, checkPermissions(['webEnabled'])],
+  miscAPIs.getAppInfo
+);
+
 // cyberchef apis -------------------------------------------------------------
 app.get('/cyberchef.html', express.static( // cyberchef client file endpoint
   path.join(__dirname, '/public'),
-  { maxAge: 600 * 1000, fallthrough: false }
-), missingResource);
+  { maxAge: dayMs, fallthrough: false }
+), missingResource, cyberchefCspHeader);
 
 app.get( // cyberchef endpoint
   '/cyberchef/:nodeName/session/:id',
-  [checkPermissions(['webEnabled']), checkProxyRequest, unsafeInlineCspHeader],
+  [checkPermissions(['webEnabled']), checkProxyRequest, cyberchefCspHeader],
   miscAPIs.cyberChef
 );
 
 app.use( // cyberchef UI endpoint
   ['/cyberchef/', '/modules/'],
-  unsafeInlineCspHeader,
+  cyberchefCspHeader,
   miscAPIs.getCyberChefUI
 );
 
@@ -2107,23 +2096,10 @@ function createApp () {
 
 // using fallthrough: false because there is no 404 endpoint (client router
 // handles 404s) and sending index.html is confusing
-// expose vue bundles (prod)
+// expose vue bundles
 app.use('/static', express.static(
   path.join(__dirname, '/vueapp/dist/static'),
-  { fallthrough: false }
-), missingResource);
-app.use('/app.css', express.static(
-  path.join(__dirname, '/vueapp/dist/app.css'),
-  { fallthrough: false }
-), missingResource);
-// expose vue bundle (dev)
-app.use(['/app.js', '/vueapp/app.js'], express.static(
-  path.join(__dirname, '/vueapp/dist/app.js'),
-  { fallthrough: false }
-), missingResource);
-app.use(['/app.js.map', '/vueapp/app.js.map'], express.static(
-  path.join(__dirname, '/vueapp/dist/app.js.map'),
-  { fallthrough: false }
+  { maxAge: dayMs, fallthrough: false }
 ), missingResource);
 
 app.use(cspHeader, setCookie, (req, res) => {
@@ -2165,7 +2141,7 @@ app.use(cspHeader, setCookie, (req, res) => {
     themeUrl: theme === 'custom-theme' ? 'api/user/css' : '',
     huntWarn: Config.get('huntWarn', 100000),
     huntLimit: limit,
-    serverNonce: res.locals.nonce,
+    nonce: res.locals.nonce,
     anonymousMode: !!internals.noPasswordSecret && !Config.get('regressionTests', false),
     businesDayStart: Config.get('businessDayStart', false),
     businessDayEnd: Config.get('businessDayEnd', false),
@@ -2568,7 +2544,7 @@ function processArgs (argv) {
       console.log('  -n <node name>        Node name section to use in config file, default first part of hostname');
       console.log('  --debug               Increase debug level, multiple are supported');
       console.log('  --esprofile           Turn on profiling to es search queries');
-      console.log('  --insecure            Disable cert verification');
+      console.log('  --insecure            Disable certificate verification for https calls');
 
       process.exit(0);
     }

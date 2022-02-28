@@ -20,6 +20,7 @@ const helmet = require('helmet');
 const uuid = require('uuidv4').default;
 const upgrade = require('./upgrade');
 const path = require('path');
+const dayMs = 60000 * 60 * 24;
 
 /* app setup --------------------------------------------------------------- */
 const app = express();
@@ -219,28 +220,33 @@ app.use((req, res, next) => {
   res.locals.nonce = Buffer.from(uuid()).toString('base64');
   next();
 });
-app.use(helmet.contentSecurityPolicy({
-  directives: {
-    defaultSrc: ["'self'"],
-    /* can remove unsafe-inline for css when this is fixed
-    https://github.com/vuejs/vue-style-loader/issues/33 */
-    styleSrc: ["'self'", "'unsafe-inline'"],
-    scriptSrc: ["'self'", "'unsafe-eval'", (req, res) => `'nonce-${res.locals.nonce}'`],
-    objectSrc: ["'none'"],
-    imgSrc: ["'self'", 'data:'],
-    frameSrc: ["'none'"]
-  }
-}));
+// define csp headers
+const cspDirectives = {
+  defaultSrc: ["'self'"],
+  styleSrc: ["'self'"],
+  // need unsafe-eval for vue full build: https://vuejs.org/v2/guide/installation.html#CSP-environments
+  scriptSrc: ["'self'", "'unsafe-eval'", (req, res) => `'nonce-${res.locals.nonce}'`],
+  objectSrc: ["'none'"],
+  imgSrc: ["'self'"]
+};
+if (process.env.NODE_ENV === 'development') {
+  // need unsafe inline styles for hot module replacement
+  cspDirectives.styleSrc.push("'unsafe-inline'");
+}
+const cspHeader = helmet.contentSecurityPolicy({
+  directives: cspDirectives
+});
+app.use(cspHeader);
 
 // using fallthrough: false because there is no 404 endpoint (client router
 // handles 404s) and sending index.html is confusing
 app.use('/parliament/font-awesome', express.static(
   path.join(__dirname, '/../node_modules/font-awesome'),
-  { maxAge: 600 * 1000, fallthrough: false }
+  { maxAge: dayMs, fallthrough: false }
 ));
 app.use('/parliament/assets', express.static(
   path.join(__dirname, '/../assets'),
-  { maxAge: 600 * 1000, fallthrough: false }
+  { maxAge: dayMs, fallthrough: false }
 ));
 
 // log requests
@@ -2033,11 +2039,7 @@ process.on('SIGINT', function () {
 // expose vue bundles (prod)
 app.use(['/static', '/parliament/static'], express.static(
   path.join(__dirname, '/vueapp/dist/static'),
-  { fallthrough: false }
-));
-app.use(['/app.css', '/parliament/app.css'], express.static(
-  path.join(__dirname, '/vueapp/dist/app.css'),
-  { fallthrough: false }
+  { maxAge: dayMs, fallthrough: false }
 ));
 // expose vue bundle (dev)
 app.use(['/app.js', '/parliament/app.js'], express.static(

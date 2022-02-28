@@ -45,6 +45,7 @@ const { Client } = require('@elastic/elasticsearch');
 const chalk = require('chalk');
 const version = require('../viewer/version');
 const path = require('path');
+const dayMs = 60000 * 60 * 24;
 
 require('console-stamp')(console, '[HH:MM:ss.l]');
 
@@ -168,18 +169,22 @@ app.use((req, res, next) => {
   res.locals.nonce = Buffer.from(uuid()).toString('base64');
   next();
 });
-app.use(helmet.contentSecurityPolicy({
-  directives: {
-    defaultSrc: ["'self'"],
-    /* can remove unsafe-inline for css when this is fixed
-    https://github.com/vuejs/vue-style-loader/issues/33 */
-    styleSrc: ["'self'", "'unsafe-inline'"],
-    scriptSrc: ["'self'", "'unsafe-eval'", (req, res) => `'nonce-${res.locals.nonce}'`],
-    objectSrc: ["'none'"],
-    imgSrc: ["'self'", 'data:'],
-    frameSrc: ["'none'"]
-  }
-}));
+// define csp headers
+const cspDirectives = {
+  defaultSrc: ["'self'"],
+  // unsafe-inline required for json editor (https://github.com/dirkliu/vue-json-editor)
+  styleSrc: ["'self'", "'unsafe-inline'"],
+  // need unsafe-eval for vue full build: https://vuejs.org/v2/guide/installation.html#CSP-environments
+  scriptSrc: ["'self'", "'unsafe-eval'", (req, res) => `'nonce-${res.locals.nonce}'`],
+  objectSrc: ["'none'"],
+  imgSrc: ["'self'", 'data:'],
+  // web worker required for json editor (https://github.com/dirkliu/vue-json-editor)
+  workerSrc: ["'self'", 'blob:']
+};
+const cspHeader = helmet.contentSecurityPolicy({
+  directives: cspDirectives
+});
+app.use(cspHeader);
 
 function getConfig (section, sectionKey, d) {
   if (!internals.config[section]) {
@@ -744,21 +749,17 @@ app.use(favicon(path.join(__dirname, '/favicon.ico')));
 // handles 404s) and sending index.html is confusing
 app.use('/font-awesome', express.static(
   path.join(__dirname, '/../node_modules/font-awesome'),
-  { maxAge: 600 * 1000, fallthrough: false }
+  { maxAge: dayMs, fallthrough: false }
 ));
 app.use('/assets', express.static(
   path.join(__dirname, '/../assets'),
-  { maxAge: 600 * 1000, fallthrough: false }
+  { maxAge: dayMs, fallthrough: false }
 ));
 
 // expose vue bundles (prod) - need to be here because of wildcard endpoint matches
 app.use('/static', express.static(
   path.join(__dirname, '/vueapp/dist/static'),
-  { fallthrough: false }
-));
-app.use('/app.css', express.static(
-  path.join(__dirname, '/vueapp/dist/app.css'),
-  { fallthrough: false }
+  { maxAge: dayMs, fallthrough: false }
 ));
 
 // expose vue bundle (dev)
@@ -1983,6 +1984,7 @@ function buildConfigAndStart () {
       console.log(`Error reading ${internals.configFile}:\n\n`, err);
       process.exit(1);
     }
+    if (config.wiseService === undefined) { config.wiseService = {}; }
 
     internals.config = config;
     if (internals.debug > 1) {
@@ -2002,6 +2004,7 @@ function buildConfigAndStart () {
   setInterval(() => {
     internals.configScheme.load((err, config) => {
       if (err) { return; }
+      if (config.wiseService === undefined) { config.wiseService = {}; }
       const updateTime = config.wiseService.updateTime || 0;
       if (updateTime > internals.updateTime) {
         console.log('New config file, restarting');

@@ -616,6 +616,7 @@ Pcap.prototype.ethertype = function (buffer, obj, pos) {
     this.mpls(buffer.slice(2), obj, pos + 2);
     break;
   case 0x8100: // VLAN
+  case 0x88a8: // Q-in-Q
     this.ethertype(buffer.slice(4), obj, pos + 4);
     break;
   default:
@@ -925,6 +926,13 @@ exports.reassemble_tcp = function (packets, numPackets, skey, cb) {
 
       packets2.push(packets[i]);
     }
+
+    if (keys.length === 1) {
+      key = packets[0].ip.addr2 + ':' + packets[0].tcp.dport;
+      info[key] = { min: packets[0].tcp.ack, max: packets[0].tcp.ack, wrapseq: false, wrapack: false };
+      keys.push(key);
+    }
+
     packets = packets2;
 
     if (packets.length === 0) {

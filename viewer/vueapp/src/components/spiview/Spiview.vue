@@ -59,26 +59,28 @@
                   title="Reset visible fields to the default fields: Dst IP, Src IP, and Protocols">
                   Arkime Default
                 </b-dropdown-item>
-                <b-dropdown-item
-                  v-for="(config, key) in fieldConfigs"
-                  :key="config.name"
-                  @click.self.stop.prevent="loadFieldConfiguration(key)">
-                  <button class="btn btn-xs btn-danger pull-right ml-1"
-                    type="button"
-                    @click.stop.prevent="deleteFieldConfiguration(config.name, key)">
-                    <span class="fa fa-trash-o">
-                    </span>
-                  </button>
-                  <button class="btn btn-xs btn-warning pull-right"
-                    type="button"
-                    v-b-tooltip.hover.right
-                    title="Update this field configuration with the currently visible fields"
-                    @click.stop.prevent="updateFieldConfiguration(config.name, key)">
-                    <span class="fa fa-save">
-                    </span>
-                  </button>
-                  {{ config.name }}
-                </b-dropdown-item>
+                <template v-if="fieldConfigs">
+                  <b-dropdown-item
+                    v-for="(config, key) in fieldConfigs"
+                    :key="config.name"
+                    @click.self.stop.prevent="loadFieldConfiguration(key)">
+                    <button class="btn btn-xs btn-danger pull-right ml-1"
+                      type="button"
+                      @click.stop.prevent="deleteFieldConfiguration(config.name, key)">
+                      <span class="fa fa-trash-o">
+                      </span>
+                    </button>
+                    <button class="btn btn-xs btn-warning pull-right"
+                      type="button"
+                      v-b-tooltip.hover.right
+                      title="Update this field configuration with the currently visible fields"
+                      @click.stop.prevent="updateFieldConfiguration(config.name, key)">
+                      <span class="fa fa-save">
+                      </span>
+                    </button>
+                    {{ config.name }}
+                  </b-dropdown-item>
+                </template>
                 <b-dropdown-item
                   v-if="fieldConfigError"
                   key="config-error">
@@ -144,11 +146,10 @@
 
     <!-- visualizations -->
     <moloch-visualizations
-      v-if="mapData && graphData && capStartTimes.length && showToolBars"
+      v-if="mapData && graphData && showToolBars"
       :graph-data="graphData"
       :map-data="mapData"
       :primary="true"
-      :cap-start-times="capStartTimes"
       :timelineDataFilters="timelineDataFilters"
       @fetchMapData="fetchMapData">
     </moloch-visualizations> <!-- /visualizations -->
@@ -431,10 +432,9 @@ export default {
       loadingVisualizations: true,
       staleData: undefined,
       filtered: 0,
-      fieldConfigs: [],
+      fieldConfigs: undefined,
       graphData: undefined,
       mapData: undefined,
-      capStartTimes: [],
       categoryList: [],
       categoryObjects: {},
       spiQuery: this.$route.query.spi,
@@ -469,21 +469,22 @@ export default {
     },
     showToolBars: function () {
       return this.$store.state.showToolBars;
+    },
+    fields: function () {
+      return this.$store.state.fieldsArr;
     }
   },
   mounted: function () {
-    this.getCaptureStats();
-    if (!this.spiQuery) {
-      // get what's saved in the db
-      UserService.getState('spiview')
-        .then((response) => {
-          this.spiQuery = response.data.visibleFields || defaultSpi;
-          this.issueQueries();
-        })
-        .catch((error) => {
-          this.spiQuery = defaultSpi;
-          this.issueQueries();
-        });
+    if (!this.spiQuery) { // there's no list of fields in the url params
+      // so get what's saved in the db
+      UserService.getPageConfig('spiview').then((response) => {
+        this.fieldConfigs = response.fieldConfigs;
+        this.spiQuery = response.spiviewFields.visibleFields || defaultSpi;
+        this.issueQueries(true);
+      }).catch((error) => {
+        this.spiQuery = defaultSpi;
+        this.issueQueries();
+      });
     } else {
       this.issueQueries();
     }
@@ -745,19 +746,18 @@ export default {
         fields: this.spiQuery
       };
 
-      UserService.createSpiviewFieldConfig(data)
-        .then((response) => {
-          data.name = response.name; // update column config name
+      UserService.createSpiviewFieldConfig(data).then((response) => {
+        data.name = response.name; // update column config name
 
-          this.fieldConfigs.push(data);
+        if (!this.fieldConfigs) { this.fieldConfigs = []; }
+        this.fieldConfigs.push(data);
 
-          this.newFieldConfigName = null;
-          this.fieldConfigsOpen = false;
-          this.fieldConfigError = false;
-        })
-        .catch((error) => {
-          this.fieldConfigError = error.text;
-        });
+        this.newFieldConfigName = null;
+        this.fieldConfigsOpen = false;
+        this.fieldConfigError = false;
+      }).catch((error) => {
+        this.fieldConfigError = error.text;
+      });
     },
     /**
      * Loads a previously saved custom spiview fields configuration and
@@ -781,14 +781,12 @@ export default {
      * @param {int} index       The index in the array of the spiview fields config to remove
      */
     deleteFieldConfiguration: function (spiName, index) {
-      UserService.deleteSpiviewFieldConfig(spiName)
-        .then(() => {
-          this.fieldConfigs.splice(index, 1);
-          this.fieldConfigError = false;
-        })
-        .catch((error) => {
-          this.fieldConfigError = error.text;
-        });
+      UserService.deleteSpiviewFieldConfig(spiName).then(() => {
+        this.fieldConfigs.splice(index, 1);
+        this.fieldConfigError = false;
+      }).catch((error) => {
+        this.fieldConfigError = error.text;
+      });
     },
     /**
      * Updates a previously saved custom spiview fields configuration
@@ -801,16 +799,14 @@ export default {
         fields: this.spiQuery
       };
 
-      UserService.updateSpiviewFieldConfig(data)
-        .then((response) => {
-          this.fieldConfigs[index] = data;
-          this.fieldConfigError = false;
-          this.fieldConfigSuccess = response.text;
-          setTimeout(() => { this.fieldConfigSuccess = ''; }, 5000);
-        })
-        .catch((error) => {
-          this.fieldConfigError = error.text;
-        });
+      UserService.updateSpiviewFieldConfig(data).then((response) => {
+        this.fieldConfigs[index] = data;
+        this.fieldConfigError = false;
+        this.fieldConfigSuccess = response.text;
+        setTimeout(() => { this.fieldConfigSuccess = ''; }, 5000);
+      }).catch((error) => {
+        this.fieldConfigError = error.text;
+      });
     },
     /* event functions ----------------------------------------------------- */
     changeSearch: function () {
@@ -873,66 +869,56 @@ export default {
           url: 'api/spiview'
         };
 
-        Vue.axios(options)
-          .then((response) => {
-            if (response.data.bsqErr) {
-              response.data.error = response.data.bsqErr;
-            }
-            resolve(response.data);
-          })
-          .catch((error) => {
-            if (!Vue.axios.isCancel(error)) {
-              reject(error);
-            }
-          });
+        Vue.axios(options).then((response) => {
+          if (response.data.bsqErr) {
+            response.data.error = response.data.bsqErr;
+          }
+          resolve(response.data);
+        }).catch((error) => {
+          if (!Vue.axios.isCancel(error)) {
+            reject(error);
+          }
+        });
       });
 
       return { promise, source };
     },
     issueQueries: function () {
-      this.getFields(); // IMPORTANT: kicks off initial query for spi data!
-      this.getSpiviewFieldConfigs();
+      this.categorizeFields(); // IMPORTANT: kicks off initial query for spi data!
+      if (!this.fieldConfigs) { this.getSpiviewFieldConfigs(); }
     },
-    getFields: function () {
-      FieldService.get(true)
-        .then((response) => {
-          this.loading = false;
-          this.error = false;
-          this.fields = response;
-          this.categoryObjects = {};
+    categorizeFields: function () {
+      this.loading = false;
+      this.error = false;
+      this.categoryObjects = {};
 
-          for (let i = 0, len = this.fields.length; i < len; ++i) {
-            const field = this.fields[i];
+      for (let i = 0, len = this.fields.length; i < len; ++i) {
+        const field = this.fields[i];
 
-            field.active = false;
+        field.active = false;
 
-            if (field.noFacet || field.regex ||
-              (field.type && field.type.match(/textfield/))) {
-              continue;
-            }
+        if (field.noFacet || field.regex ||
+          (field.type && field.type.match(/textfield/))) {
+          continue;
+        }
 
-            if (this.categoryObjects[field.group]) {
-              // already created, just add a new field
-              this.categoryObjects[field.group].fields.push(field);
-            } else { // create it
-              Vue.set(this.categoryObjects, field.group, {
-                fields: [field],
-                spi: {}
-              });
-            }
-          }
+        if (this.categoryObjects[field.group]) {
+          // already created, just add a new field
+          this.categoryObjects[field.group].fields.push(field);
+        } else { // create it
+          Vue.set(this.categoryObjects, field.group, {
+            fields: [field],
+            spi: {}
+          });
+        }
+      }
 
-          // sorted list of categories for the view
-          this.categoryList = Object.keys(this.categoryObjects).sort();
-          this.categoryList.splice(this.categoryList.indexOf('general'), 1);
-          this.categoryList.unshift('general');
+      // sorted list of categories for the view
+      this.categoryList = Object.keys(this.categoryObjects).sort();
+      this.categoryList.splice(this.categoryList.indexOf('general'), 1);
+      this.categoryList.unshift('general');
 
-          this.getSpiData(this.spiQuery); // IMPORTANT: queries for spi data!
-        })
-        .catch((error) => {
-          this.loading = false;
-          this.error = error.text;
-        });
+      this.getSpiData(this.spiQuery); // IMPORTANT: queries for spi data!
     },
     getSpiData: function (spiQuery) {
       if (!spiQuery) { return; }
@@ -1000,21 +986,19 @@ export default {
 
       if (tasks.length) {
         // start processing tasks serially
-        this.serial(tasks)
-          .then((response) => { // returns the last result in the series
-            if (response && response.error) {
-              this.error = response.error;
-            }
-            this.dataLoading = false;
-            pendingPromise = null;
-            this.spiviewFieldTransition = 'list';
-          })
-          .catch((error) => {
-            this.error = error.text || error;
-            this.dataLoading = false;
-            pendingPromise = null;
-            this.spiviewFieldTransition = 'list';
-          });
+        this.serial(tasks).then((response) => { // returns the last result in the series
+          if (response && response.error) {
+            this.error = response.error;
+          }
+          this.dataLoading = false;
+          pendingPromise = null;
+          this.spiviewFieldTransition = 'list';
+        }).catch((error) => {
+          this.error = error.text || error;
+          this.dataLoading = false;
+          pendingPromise = null;
+          this.spiviewFieldTransition = 'list';
+        });
       } else if (this.fields) {
         // if we couldn't figure out the fields to request,
         // request the default ones
@@ -1080,31 +1064,11 @@ export default {
     },
     /* Gets the current user's custom spiview fields configurations */
     getSpiviewFieldConfigs: function () {
-      UserService.getSpiviewFields()
-        .then((response) => {
-          this.fieldConfigs = response;
-        })
-        .catch((error) => {
-          this.fieldConfigError = error.text;
-        });
-    },
-    /* Fetches capture stats to show the last time each capture node started */
-    getCaptureStats: function () {
-      this.$http.get('api/stats')
-        .then((response) => {
-          for (const data of response.data.data) {
-            this.capStartTimes.push({
-              nodeName: data.nodeName,
-              startTime: data.startTime * 1000
-            });
-          }
-        })
-        .catch((error) => {
-          this.capStartTimes = [{
-            nodeName: 'none',
-            startTime: 1
-          }];
-        });
+      UserService.getSpiviewFields().then((response) => {
+        this.fieldConfigs = response;
+      }).catch((error) => {
+        this.fieldConfigError = error.text;
+      });
     },
     /**
      * Chains sequential promises together

@@ -29,6 +29,7 @@
         :action-column="true"
         :desc="query.desc"
         :sortField="query.sortField"
+        page="esNodes"
         table-animation="list"
         table-classes="table-sm text-right small mt-2"
         table-state-name="esNodesCols"
@@ -293,6 +294,6 @@ table.table tr.border-top-bold > td {
   opacity: 1;
 }
 .badge-master {
-  background-color: var(--color-primary-darker);
+  background-color: var(--color-quaternary);
 }
 </style>

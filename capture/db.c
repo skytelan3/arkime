@@ -510,7 +510,7 @@ void moloch_db_save_session(MolochSession_t *session, int final)
     }
 
     /* jsonSize is an estimate of how much space it will take to encode the session */
-    jsonSize = 1300 + session->filePosArray->len*17 + 10*session->fileNumArray->len;
+    jsonSize = 1300 + session->filePosArray->len*17 + 11*session->fileNumArray->len;
     if (config.enablePacketLen) {
         jsonSize += 10*session->fileLenArray->len;
     }
@@ -943,6 +943,10 @@ void moloch_db_save_session(MolochSession_t *session, int final)
                 g_free(session->fields[pos]->str);
             }
             break;
+        case MOLOCH_FIELD_TYPE_FLOAT:
+            BSB_EXPORT_sprintf(jbsb, "\"%s\":%f", config.fields[pos]->dbField, session->fields[pos]->f);
+            BSB_EXPORT_u08(jbsb, ',');
+            break;
         case MOLOCH_FIELD_TYPE_INT_ARRAY:
             if (flags & MOLOCH_FIELD_FLAG_CNT) {
                 BSB_EXPORT_sprintf(jbsb, "\"%sCnt\":%u,", config.fields[pos]->dbField, session->fields[pos]->iarray->len);
@@ -1031,6 +1035,39 @@ void moloch_db_save_session(MolochSession_t *session, int final)
             g_hash_table_iter_init (&iter, ghash);
             while (g_hash_table_iter_next (&iter, &ikey, NULL)) {
                 BSB_EXPORT_sprintf(jbsb, "%u", (unsigned int)(long)ikey);
+                BSB_EXPORT_u08(jbsb, ',');
+            }
+
+            if (freeField) {
+                g_hash_table_destroy(ghash);
+            }
+            BSB_EXPORT_rewind(jbsb, 1); // Remove last comma
+            BSB_EXPORT_cstr(jbsb, "],");
+            break;
+        case MOLOCH_FIELD_TYPE_FLOAT_ARRAY:
+            if (flags & MOLOCH_FIELD_FLAG_CNT) {
+                BSB_EXPORT_sprintf(jbsb, "\"%sCnt\":%u,", config.fields[pos]->dbField, session->fields[pos]->farray->len);
+            }
+            BSB_EXPORT_sprintf(jbsb, "\"%s\":[", config.fields[pos]->dbField);
+            for(i = 0; i < session->fields[pos]->farray->len; i++) {
+                BSB_EXPORT_sprintf(jbsb, "%f", g_array_index(session->fields[pos]->farray, float, i));
+                BSB_EXPORT_u08(jbsb, ',');
+            }
+            BSB_EXPORT_rewind(jbsb, 1); // Remove last comma
+            BSB_EXPORT_cstr(jbsb, "],");
+            if (freeField) {
+                g_array_free(session->fields[pos]->farray, TRUE);
+            }
+            break;
+        case MOLOCH_FIELD_TYPE_FLOAT_GHASH:
+            ghash = session->fields[pos]->ghash;
+            if (flags & MOLOCH_FIELD_FLAG_CNT) {
+                BSB_EXPORT_sprintf(jbsb, "\"%sCnt\": %u,", config.fields[pos]->dbField, g_hash_table_size(ghash));
+            }
+            BSB_EXPORT_sprintf(jbsb, "\"%s\":[", config.fields[pos]->dbField);
+            g_hash_table_iter_init (&iter, ghash);
+            while (g_hash_table_iter_next (&iter, &ikey, NULL)) {
+                BSB_EXPORT_sprintf(jbsb, "%f", POINTER_TO_FLOAT(ikey));
                 BSB_EXPORT_u08(jbsb, ',');
             }
 
@@ -1898,7 +1935,7 @@ char *moloch_db_create_file_full(time_t firstPacket, const char *name, uint64_t 
 
         uint16_t flen = strlen(config.pcapDir[config.pcapDirPos]);
         if (flen >= sizeof(filename)-1) {
-            LOGEXIT("pcapDir %s is too large", config.pcapDir[config.pcapDirPos]);
+            LOGEXIT("pcapDir '%s' string length is too large", config.pcapDir[config.pcapDirPos]);
         }
 
         g_strlcpy(filename, config.pcapDir[config.pcapDirPos], sizeof(filename));
@@ -2076,7 +2113,7 @@ LOCAL void moloch_db_check()
     version = moloch_js0n_get(meta, meta_len, "molochDbVersion", &version_len);
 
     if (!version)
-        LOGEXIT("ERROR - Database version couldn't be found, have your run \"db/db.pl host:port init\"");
+        LOGEXIT("ERROR - Database version couldn't be found, have you run \"db/db.pl host:port init\"");
 
     if (atoi((char*)version) < MOLOCH_MIN_DB_VERSION) {
         LOGEXIT("ERROR - Database version '%.*s' is too old, needs to be at least (%d), run \"db/db.pl host:port upgrade\"", version_len, version, MOLOCH_MIN_DB_VERSION);
@@ -2456,7 +2493,7 @@ gboolean moloch_db_file_exists(const char *filename, uint32_t *outputId)
         if ((value = moloch_js0n_get(source, source_len, "num", &len))) {
             *outputId = atoi((char*)value);
         } else {
-            LOGEXIT("ERROR - No num field in %.*s", source_len, source);
+            LOGEXIT("ERROR - Files check has no num field in %.*s", source_len, source);
         }
     }
 
