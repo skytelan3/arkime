@@ -625,10 +625,13 @@ void moloch_db_save_session(MolochSession_t *session, int final)
 
     startPtr = BSB_WORK_PTR(jbsb);
 
-    if (config.autoGenerateId) {
-        BSB_EXPORT_sprintf(jbsb, "{\"index\": {\"_index\": \"%ssessions3-%s\"}}\n", config.prefix, dbInfo[thread].prefix);
-    } else {
-        BSB_EXPORT_sprintf(jbsb, "{\"index\": {\"_index\": \"%ssessions3-%s\", \"_id\": \"%s\"}}\n", config.prefix, dbInfo[thread].prefix, id);
+    if (!config.disableIndexJson)
+    {
+        if (config.autoGenerateId) {
+            BSB_EXPORT_sprintf(jbsb, "{\"index\": {\"_index\": \"%ssessions3-%s\"}}\n", config.prefix, dbInfo[thread].prefix);
+        } else {
+            BSB_EXPORT_sprintf(jbsb, "{\"index\": {\"_index\": \"%ssessions3-%s\", \"_id\": \"%s\"}}\n", config.prefix, dbInfo[thread].prefix, id);
+        }
     }
 
     dataPtr = BSB_WORK_PTR(jbsb);
@@ -642,6 +645,11 @@ void moloch_db_save_session(MolochSession_t *session, int final)
                       ((uint64_t)session->lastPacket.tv_sec)*1000 + ((uint64_t)session->lastPacket.tv_usec)/1000,
                       timediff,
                       session->ipProtocol);
+
+    if (config.insertIdToJsonData)
+    {
+        BSB_EXPORT_sprintf(jbsb, "\"arkimeId\": \"%s\",", id);
+    }
 
     if (session->ipProtocol == IPPROTO_TCP) {
         BSB_EXPORT_sprintf(jbsb,
