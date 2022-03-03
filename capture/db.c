@@ -646,7 +646,7 @@ void moloch_db_save_session(MolochSession_t *session, int final)
                       timediff,
                       session->ipProtocol);
 
-    if (config.insertIdToJsonData)
+    if (config.insertMetaDataToJsonData)
     {
         BSB_EXPORT_sprintf(jbsb, "\"arkimeId\": \"%s\",", id);
     }
@@ -697,9 +697,16 @@ void moloch_db_save_session(MolochSession_t *session, int final)
         BSB_EXPORT_cstr(jbsb, "\",");
     }
 
-    BSB_EXPORT_sprintf(jbsb,
+    if (!config.timestampToMillis)
+    {
+        BSB_EXPORT_sprintf(jbsb,
                       "\"@timestamp\":%" PRIu64 ",",
                       ((uint64_t)currentTime.tv_sec)*1000 + ((uint64_t)currentTime.tv_usec)/1000);
+    }
+    else
+    {
+        BSB_EXPORT_sprintf(jbsb, "\"@timestamp\":%" PRIu64 ",", ((uint64_t)currentTime.tv_sec));
+    }
 
     if (session->ipProtocol) {
         if (IN6_IS_ADDR_V4MAPPED(&session->addr1)) {
