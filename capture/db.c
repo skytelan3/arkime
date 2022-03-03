@@ -566,7 +566,7 @@ void moloch_db_save_session(MolochSession_t *session, int final)
             snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02dh%02d", tmp.tm_year%100, tmp.tm_mon+1, tmp.tm_mday, (tmp.tm_hour/12)*12);
             break;
         case MOLOCH_ROTATE_DAILY:
-            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02d", tmp.tm_year%100, tmp.tm_mon+1, tmp.tm_mday);
+            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d.%02d.%02d", tmp.tm_year%100, tmp.tm_mon+1, tmp.tm_mday);
             break;
         case MOLOCH_ROTATE_WEEKLY:
             snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02dw%02d", tmp.tm_year%100, tmp.tm_yday/7);
@@ -632,23 +632,34 @@ void moloch_db_save_session(MolochSession_t *session, int final)
         } else {
             BSB_EXPORT_sprintf(jbsb, "{\"index\": {\"_index\": \"%ssessions3-%s\", \"_id\": \"%s\"}}\n", config.prefix, dbInfo[thread].prefix, id);
         }
+
+        dataPtr = BSB_WORK_PTR(jbsb);
+
+        BSB_EXPORT_sprintf(jbsb,
+                        "{\"firstPacket\":%" PRIu64 ","
+                        "\"lastPacket\":%" PRIu64 ","
+                        "\"length\":%u,"
+                        "\"ipProtocol\":%u,",
+                        ((uint64_t)session->firstPacket.tv_sec)*1000 + ((uint64_t)session->firstPacket.tv_usec)/1000,
+                        ((uint64_t)session->lastPacket.tv_sec)*1000 + ((uint64_t)session->lastPacket.tv_usec)/1000,
+                        timediff,
+                        session->ipProtocol);
     }
-
-    dataPtr = BSB_WORK_PTR(jbsb);
-
-    BSB_EXPORT_sprintf(jbsb,
-                      "{\"firstPacket\":%" PRIu64 ","
-                      "\"lastPacket\":%" PRIu64 ","
-                      "\"length\":%u,"
-                      "\"ipProtocol\":%u,",
-                      ((uint64_t)session->firstPacket.tv_sec)*1000 + ((uint64_t)session->firstPacket.tv_usec)/1000,
-                      ((uint64_t)session->lastPacket.tv_sec)*1000 + ((uint64_t)session->lastPacket.tv_usec)/1000,
-                      timediff,
-                      session->ipProtocol);
-
-    if (config.insertMetaDataToJsonData)
+    else
     {
-        BSB_EXPORT_sprintf(jbsb, "\"arkimeId\": \"%s\",", id);
+        dataPtr = BSB_WORK_PTR(jbsb);
+
+        BSB_EXPORT_sprintf(jbsb,
+                        "{\"firstPacket\":%" PRIu64 ","
+                        "\"lastPacket\":%" PRIu64 ","
+                        "\"length\":%u,"
+                        "\"ipProtocol\":%u,",
+                        ((uint64_t)session->firstPacket.tv_sec)*1000 + ((uint64_t)session->firstPacket.tv_usec)/1000,
+                        ((uint64_t)session->lastPacket.tv_sec)*1000 + ((uint64_t)session->lastPacket.tv_usec)/1000,
+                        timediff,
+                        session->ipProtocol);
+        
+        BSB_EXPORT_sprintf(jbsb, "\"arkime\": {\"_index\": \"%ssessions3-%s\", \"_id\": \"%s\"},", config.prefix, dbInfo[thread].prefix, id);
     }
 
     if (session->ipProtocol == IPPROTO_TCP) {
