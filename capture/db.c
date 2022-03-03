@@ -644,6 +644,9 @@ void moloch_db_save_session(MolochSession_t *session, int final)
                         ((uint64_t)session->lastPacket.tv_sec)*1000 + ((uint64_t)session->lastPacket.tv_usec)/1000,
                         timediff,
                         session->ipProtocol);
+        BSB_EXPORT_sprintf(jbsb,
+                "\"@timestamp\":%" PRIu64 ",",
+                ((uint64_t)currentTime.tv_sec)*1000 + ((uint64_t)currentTime.tv_usec)/1000);
     }
     else
     {
@@ -659,7 +662,17 @@ void moloch_db_save_session(MolochSession_t *session, int final)
                         timediff,
                         session->ipProtocol);
         
-        BSB_EXPORT_sprintf(jbsb, "\"arkime\": {\"_index\": \"%ssessions3-%s\", \"_id\": \"%s\"},", config.prefix, dbInfo[thread].prefix, id);
+        BSB_EXPORT_sprintf(jbsb,
+                        "\"arkime\": {"
+                        "\"index\": \"%ssessions3-%s\","
+                        "\"id\": \"%s\","
+                        "\"timestamp\":%" PRIu64
+                        "},",
+                        config.prefix,
+                        dbInfo[thread].prefix,
+                        id,
+                        ((uint64_t)currentTime.tv_sec)*1000 + ((uint64_t)currentTime.tv_usec)/1000
+                        );
     }
 
     if (session->ipProtocol == IPPROTO_TCP) {
