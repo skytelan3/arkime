@@ -497,7 +497,7 @@ typedef struct moloch_config {
     char      gapPacketPos;
     char      enablePacketDedup;
 
-    char      insertMetaDataToJsonData;
+    char      disableIndexJson;
     char      timestampToMillis;
 
     char      kafkaBootstrapServers;

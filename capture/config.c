@@ -558,7 +558,7 @@ void moloch_config_load()
     config.enablePacketLen       = moloch_config_boolean(NULL, "enablePacketLen", FALSE);
     config.enablePacketDedup     = moloch_config_boolean(NULL, "enablePacketDedup", FALSE);
 
-    config.insertMetaDataToJsonData    = moloch_config_boolean(keyfile, "insertMetaDataToJsonData", FALSE);
+    config.disableIndexJson    = moloch_config_boolean(keyfile, "disableIndexJson", FALSE);
 
     // WatchTek.co ES scheme
     config.timestampToMillis      = moloch_config_boolean(keyfile, "timestampToMillis", FALSE);
