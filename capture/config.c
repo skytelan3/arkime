@@ -560,9 +560,6 @@ void moloch_config_load()
 
     config.disableIndexJson    = moloch_config_boolean(keyfile, "disableIndexJson", FALSE);
 
-    // WatchTek.co ES scheme
-    config.timestampToMillis      = moloch_config_boolean(keyfile, "timestampToMillis", FALSE);
-
     config.maxStreams[SESSION_TCP] = MAX(100, maxStreams/config.packetThreads*1.25);
     config.maxStreams[SESSION_UDP] = MAX(100, maxStreams/config.packetThreads/20);
     config.maxStreams[SESSION_SCTP] = MAX(100, maxStreams/config.packetThreads/20);

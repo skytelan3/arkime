@@ -498,7 +498,6 @@ typedef struct moloch_config {
     char      enablePacketDedup;
 
     char      disableIndexJson;
-    char      timestampToMillis;
 
     char      kafkaBootstrapServers;
     char      kafkaTopic;
