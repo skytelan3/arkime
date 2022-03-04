@@ -2149,7 +2149,7 @@ LOCAL void moloch_db_check()
 
     uint32_t           docs_len;
     unsigned char     *docs = 0;
-    docs = moloch_js0n_get(mappings, mappings_len, "_docs", &docs_len);
+    docs = moloch_js0n_get(mappings, mappings_len, "_doc", &docs_len);
     if(docs && docs_len != 0) {
         mappings = docs;
         mappings_len = docs_len;
