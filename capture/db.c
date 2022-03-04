@@ -677,7 +677,7 @@ void moloch_db_save_session(MolochSession_t *session, int final)
     // WatchTek CustomField
     if (config.hostIp)
     {
-        BSB_EXPORT_sprintf(jbsb, "\"deviceIp\": \"%s\"," config.hostIp);
+        BSB_EXPORT_sprintf(jbsb, "\"deviceIp\": \"%s\",", config.hostIp);
     }
     if (session->ipProtocol == IPPROTO_TCP) {
         BSB_EXPORT_sprintf(jbsb,
