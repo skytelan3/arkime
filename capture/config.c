@@ -558,7 +558,8 @@ void moloch_config_load()
     config.enablePacketLen       = moloch_config_boolean(NULL, "enablePacketLen", FALSE);
     config.enablePacketDedup     = moloch_config_boolean(NULL, "enablePacketDedup", FALSE);
 
-    config.disableIndexJson    = moloch_config_boolean(keyfile, "disableIndexJson", FALSE);
+    config.disableIndexJson      = moloch_config_boolean(keyfile, "disableIndexJson", FALSE);
+    config.hostIp                = moloch_config_str(keyfile, "hostIp", NULL);
 
     config.maxStreams[SESSION_TCP] = MAX(100, maxStreams/config.packetThreads*1.25);
     config.maxStreams[SESSION_UDP] = MAX(100, maxStreams/config.packetThreads/20);

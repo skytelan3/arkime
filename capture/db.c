@@ -674,7 +674,11 @@ void moloch_db_save_session(MolochSession_t *session, int final)
                         ((uint64_t)currentTime.tv_sec)*1000 + ((uint64_t)currentTime.tv_usec)/1000
                         );
     }
-
+    // WatchTek CustomField
+    if (config.hostIp)
+    {
+        BSB_EXPORT_sprintf(jbsb, "\"deviceIp\": \"%s\"," config.hostIp);
+    }
     if (session->ipProtocol == IPPROTO_TCP) {
         BSB_EXPORT_sprintf(jbsb,
                            "\"tcpflags\":{"

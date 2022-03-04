@@ -379,6 +379,7 @@ typedef struct moloch_config {
     char     *configFile;
     char     *nodeName;
     char     *hostName;
+    char      hostIp;
     char    **pcapReadFiles;
     char    **pcapReadDirs;
     char    **pcapFileLists;
