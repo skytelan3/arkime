@@ -2147,9 +2147,16 @@ LOCAL void moloch_db_check()
         LOGEXIT("ERROR - Couldn't load version information, database might be down or out of date.  Run \"db/db.pl host:port upgrade\"");
     }
 
+    uint32_t           docs_len;
+    unsigned char     *docs = 0;
+    docs = moloch_js0n_get(mappings, mappings_len, "_docs", &docs_len);
+    if(docs && docs_len != 0) {
+        mappings = docs;
+        mappings_len = docs_len;
+    }
+
     uint32_t           meta_len;
     unsigned char     *meta = 0;
-
     meta = moloch_js0n_get(mappings, mappings_len, "_meta", &meta_len);
     if(!meta || meta_len == 0) {
         LOGEXIT("ERROR - Couldn't load version information, database might be down or out of date.  Run \"db/db.pl host:port upgrade\"");
