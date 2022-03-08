@@ -486,7 +486,7 @@ exports.getSession = async (id, options, cb) => {
   if (!options) {
     options = { _source: 'cert', fields: ['*'] };
   }
-  const query = { query: { ids: { values: [exports.sid2Id(id)] } }, _source: options._source, fields: options.fields };
+  const query = { query: { ids: { values: [exports.sid2Id(id)] } }, _source: options.fields };
 
   const unflatten = options?.arkime_unflatten ?? true;
   const params = { };
