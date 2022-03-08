@@ -31,8 +31,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       if (err) {
         return res.send('Could not build query.  Err: ' + err);
       }
-      query._source = false;
-      query.fields = fields;
+      query._source = fields;
       if (Config.debug) {
         console.log('sessionsListFromQuery query', JSON.stringify(query, null, 1));
       }
@@ -1424,8 +1423,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     }, (err) => {
       if (processSegments) {
         sessionAPIs.buildSessionQuery(req, (err, query, indices) => {
-          query.fields = fields;
-          query._source = false;
+          query._source = fields;
           sessionsListAddSegments(req, indices, query, list, (err, addSegmentsList) => {
             cb(err, addSegmentsList);
           });
@@ -1620,8 +1618,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       }
 
       if (req.query.fields) {
-        query._source = false;
-        query.fields = ViewerUtils.queryValueToArray(req.query.fields);
+        query._source = ViewerUtils.queryValueToArray(req.query.fields);
       }
 
       res.send({ esquery: query, indices: indices });
@@ -1667,8 +1664,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
 
       let addMissing = false;
       if (req.query.fields) {
-        query._source = false;
-        query.fields = ViewerUtils.queryValueToArray(req.query.fields);
+        query._source = ViewerUtils.queryValueToArray(req.query.fields);
         ['node', 'source.ip', 'source.port', 'destination.ip', 'destination.port'].forEach((item) => {
           if (query.fields.indexOf(item) === -1) {
             query.fields.push(item);
@@ -1676,8 +1672,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         });
       } else {
         addMissing = true;
-        query._source = false;
-        query.fields = [
+        query._source = [
           'ipProtocol', 'rootId', 'totDataBytes', 'client.bytes',
           'server.bytes', 'firstPacket', 'lastPacket', 'source.ip', 'source.port',
           'destination.ip', 'destination.port', 'network.packets', 'source.packets', 'destination.packets',
@@ -2920,8 +2915,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
 
       query.size = 1;
       query.sort = { lastPacket: { order: 'desc' } };
-      query._source = false;
-      query.fields = ['node'];
+      query._source = ['node'];
 
       if (Config.debug) {
         console.log(`/api/sessions/bodyhash/${req.params.hash} ${indices} query`, JSON.stringify(query, null, 2));
