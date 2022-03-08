@@ -1745,6 +1745,7 @@ exports.checkVersion = async function (minVersion, checkUsers) {
       const molochDbVersion = '';
       try
       {
+        console.log(doc[fixIndex('sessions3_template')].mappings);
         molochDbVersion = doc[fixIndex('sessions3_template')].mappings._meta.molochDbVersion;
       }
       catch (e)
