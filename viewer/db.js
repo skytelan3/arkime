@@ -1152,7 +1152,15 @@ async function initialShortcutsSyncToRemote () {
     index: internals.localShortcutsIndex
   });
   // get initSync flag of the first index (always want the first and only index returned)
-  const initSync = doc[Object.keys(doc)[0]]?.mappings?._meta?.initSync;
+  const initSync = '';
+  try
+  {
+    initSync = doc[Object.keys(doc)[0]]?.mappings?._meta?.initSync;
+  }
+  catch (e)
+  {
+    initSync = doc[Object.keys(doc)[0]]?.mappings?._doc?._meta?.initSync;
+  }
 
   if (initSync) { return; } // already been synced, don't need to do anything
 
@@ -1291,7 +1299,16 @@ async function getShortcutsVersion () {
   });
 
   // get version of the first index (always want the first and only index returned)
-  return doc[Object.keys(doc)[0]]?.mappings?._meta?.version || 0;
+  const shortcutVersion = '';
+  try
+  {
+    shortcutVersion = doc[Object.keys(doc)[0]]?.mappings?._meta?.version;
+  }
+  catch (e)
+  {
+    shortcutVersion = doc[Object.keys(doc)[0]]?.mappings?._doc?._meta?.version;
+  }
+  return shortcutVersion || 0;
 }
 // updates the shortcuts index version in the remote db so that the local
 // db knows to sync the shortcuts (remote db = user's es)
@@ -1505,7 +1522,18 @@ exports.healthCache = async () => {
       const { body: doc } = await internals.client7.indices.getTemplate({
         name: fixIndex('sessions3_template'), filter_path: '**._meta'
       });
-      health.molochDbVersion = doc[fixIndex('sessions3_template')].mappings._meta.molochDbVersion;
+
+      const molochDbVersion = '';
+      try
+      {
+        molochDbVersion = doc[fixIndex('sessions3_template')].mappings._meta.molochDbVersion;
+      }
+      catch (e)
+      {
+        molochDbVersion = doc[fixIndex('sessions3_template')].mappings._doc._meta.molochDbVersion;
+      }
+
+      health.molochDbVersion = molochDbVersion;
       internals.healthCache = health;
       internals.healthCache._timeStamp = Date.now();
       return health;
@@ -1714,7 +1742,15 @@ exports.checkVersion = async function (minVersion, checkUsers) {
     });
 
     try {
-      const molochDbVersion = doc[fixIndex('sessions3_template')].mappings._meta.molochDbVersion;
+      const molochDbVersion = '';
+      try
+      {
+        molochDbVersion = doc[fixIndex('sessions3_template')].mappings._meta.molochDbVersion;
+      }
+      catch (e)
+      {
+        molochDbVersion = doc[fixIndex('sessions3_template')].mappings._doc._meta.molochDbVersion;
+      }
 
       if (molochDbVersion < minVersion) {
         console.log(`ERROR - Current database version (${molochDbVersion}) is less then required version (${minVersion}) use 'db/db.pl <eshost:esport> upgrade' to upgrade`);
