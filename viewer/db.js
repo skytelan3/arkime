@@ -1159,7 +1159,7 @@ async function initialShortcutsSyncToRemote () {
   }
   catch (e)
   {
-    initSync = doc[Object.keys(doc)[0]]?.mappings?._doc?._meta?.initSync;
+    initSync = doc[Object.keys(doc)[0]]?.mappings?.doc?._meta?.initSync;
   }
 
   if (initSync) { return; } // already been synced, don't need to do anything
@@ -1306,7 +1306,7 @@ async function getShortcutsVersion () {
   }
   catch (e)
   {
-    shortcutVersion = doc[Object.keys(doc)[0]]?.mappings?._doc?._meta?.version;
+    shortcutVersion = doc[Object.keys(doc)[0]]?.mappings?.doc?._meta?.version;
   }
   return shortcutVersion || 0;
 }
@@ -1530,7 +1530,7 @@ exports.healthCache = async () => {
       }
       catch (e)
       {
-        molochDbVersion = doc[fixIndex('sessions3_template')].mappings._doc._meta.molochDbVersion;
+        molochDbVersion = doc[fixIndex('sessions3_template')].mappings.doc._meta.molochDbVersion;
       }
 
       health.molochDbVersion = molochDbVersion;
@@ -1749,7 +1749,7 @@ exports.checkVersion = async function (minVersion, checkUsers) {
       }
       catch (e)
       {
-        molochDbVersion = doc[fixIndex('sessions3_template')].mappings._doc._meta.molochDbVersion;
+        molochDbVersion = doc[fixIndex('sessions3_template')].mappings.doc._meta.molochDbVersion;
       }
 
       if (molochDbVersion < minVersion) {
