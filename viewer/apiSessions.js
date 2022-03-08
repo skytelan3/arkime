@@ -1014,7 +1014,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       });
     }
 
-    Db.getSession(sid, { _source: false, fields: ['node', 'ipProtocol', 'packetPos'] }, async (err, session) => {
+    Db.getSession(sid, { _source: ['node', 'ipProtocol', 'packetPos'] }, async (err, session) => {
       let fileNum;
       let itemPos = 0;
       const fields = session.fields;
@@ -1113,7 +1113,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
   sessionAPIs.processSessionId = (id, fullSession, headerCb, packetCb, endCb, maxPackets, limit) => {
     let options;
     if (!fullSession) {
-      options = { _source: false, fields: 'node,network.packets,packetPos,source.ip,source.port,destination.ip,destination.port,ipProtocol,packetLen'.split(',') };
+      options = { _source: 'node,network.packets,packetPos,source.ip,source.port,destination.ip,destination.port,ipProtocol,packetLen'.split(',') };
     }
 
     Db.getSession(id, options, (err, session) => {
@@ -1403,7 +1403,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     const nonArrayFields = ['ipProtocol', 'firstPacket', 'lastPacket', 'source.ip', 'source.port', 'source.geo.country_iso_code', 'destination.ip', 'destination.port', 'destination.geo.country_iso_code', 'network.bytes', 'totDataBytes', 'network.packets', 'node', 'rootId', 'http.xffGEO'];
     const fixFields = nonArrayFields.filter((x) => { return fields.indexOf(x) !== -1; });
 
-    const options = ViewerUtils.addCluster(req ? req.query.cluster : undefined, { _source: false, fields: fields });
+    const options = ViewerUtils.addCluster(req ? req.query.cluster : undefined, { _source: fields });
     options.arkime_unflatten = false;
     async.eachLimit(ids, 10, (id, nextCb) => {
       Db.getSession(id, options, (err, session) => {
