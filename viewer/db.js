@@ -1152,7 +1152,7 @@ async function initialShortcutsSyncToRemote () {
     index: internals.localShortcutsIndex
   });
   // get initSync flag of the first index (always want the first and only index returned)
-  const initSync = '';
+  let initSync = '';
   try
   {
     initSync = doc[Object.keys(doc)[0]]?.mappings?._meta?.initSync;
@@ -1299,7 +1299,7 @@ async function getShortcutsVersion () {
   });
 
   // get version of the first index (always want the first and only index returned)
-  const shortcutVersion = '';
+  let shortcutVersion = 0;
   try
   {
     shortcutVersion = doc[Object.keys(doc)[0]]?.mappings?._meta?.version;
@@ -1523,7 +1523,7 @@ exports.healthCache = async () => {
         name: fixIndex('sessions3_template'), filter_path: '**._meta'
       });
 
-      const molochDbVersion = '';
+      let molochDbVersion = 0;
       try
       {
         molochDbVersion = doc[fixIndex('sessions3_template')].mappings._meta.molochDbVersion;
@@ -1742,17 +1742,13 @@ exports.checkVersion = async function (minVersion, checkUsers) {
     });
 
     try {
-      const molochDbVersion = '';
+      let molochDbVersion = 0;
       try
       {
         molochDbVersion = doc[fixIndex('sessions3_template')].mappings._meta.molochDbVersion;
       }
       catch (e)
       {
-        console.log(doc[fixIndex('sessions3_template')].mappings);
-        console.log(doc[fixIndex('sessions3_template')].mappings._doc);
-        console.log(doc[fixIndex('sessions3_template')].mappings._doc._meta);
-        console.log(doc[fixIndex('sessions3_template')].mappings._doc._meta.molochDbVersion);
         molochDbVersion = doc[fixIndex('sessions3_template')].mappings._doc._meta.molochDbVersion;
       }
 
