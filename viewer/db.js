@@ -1159,7 +1159,7 @@ async function initialShortcutsSyncToRemote () {
   }
   catch (e)
   {
-    initSync = doc[Object.keys(doc)[0]]?.mappings?.doc?._meta?.initSync;
+    initSync = doc[Object.keys(doc)[0]]?.mappings?._doc?._meta?.initSync;
   }
 
   if (initSync) { return; } // already been synced, don't need to do anything
@@ -1306,7 +1306,7 @@ async function getShortcutsVersion () {
   }
   catch (e)
   {
-    shortcutVersion = doc[Object.keys(doc)[0]]?.mappings?.doc?._meta?.version;
+    shortcutVersion = doc[Object.keys(doc)[0]]?.mappings?._doc?._meta?.version;
   }
   return shortcutVersion || 0;
 }
@@ -1530,7 +1530,7 @@ exports.healthCache = async () => {
       }
       catch (e)
       {
-        molochDbVersion = doc[fixIndex('sessions3_template')].mappings.doc._meta.molochDbVersion;
+        molochDbVersion = doc[fixIndex('sessions3_template')].mappings._doc._meta.molochDbVersion;
       }
 
       health.molochDbVersion = molochDbVersion;
@@ -1745,12 +1745,11 @@ exports.checkVersion = async function (minVersion, checkUsers) {
       const molochDbVersion = '';
       try
       {
-        console.log(doc[fixIndex('sessions3_template')].mappings);
         molochDbVersion = doc[fixIndex('sessions3_template')].mappings._meta.molochDbVersion;
       }
       catch (e)
       {
-        molochDbVersion = doc[fixIndex('sessions3_template')].mappings.doc._meta.molochDbVersion;
+        molochDbVersion = doc[fixIndex('sessions3_template')].mappings._doc._meta.molochDbVersion;
       }
 
       if (molochDbVersion < minVersion) {
@@ -2005,25 +2004,4 @@ exports.getTemplate = async (templateName) => {
 
 exports.putTemplate = async (templateName, body) => {
   return internals.client7.indices.putTemplate({ name: fixIndex(templateName), body: body });
-};
-
-exports.setQueriesNode = async (node) => {
-  internals.client7.indices.putMapping({
-    index: fixIndex('queries'),
-    body: { _meta: { node: node, updateTime: Date.now() } }
-  });
-};
-
-exports.getQueriesNode = async () => {
-  const { body: doc } = await internals.client7.indices.getMapping({
-    index: fixIndex('queries')
-  });
-
-  // Since queries is an alias we dont't know the real index name here
-  const meta = doc[Object.keys(doc)[0]].mappings._meta;
-
-  return {
-    node: meta?.node,
-    updateTime: meta?.updateTime
-  };
 };
