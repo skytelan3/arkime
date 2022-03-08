@@ -543,6 +543,7 @@ exports.search = async (index, type, query, options, cb) => {
     options = undefined;
   }
   query.profile = internals.esProfile;
+  query._source = query.fields;
 
   const params = {
     index: fixIndex(index),
