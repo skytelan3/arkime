@@ -731,6 +731,8 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       {
         fields = item._source;
       }
+      console.log(fields);
+      console.log(fields.node);
       sessionAPIs.isLocalView(fields.node, () => {
         // Get from our DISK
         pcapWriter(res, Db.session2Sid(item), writerOptions, nextCb);
