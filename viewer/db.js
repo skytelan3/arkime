@@ -555,13 +555,13 @@ exports.search = async (index, type, query, options, cb) => {
     options = undefined;
   }
   query.profile = internals.esProfile;
-  query._source = query.fields;
   const queryCopy = JSON.parse(JSON.stringify(query));
+  queryCopy._source = queryCopy.fields;
   delete queryCopy.fields;
 
   const params = {
     index: fixIndex(index),
-    body: query.fields,
+    body: query,
     rest_total_hits_as_int: true
   };
 
