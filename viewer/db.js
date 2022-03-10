@@ -562,7 +562,7 @@ exports.search = async (index, type, query, options, cb) => {
   {
     console.log('elasticsearchVersion6');
     bodyQuery = JSON.parse(JSON.stringify(query));
-    bodyQuery._source = queryCopy.fields;
+    bodyQuery._source = query.fields;
     delete bodyQuery.fields;
   }
   else
