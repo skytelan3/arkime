@@ -722,23 +722,21 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     const writerOptions = { writeHeader: true };
 
     async.eachLimit(list, 10, (item, nextCb) => {
-      console.log('-- list --');
-      console.log(list);
-      console.log('-- item --');
-      console.log(item);
-
-      let fields = '';
-      if (item.fields != '')
+      let node;
+      let fields;
+      try
       {
+        node = item.fields.node;
         fields = item.fields;
-        console.log('item.fields: ' + fields);
       }
-      else
+      catch (e)
       {
+        console.log('catch');
+        node = item._source.node;
         fields = item._source;
-        console.log('item._source: ' + fields);
       }
-      console.log('fields.node: '+fields.node);
+      console.log('node:' + node);
+      console.log('fields:' + fields);
       sessionAPIs.isLocalView(fields.node, () => {
         // Get from our DISK
         pcapWriter(res, Db.session2Sid(item), writerOptions, nextCb);
