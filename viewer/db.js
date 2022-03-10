@@ -519,12 +519,25 @@ exports.getSession = async (id, options, cb) => {
       session.fields.cert = session._source.cert;
     }
     fixSessionFields(session.fields, unflatten);
-    const sourceCopy = JSON.parse(JSON.stringify(session._source));
+    let packetPos;
+    let fields;
+    try
+    {
+      packetPos = session.fields.packetPos;
+      fields = session.fields;
+    }
+    catch (e)
+    {
+      packetPos = session._source.packetPos;
+      fields = session._source;
+    }
+    console.log('packetPos: '+packetPos)
+    console.log('fields: '+fields)
     delete session._source;
     if (!optionsReplaced && options.fields && !options.fields.includes('packetPos')) {
       return cb(null, session);
     }
-    return fixPacketPos(session, sourceCopy);
+    return fixPacketPos(session, fields);
   });
 };
 
