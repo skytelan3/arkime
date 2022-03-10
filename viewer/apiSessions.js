@@ -622,7 +622,18 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       });
     }
 
-    const fields = session.fields;
+    let packetPos;
+    let fields;
+    try
+    {
+      packetPos = session.fields.packetPos;
+      fields = session.fields;
+    }
+    catch (e)
+    {
+      packetPos = session._source.packetPos;
+      fields = session._source;
+    }
 
     let fileNum;
     let itemPos = 0;
@@ -1149,7 +1160,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       
       console.log('packetPos: '+packetPos)
       console.log('fields: '+fields)
-      
+
       if (maxPackets && fields.packetPos.length > maxPackets) {
         fields.packetPos.length = maxPackets;
       }
