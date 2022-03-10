@@ -23,6 +23,7 @@ const fs = require('fs');
 const async = require('async');
 const { Client } = require('@elastic/elasticsearch');
 const User = require('../common/user');
+const Config = require('./config.js');
 
 const internals = {
   fileId2File: {},
