@@ -561,7 +561,7 @@ exports.search = async (index, type, query, options, cb) => {
 
   const params = {
     index: fixIndex(index),
-    body: queryCopy,
+    body: query.fields,
     rest_total_hits_as_int: true
   };
 
