@@ -532,7 +532,6 @@ exports.getSession = async (id, options, cb) => {
       fields = session._source;
     }
 
-    delete session._source;
     if (!optionsReplaced && options.fields && !options.fields.includes('packetPos')) {
       return cb(null, session);
     }

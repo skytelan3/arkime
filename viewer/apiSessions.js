@@ -1146,8 +1146,10 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         packetPos = session._source.packetPos;
         fields = session._source;
       }
+      
       console.log('packetPos: '+packetPos)
       console.log('fields: '+fields)
+      
       if (maxPackets && fields.packetPos.length > maxPackets) {
         fields.packetPos.length = maxPackets;
       }
