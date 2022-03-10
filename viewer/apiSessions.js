@@ -722,17 +722,19 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     const writerOptions = { writeHeader: true };
 
     async.eachLimit(list, 10, (item, nextCb) => {
+      console.log('item: ' + item);
       let fields = '';
       if (item.fields != '')
       {
         fields = item.fields;
+        console.log('item.fields: ' + fields);
       }
       else
       {
         fields = item._source;
+        console.log('item._source: ' + fields);
       }
-      console.log(fields);
-      console.log(fields.node);
+      console.log('fields.node: '+fields.node);
       sessionAPIs.isLocalView(fields.node, () => {
         // Get from our DISK
         pcapWriter(res, Db.session2Sid(item), writerOptions, nextCb);
