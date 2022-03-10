@@ -722,9 +722,9 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     const writerOptions = { writeHeader: true };
 
     async.eachLimit(list, 10, (item, nextCb) => {
-      console.log('-- list --')
-      console.log(list)
-      console.log('-- item --')
+      console.log('-- list --');
+      console.log(list);
+      console.log('-- item --');
       console.log(item);
 
       let fields = '';
