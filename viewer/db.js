@@ -560,14 +560,12 @@ exports.search = async (index, type, query, options, cb) => {
   let bodyQuery;
   if (Config.get('elasticsearchVersion', 7) == 6)
   {
-    console.log('elasticsearchVersion6');
     bodyQuery = JSON.parse(JSON.stringify(query));
     bodyQuery._source = query.fields;
     delete bodyQuery.fields;
   }
   else
   {
-    console.log('elasticsearchVersion7');
     bodyQuery = query;
   }
 
