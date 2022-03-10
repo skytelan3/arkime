@@ -722,18 +722,17 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     const writerOptions = { writeHeader: true };
 
     async.eachLimit(list, 10, (item, nextCb) => {
-      const itemJson = JSON.parse(item);
-      console.log('item: ' + itemJson);
+      console.log('item: ' + item);
       let fields = '';
-      if (itemJson.fields != '')
+      if (item.fields != '')
       {
-        fields = itemJson.fields;
-        console.log('itemJson.fields: ' + fields);
+        fields = item.fields;
+        console.log('item.fields: ' + fields);
       }
       else
       {
-        fields = itemJson._source;
-        console.log('itemJson._source: ' + fields);
+        fields = item._source;
+        console.log('item._source: ' + fields);
       }
       console.log('fields.node: '+fields.node);
       sessionAPIs.isLocalView(fields.node, () => {
