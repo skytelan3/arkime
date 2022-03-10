@@ -722,6 +722,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     const writerOptions = { writeHeader: true };
 
     async.eachLimit(list, 10, (item, nextCb) => {
+      console.log(item)
       const fields = item.fields;
       sessionAPIs.isLocalView(fields.node, () => {
         // Get from our DISK
