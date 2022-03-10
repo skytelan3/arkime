@@ -531,8 +531,7 @@ exports.getSession = async (id, options, cb) => {
       packetPos = session._source.packetPos;
       fields = session._source;
     }
-    console.log('packetPos: '+packetPos)
-    console.log('fields: '+fields)
+
     delete session._source;
     if (!optionsReplaced && options.fields && !options.fields.includes('packetPos')) {
       return cb(null, session);
