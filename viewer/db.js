@@ -555,13 +555,22 @@ exports.search = async (index, type, query, options, cb) => {
     options = undefined;
   }
   query.profile = internals.esProfile;
-  const queryCopy = JSON.parse(JSON.stringify(query));
-  queryCopy._source = queryCopy.fields;
-  delete queryCopy.fields;
+
+  let bodyQuery;
+  if (Config.get('elasticsearchVersion', 7) == 6)
+  {
+    bodyQuery = JSON.parse(JSON.stringify(query));
+    bodyQuery._source = queryCopy.fields;
+    delete bodyQuery.fields;
+  }
+  else
+  {
+    bodyQuery = query;
+  }
 
   const params = {
     index: fixIndex(index),
-    body: query,
+    body: bodyQuery,
     rest_total_hits_as_int: true
   };
 
