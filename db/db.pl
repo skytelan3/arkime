@@ -109,6 +109,7 @@ my $GZ = 0;
 my $REFRESH = 60;
 my $ESAPIKEY = "";
 my $USERPASS;
+my $ISWINDOWS=0;
 
 #use LWP::ConsoleLogger::Everywhere ();
 
@@ -157,6 +158,7 @@ sub showHelp($)
     print "    --shardsPerNode <shards>   - Number of shards per node or use \"null\" to let ES decide, default shards*replicas/nodes\n";
     print "    --hotwarm                  - Set 'hot' for 'node.attr.molochtype' on new indices, warm on non sessions indices\n";
     print "    --ilm                      - Use ilm to manage\n";
+    print "    --windows                  - Elasticsearch's Operating system is windows\n";
     print "  wipe                         - Same as init, but leaves user database untouched\n";
     print "  upgrade [<opts>]             - Upgrade Arkime's schema in elasticsearch from previous versions\n";
     print "    --shards <shards>          - Number of shards for sessions, default number of nodes\n";
@@ -5829,11 +5831,14 @@ sub dbCheck {
             $errstr .= sprintf ("    REMOVE 'index.cache.field.type'\n");
         }
 
-        if (!(exists $nodeStat->{process}->{max_file_descriptors}) || int($nodeStat->{process}->{max_file_descriptors}) < 4000) {
-            $errstr .= sprintf ("  INCREASE max file descriptors in /etc/security/limits.conf and restart all ES node\n");
-            $errstr .= sprintf ("                (change root to the user that runs ES)\n");
-            $errstr .= sprintf ("          root hard nofile 128000\n");
-            $errstr .= sprintf ("          root soft nofile 128000\n");
+        if (!($ISWINDOWS))
+        {
+            if (!(exists $nodeStat->{process}->{max_file_descriptors}) || int($nodeStat->{process}->{max_file_descriptors}) < 4000) {
+                $errstr .= sprintf ("  INCREASE max file descriptors in /etc/security/limits.conf and restart all ES node\n");
+                $errstr .= sprintf ("                (change root to the user that runs ES)\n");
+                $errstr .= sprintf ("          root hard nofile 128000\n");
+                $errstr .= sprintf ("          root soft nofile 128000\n");
+            }
         }
 
         if ($errstr) {
@@ -5928,6 +5933,8 @@ sub parseArgs {
             $DOHOTWARM = 1;
         } elsif ($ARGV[$pos] eq "--ilm") {
             $DOILM = 1;
+        } elsif ($ARGV[$pos] eq "--windows") {
+            $ISWINDOWS = 1;    
         } elsif ($ARGV[$pos] eq "--warmafter") {
             $pos++;
             $WARMAFTER = int($ARGV[$pos]);
