@@ -518,12 +518,13 @@ exports.getSession = async (id, options, cb) => {
     if (session.fields && session._source && session._source.cert) {
       session.fields.cert = session._source.cert;
     }
-    delete session._source;
     fixSessionFields(session.fields, unflatten);
+    const sourceCopy = JSON.parse(JSON.stringify(session._source));
+    delete session._source;
     if (!optionsReplaced && options.fields && !options.fields.includes('packetPos')) {
       return cb(null, session);
     }
-    return fixPacketPos(session, session.fields);
+    return fixPacketPos(session, sourceCopy);
   });
 };
 

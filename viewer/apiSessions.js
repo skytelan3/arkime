@@ -731,12 +731,10 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       }
       catch (e)
       {
-        console.log('catch');
         node = item._source.node;
         fields = item._source;
       }
-      console.log('node:' + node);
-      console.log('fields:' + fields);
+
       sessionAPIs.isLocalView(fields.node, () => {
         // Get from our DISK
         pcapWriter(res, Db.session2Sid(item), writerOptions, nextCb);
