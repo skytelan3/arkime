@@ -27,6 +27,7 @@
 #include <fcntl.h>
 #include <arpa/inet.h>
 #include "patricia.h"
+#include <ctype.h>
 
 #include "maxminddb.h"
 LOCAL MMDB_s           *geoCountry;
@@ -1899,6 +1900,30 @@ LOCAL void moloch_db_load_file_num()
         nextFileNum = moloch_db_get_sequence_number_sync(key);
     }
 }
+char *ltrim(char *s) 
+{     
+    while(isspace(*s)) s++;     
+    return s; 
+}  
+
+char *rtrim(char *s) 
+{     
+    char* back;
+    int len = strlen(s);
+
+    if(len == 0)
+        return(s); 
+
+    back = s + len;     
+    while(isspace(*--back));     
+    *(back+1) = '\0';     
+    return s; 
+}  
+
+char *trim(char *s) 
+{     
+    return rtrim(ltrim(s));  
+} 
 /******************************************************************************/
 // Modified From https://github.com/phaag/nfdump/blob/master/bin/flist.c
 // Copyright (c) 2014, Peter Haag
@@ -1914,8 +1939,7 @@ LOCAL void moloch_db_mkpath(char *path)
 
         done = (*slash == '\0');
         *slash = '\0';
-        *path = trim(*path)
-        if (stat(path, &sb)) {
+        if (stat(trim(path), &sb)) {
             if (config.debug) {
                 LOG("mkdir(%s)", path);
             }
@@ -1931,17 +1955,6 @@ LOCAL void moloch_db_mkpath(char *path)
     }
 }
 /******************************************************************************/
-char *trim(char *s) {
-    char *ptr;
-    if (!s)
-        return NULL;   // handle NULL string
-    if (!*s)
-        return s;      // handle empty string
-    for (ptr = s + strlen(s) - 1; (ptr >= s) && isspace(*ptr); --ptr);
-    ptr[1] = '\0';
-    return s;
-}
-
 char *moloch_db_create_file_full(time_t firstPacket, const char *name, uint64_t size, int locked, uint32_t *id, ...)
 {
     static GRegex     *numRegex;
