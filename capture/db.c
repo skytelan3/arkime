@@ -1915,7 +1915,7 @@ LOCAL void moloch_db_mkpath(char *path)
         done = (*slash == '\0');
         *slash = '\0';
 
-        if (stat(path, &sb)) {
+        if (stat(trim(path), &sb)) {
             if (config.debug) {
                 LOG("mkdir(%s)", path);
             }
@@ -1931,6 +1931,16 @@ LOCAL void moloch_db_mkpath(char *path)
     }
 }
 /******************************************************************************/
+char *trim(char *s) {
+    char *ptr;
+    if (!s)
+        return NULL;   // handle NULL string
+    if (!*s)
+        return s;      // handle empty string
+    for (ptr = s + strlen(s) - 1; (ptr >= s) && isspace(*ptr); --ptr);
+    ptr[1] = '\0';
+    return s;
+}
 char *moloch_db_create_file_full(time_t firstPacket, const char *name, uint64_t size, int locked, uint32_t *id, ...)
 {
     static GRegex     *numRegex;
