@@ -1,0 +1,63 @@
+우분투 22 Desktop 최소설치
+
+# apt install git -y
+# apt install re2c -y (*)
+# apt install python3-pip -y (*)
+
+# git clone https://github.com/skytelan3/arkime.git
+# cd arkime
+
+
+# chmod +x easybutton-build.sh
+# ./easybutton-build.sh --install --kafka
+
+
+es 설치 (옵션)
+https://hwanstory.kr/@kim-hwan/posts/ELK-Stack-Install
+
+# curl -fsSL https://artifacts.elastic.co/GPG-KEY-elasticsearch |sudo gpg --dearmor -o /usr/share/keyrings/elastic.gpg
+# echo "deb [signed-by=/usr/share/keyrings/elastic.gpg] https://artifacts.elastic.co/packages/7.x/apt stable main" | sudo tee -a /etc/apt/sources.list.d/elastic-7.x.list
+# apt update
+# apt install elasticsearch
+# systemctl start elasticsearch && systemctl enable elasticsearch
+
+
+# make config
+
+# /opt/arkime/db/db.pl http://localhost:9200 init
+# /opt/arkime/bin/arkime_add_user.sh admin "Admin User" watchall --admin
+
+# vi /opt/arkime/etc/config.ini
+[default] 섹션에 추가 (참고 https://arkime.com/faq#arkime_requires_full_packet_captures_error)
+readTruncatedPackets=true
+snapLen=65536
+
+
+
+# cd capture/plugins/kafka/
+# vi Makefile
+14 THIRDPARTYLIB=../../../thirdparty
+15 ../%.so : %.c ../../moloch.h ../../hash.h ../../dll.h
+16         $(CC) -pthread --shared -o $@ -g -O2 -Wall -Wextra -D_GNU_SOURCE -fPIC $(INCLUDE_OTHER) $(INCLUDE_KAFKA) $< \
+           $(THIRDPARTYLIB)/librdkafka-1.5.3/src/librdkafka.a \
+           $(THIRDPARTYLIB)/librdkafka-1.5.3/mklove/deps/src/zlib/libz.a \
+           $(THIRDPARTYLIB)/librdkafka-1.5.3/mklove/deps/src/libcrypto/libssl.a \
+           $(THIRDPARTYLIB)/librdkafka-1.5.3/mklove/deps/src/libcrypto/libcrypto.a \
+           $(THIRDPARTYLIB)/librdkafka-1.5.3/mklove/deps/src/libzstd/lib/libzstd.a \
+           $(THIRDPARTYLIB)/librdkafka-1.5.3/mklove/deps/dest/zlib/usr/lib/libz.a \
+           $(THIRDPARTYLIB)/librdkafka-1.5.3/mklove/deps/dest/libcrypto/usr/lib64/libssl.a \
+           $(THIRDPARTYLIB)/librdkafka-1.5.3/mklove/deps/dest/libcrypto/usr/lib64/libcrypto.a \
+           $(THIRDPARTYLIB)/librdkafka-1.5.3/mklove/deps/dest/libzstd/usr/lib/libzstd.a \
+		   -Wl,-rpath=/usr/local/lib -lsasl2
+# rm ../kafka.so
+# make
+# cp ../kafka.so /opt/arkime/plugins/kafka.so
+
+# systemctl start arkimecapture.service
+# systemctl start arkimeviewer.service (옵션)
+
+
+
+
+ini 파일 설정은 아래 사이트 참고
+https://arkime.com/settings#ini-settings

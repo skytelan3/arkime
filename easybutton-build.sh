@@ -11,7 +11,7 @@
 # * install arkime if --install
 
 
-GLIB=2.68.3
+GLIB=2.68.4
 YARA=4.0.2
 MAXMIND=1.4.3
 PCAP=1.9.1
@@ -309,6 +309,7 @@ else
     fi
     if [ ! -f "/usr/local/include/librdkafka/rdkafka.h" ]; then
       tar zxf librdkafka-$KAFKA.tar.gz
+      sed -i 's|https://zlib.net/|https://zlib.net/fossils/|g' librdkafka-$KAFKA/mklove/modules/configure.zlib
       echo "MOLOCH: Building librddkafka";
       (cd librdkafka-$KAFKA; ./configure --install-deps --source-deps-only; $MAKE; $MAKE install)
       if [ $? -ne 0 ]; then
