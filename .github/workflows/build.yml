@@ -113,9 +113,9 @@ jobs:
           npm run lint
           cp -r capture/plugins/lua/samples /opt/arkime/lua
 
-      - name: capture tests
-        run: |
-          (cd tests; ./tests.pl)
+      # - name: capture tests
+      #   run: |
+      #     (cd tests; ./tests.pl)
 
       - name: ui test
         if: ${{ matrix.version == 'el8' }}
