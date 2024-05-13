@@ -227,7 +227,6 @@ my ($json) = @_;
         my $body = $session->{body};
 
         delete $session->{header}->{index}->{_id};
-        delete $session->{header}->{index}->{_index};
         if (exists $body->{rootId}) {
             $body->{rootId} = "SET";
         }
