@@ -525,7 +525,7 @@ Db.getSession = async (id, options, cb) => {
     if (!optionsReplaced && options.fields && !options.fields.includes('packetPos')) {
       return cb(null, session);
     }
-    return fixPacketPos(session, fields);
+    return fixPacketPos(session, session.fields);
   });
 };
 
@@ -548,7 +548,7 @@ Db.search = async (index, type, query, options, cb) => {
 
   const params = {
     index: fixIndex(index),
-    body: bodyQuery,
+    body: query,
     rest_total_hits_as_int: true
   };
 
