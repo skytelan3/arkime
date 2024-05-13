@@ -486,6 +486,8 @@ typedef struct arkime_config {
     char      gapPacketPos;
     char      enablePacketDedup;
     char      sessionIdMode;
+
+    char     *hostIp;
 } ArkimeConfig_t;
 
 typedef struct {
