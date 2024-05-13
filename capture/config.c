@@ -818,7 +818,6 @@ void arkime_config_load()
     config.enablePacketLen       = arkime_config_boolean(NULL, "enablePacketLen", FALSE);
     config.enablePacketDedup     = arkime_config_boolean(NULL, "enablePacketDedup", TRUE);
 
-    config.disableIndexJson      = arkime_config_boolean(keyfile, "disableIndexJson", FALSE);
     config.hostIp                = arkime_config_str(keyfile, "hostIp", NULL);
 
     config.maxStreams[SESSION_TCP] = MAX(100, maxStreams / config.packetThreads * 1.25);
