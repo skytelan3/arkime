@@ -1,10 +1,18 @@
+/******************************************************************************/
+/* apiHistory.js -- api calls for history tab
+ *
+ * Copyright Yahoo Inc.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 'use strict';
 
+const Db = require('./db.js');
 const util = require('util');
+const ArkimeUtil = require('../common/arkimeUtil');
+const ViewerUtils = require('./viewerUtils');
 
-module.exports = (Db) => {
-  const historyAPIs = {};
-
+class HistoryAPIs {
   // --------------------------------------------------------------------------
   // APIs
   // --------------------------------------------------------------------------
@@ -30,6 +38,7 @@ module.exports = (Db) => {
    * @param {string} forcedExpression - The expression applied to the search as a result of a users forced expression. Only visible to admins, normal users cannot see their forced expressions.
    */
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/histories
    *
@@ -48,9 +57,9 @@ module.exports = (Db) => {
    * @returns {number} recordsTotal - The total number of history results stored.
    * @returns {number} recordsFiltered - The number of history items returned in this result.
    */
-  historyAPIs.getHistories = (req, res) => {
+  static getHistories (req, res) {
     let userId;
-    if (req.user.createEnabled) { // user is an admin, they can view all history items
+    if (req.user.hasRole('arkimeAdmin')) { // user is an admin, they can view all history items
       // if the admin has requested a specific user
       if (req.query.userId) { userId = req.query.userId; }
     } else { // user isn't an admin, so they can only view their own history items
@@ -84,7 +93,7 @@ module.exports = (Db) => {
 
       if (userId) { // filter on userId
         query.query.bool.filter.push({
-          wildcard: { userId: '*' + userId + '*' }
+          wildcard: { userId }
         });
       }
     }
@@ -124,23 +133,25 @@ module.exports = (Db) => {
       query.query.bool.filter.push({
         range: {
           timestamp: {
-            gte: req.query.startTime,
-            lte: req.query.stopTime
+            gte: '' + req.query.startTime,
+            lte: '' + req.query.stopTime
           }
         }
       });
     }
 
+    ViewerUtils.addCluster(req.query.cluster, query);
+
     Promise.all([
       Db.searchHistory(query),
-      Db.countHistory()
+      Db.countHistory(req.query.cluster)
     ]).then(([{ body: { hits: histories } }, { body: { count: total } }]) => {
       const results = { total: histories.total, results: [] };
       for (const hit of histories.hits) {
         const item = hit._source;
         item.id = hit._id;
         item.index = hit._index;
-        if (!req.user.createEnabled) {
+        if (!req.user.hasRole('arkimeAdmin')) {
           // remove forced expression and es query for reqs made by nonadmin users
           item.forcedExpression = undefined;
           item.esQuery = undefined;
@@ -159,31 +170,32 @@ module.exports = (Db) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * DELETE - /api/history/:id
    *
    * Deletes a history entry (admin only).
    * @name /history/:id
-   * @param {string} index - The Elasticsearch index that the history item was stored in.
+   * @param {string} index - The OpenSearch/Elasticsearch index that the history item was stored in.
    * @returns {boolean} success - Whether the delete history operation was successful.
    * @returns {string} text - The success/error message to (optionally) display to the user.
    */
-  historyAPIs.deleteHistory = async (req, res) => {
+  static async deleteHistory (req, res) {
     if (!req.query.index) {
       return res.serverError(403, 'Missing history index');
     }
 
     try {
-      await Db.deleteHistory(req.params.id, req.query.index);
+      await Db.deleteHistory(req.params.id, req.query.index, req.query.cluster);
       return res.send(JSON.stringify({
         success: true,
         text: 'Deleted history item successfully'
       }));
     } catch (err) {
-      console.log(`ERROR - ${req.method} /api/history/${req.params.id}`, util.inspect(err, false, 50));
+      console.log(`ERROR - ${req.method} /api/history/%s`, ArkimeUtil.sanitizeStr(req.params.id), util.inspect(err, false, 50));
       return res.serverError(500, 'Error deleting history item');
     }
   };
-
-  return historyAPIs;
 };
+
+module.exports = HistoryAPIs;

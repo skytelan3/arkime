@@ -1,18 +1,32 @@
+/******************************************************************************/
+/* apiMisc.js -- api calls for misc parts of viewer
+ *
+ * Copyright Yahoo Inc.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 'use strict';
 
+const Config = require('./config.js');
+const Db = require('./db.js');
 const dns = require('dns');
 const fs = require('fs');
 const unzipper = require('unzipper');
 const util = require('util');
 const ArkimeUtil = require('../common/arkimeUtil');
+const ViewerUtils = require('./viewerUtils');
+const ArkimeConfig = require('../common/arkimeConfig');
+const User = require('../common/user');
+const View = require('./apiViews');
+const internals = require('./internals');
+const UserAPIs = require('./apiUsers');
+const SessionAPIs = require('./apiSessions');
 
-module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => {
-  const miscAPIs = {};
-
+class MiscAPIs {
   // --------------------------------------------------------------------------
   // HELPERS
   // --------------------------------------------------------------------------
-  async function getClusters () {
+  static async #getClusters () {
     const clusters = { active: [], inactive: [] };
     if (Config.get('multiES', false)) {
       try {
@@ -29,7 +43,8 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
     }
   }
 
-  function remoteClusters () {
+  // --------------------------------------------------------------------------
+  static #remoteClusters () {
     function cloneClusters (clusters) {
       const clone = {};
 
@@ -65,7 +80,7 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
    * @param {boolean} array=false Whether to return an array of fields, otherwise returns a map
    * @returns {array/map} The map or list of database fields
    */
-  miscAPIs.getFields = (req, res) => {
+  static getFields (req, res) {
     if (!internals.fieldsMap) {
       res.status(404);
       res.send('Cannot locate fields');
@@ -90,8 +105,8 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
    * @returns {number} recordsTotal - The total number of files Arkime knows about
    * @returns {number} recordsFiltered - The number of files returned in this result
    */
-  miscAPIs.getFiles = (req, res) => {
-    const columns = ['num', 'node', 'name', 'locked', 'first', 'filesize', 'encoding', 'packetPosEncoding', 'packets', 'packetsSize', 'uncompressedBits'];
+  static getFiles (req, res) {
+    const columns = ['num', 'node', 'name', 'locked', 'first', 'filesize', 'encoding', 'packetPosEncoding', 'packets', 'packetsSize', 'uncompressedBits', 'compression'];
 
     const query = {
       _source: columns,
@@ -108,9 +123,11 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
       query.query = { wildcard: { name: `*${req.query.filter}*` } };
     }
 
+    ViewerUtils.addCluster(req.query.cluster, query);
+
     Promise.all([
       Db.search('files', 'file', query),
-      Db.numberOfDocuments('files')
+      Db.numberOfDocuments('files', { cluster: req.query.cluster })
     ]).then(([files, total]) => {
       if (files.error) { throw files.error; }
 
@@ -120,7 +137,7 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
         if (fields.locked === undefined) {
           fields.locked = 0;
         }
-        fields.compression = fields.packetsSize ? Math.round(100 - (100 * fields.filesize / fields.packetsSize)) : 0;
+        fields.cratio = fields.packetsSize ? Math.round(100 - (100 * fields.filesize / fields.packetsSize)) : 0;
         fields.id = fields._id;
         results.results.push(fields);
       }
@@ -139,6 +156,7 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/:nodeName/:fileNum/filesize
    *
@@ -146,7 +164,7 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
    * @name /:nodeName/:fileNum/filesize
    * @returns {number} filesize - The size of the file (-1 if the file cannot be found).
    */
-  miscAPIs.getFileSize = (req, res) => {
+  static getFileSize (req, res) {
     Db.fileIdToFile(req.params.nodeName, req.params.fileNum, (file) => {
       if (!file) {
         return res.send({ filesize: -1 });
@@ -162,25 +180,6 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
     });
   };
 
-  // title apis ---------------------------------------------------------------
-  /**
-   * GET - /api/title
-   *
-   * Retrieves the browser page title for the Arkime app.
-   * Configure it using <a href="https://arkime.com/settings#titletemplate">the titleTemplate setting</a>
-   * @name /title
-   * @returns {string} title - The title of the app based on the configured setting.
-   */
-  miscAPIs.getPageTitle = (req, res) => {
-    let titleConfig = Config.get('titleTemplate', '_cluster_ - _page_ _-view_ _-expression_');
-
-    titleConfig = titleConfig.replace(/_cluster_/g, internals.clusterName)
-      .replace(/_userId_/g, req.user ? req.user.userId : '-')
-      .replace(/_userName_/g, req.user ? req.user.userName : '-');
-
-    res.send(titleConfig);
-  };
-
   // value actions apis -------------------------------------------------------
   /**
    * GET - /api/valueactions
@@ -189,7 +188,7 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
    * @name /valueactions
    * @returns {object} - The list of actions that can be preformed on data values.
    */
-  miscAPIs.getValueActions = (req, res) => {
+  static getValueActions (req, res) {
     if (!req.user || !req.user.userId) {
       return res.send({});
     }
@@ -204,16 +203,54 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
     }`
     };
     actions.reverseDNS = { category: 'ip', name: 'Get Reverse DNS', url: 'api/reversedns?ip=%TEXT%', actionType: 'fetch' };
-    actions.bodyHashMd5 = { category: 'md5', url: '%NODE%/%ID%/bodyHash/%TEXT%', name: 'Download File' };
-    actions.bodyHashSha256 = { category: 'sha256', url: '%NODE%/%ID%/bodyHash/%TEXT%', name: 'Download File' };
+    actions.bodyHashMd5 = { category: 'md5', url: 'api/session/%NODE%/%ID%/bodyHash/%TEXT%', name: 'Download File' };
+    actions.bodyHashSha256 = { category: 'sha256', url: 'api/session/%NODE%/%ID%/bodyHash/%TEXT%', name: 'Download File' };
 
     for (const key in internals.rightClicks) {
       const rc = internals.rightClicks[key];
+      // If we are one of the notUsers, then we don't get the action
       if (rc.notUsers && rc.notUsers[req.user.userId]) {
         continue;
       }
+
+      // If we are one of the users that can see the action, add to our list and remove users so we don't leak
       if (!rc.users || rc.users[req.user.userId]) {
-        actions[key] = rc;
+        actions[key] = JSON.parse(JSON.stringify(rc));
+        delete actions[key].users;
+        delete actions[key].notUsers;
+      }
+    }
+
+    return res.send(actions);
+  };
+
+  // --------------------------------------------------------------------------
+  /**
+   * GET - /api/fieldactions
+   *
+   * Retrives the actions that can be preformed on fields.
+   * @name /fieldactions
+   * @returns {object} - The list of actions that can be preformed on fields.
+   */
+  static getFieldActions (req, res) {
+    if (!req.user || !req.user.userId) {
+      return res.send({});
+    }
+
+    const actions = {};
+
+    for (const key in internals.fieldActions) {
+      const action = internals.fieldActions[key];
+      // If we are one of the notUsers, then we don't get the action
+      if (action.notUsers && action.notUsers[req.user.userId]) {
+        continue;
+      }
+
+      // If we are one of the users that can see the action, add to our list and remove users so we don't leak
+      if (!action.users || action.users[req.user.userId]) {
+        actions[key] = JSON.parse(JSON.stringify(action));
+        delete actions[key].users;
+        delete actions[key].notUsers;
       }
     }
 
@@ -229,7 +266,7 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
    * @param {string} ip - The IP to search domain names for.
    * @returns {string} domains - A comma separated string list of all the matching domain names.
    */
-  miscAPIs.getReverseDNS = (req, res) => {
+  static getReverseDNS (req, res) {
     dns.reverse(req.query.ip, (err, data) => {
       if (err) {
         return res.send('reverse error');
@@ -242,15 +279,36 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
   /**
    * POST - /api/upload
    *
-   * Uploads PCAP files.
+   * Uploads PCAP files to Arkime. This API is really only useful for demo sites and very special cases.
+   * Instead you almost always should just run capture locally, which will be much more
+   * efficient and not duplicate the PCAP. See https://arkime.com/faq#how-do-i-import-existing-pcaps
    * @name /upload
    * @param {string} tags - A comma separated list of tags to add to each session created.
    */
-  miscAPIs.upload = (req, res) => {
+  static upload (req, res) {
     const exec = require('child_process').exec;
+    const uploadCommand = Config.get('uploadCommand');
+
+    if (!uploadCommand) {
+      const msg = 'Need to set https://arkime.com/settings#uploadcommand in config file for uploads to work. However if you are trying to import pcap files from the command line, just use capture instead, https://arkime.com/faq#how-do-i-import-existing-pcaps';
+      res.status(500);
+      res.end(msg);
+      console.log('ERROR -', msg);
+      return;
+    }
+
+    if (!req.user.hasRole(internals.uploadRoles)) {
+      res.status(403);
+      return res.end('Not covered by role');
+    }
+
+    if (req.file === undefined) {
+      res.status(403);
+      return res.end('Missing file');
+    }
 
     let tags = '';
-    if (req.body.tags) {
+    if (ArkimeUtil.isString(req.body.tags)) {
       const t = req.body.tags.replace(/[^-a-zA-Z0-9_:,]/g, '').split(',');
       t.forEach((tag) => {
         if (tag.length > 0) {
@@ -259,12 +317,12 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
       });
     }
 
-    const cmd = Config.get('uploadCommand')
+    const cmd = uploadCommand
       .replace(/{TAGS}/g, tags)
       .replace(/{NODE}/g, Config.nodeName())
       .replace(/{TMPFILE}/g, req.file.path)
       .replace(/{INSECURE-ORIGINALNAME}/g, req.file.originalname)
-      .replace(/{CONFIG}/g, Config.getConfigFile());
+      .replace(/{CONFIG}/g, ArkimeConfig.configFile);
 
     console.log('upload command: ', cmd);
     exec(cmd, (error, stdout, stderr) => {
@@ -292,8 +350,8 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
    * @returns {Array} active - The active Arkime clusters.
    * @returns {Array} inactive - The inactive Arkime clusters.
    */
-  miscAPIs.getClusters = async (req, res) => {
-    const clusters = await getClusters();
+  static async getClusters (req, res) {
+    const clusters = await MiscAPIs.#getClusters();
     res.send(clusters);
   };
 
@@ -304,8 +362,8 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
    * @name /remoteclusters
    * @returns {Object} remoteclusters - Key/value pairs of remote Arkime clusters, the key being the name of the cluster
    */
-  miscAPIs.getRemoteClusters = (req, res) => {
-    const clusters = remoteClusters();
+  static getRemoteClusters (req, res) {
+    const clusters = MiscAPIs.#remoteClusters();
 
     if (!Object.keys(clusters).length) {
       res.status(404);
@@ -322,7 +380,7 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
    * Retrieves information that the app uses on every page:
    * eshealth, currentuser, views, remoteclusters, clusters, fields, fieldsmap, fieldshistory
    * @name /appinfo
-   * @returns {ESHealth} eshealth - The Elasticsearch cluster health status and information.
+   * @returns {ESHealth} eshealth - The OpenSearch/Elasticsearch cluster health status and information.
    * @returns {ArkimeUser} currentuser - The currently logged in user
    * @returns {ArkimeView[]} views - A list of views accessible to the logged in user
    * @returns {Object} remoteclusters - A list of known remote Arkime clusters
@@ -331,7 +389,7 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
    * @returns {Array} fieldsmap - Available database field objects pertaining to sessions
    * @returns {Object} fieldshistory - The user's field history for the search expression input
    */
-  miscAPIs.getAppInfo = async (req, res) => {
+  static async getAppInfo (req, res) {
     try {
       let esHealth, esHealthError;
       try { // deal with es health errors
@@ -341,17 +399,18 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
       }
 
       // these always returns something and never return an error
-      const clusters = await getClusters(); // { active: [], inactive: [] }
-      const remoteclusters = remoteClusters(); // {}
-      const fieldhistory = userAPIs.findUserState('fieldHistory', req.user); // {}
-      const getViews = util.promisify(userAPIs.getViews);
-      const views = await getViews(req); // {}
+      const clusters = await MiscAPIs.#getClusters(); // { active: [], inactive: [] }
+      const remoteclusters = MiscAPIs.#remoteClusters(); // {}
+      const fieldhistory = UserAPIs.findUserState('fieldHistory', req.user); // {}
+      const { data: views } = await View.getViews(req);
+      const roles = await User.getRoles();
 
       // can't fetch user or fields is FATAL, so let it fall through to outer
       // catch and send an error to the client
-      const user = userAPIs.getCurrentUser(req);
+      const user = await User.getCurrentUser(req);
       const fieldsArr = internals.fieldsArr;
       const fieldsMap = JSON.parse(internals.fieldsMap);
+      const userSettingDefaults = internals.settingDefaults;
 
       return res.send({
         esHealth,
@@ -362,7 +421,9 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
         clusters,
         user,
         fieldsArr,
-        fieldsMap
+        fieldsMap,
+        roles,
+        userSettingDefaults
       });
     } catch (err) {
       console.log('ERROR - /api/appinfo', err);
@@ -378,10 +439,10 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
    * @name /cyberchef/:nodeName/session/:id
    * @param {string} type=src - Whether to send the source (src) or destination (dst) packets.
    */
-  miscAPIs.cyberChef = (req, res) => {
-    sessionAPIs.processSessionIdAndDecode(req.params.id, 10000, (err, session, results) => {
+  static cyberChef (req, res) {
+    SessionAPIs.processSessionIdAndDecode(req.params.id, 10000, (err, session, results) => {
       if (err) {
-        console.log(`ERROR - ${req.method} /${req.params.nodeName}/session/${req.params.id}/cyberchef`, util.inspect(err, false, 50));
+        console.log(`ERROR - ${req.method} /%s/session/%s/cyberchef`, ArkimeUtil.sanitizeStr(req.params.nodeName), ArkimeUtil.sanitizeStr(req.params.id), util.inspect(err, false, 50));
         return res.end('Error - ' + err);
       }
 
@@ -390,17 +451,18 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
         data += results[i].data.toString('hex');
       }
 
-      res.send({ data: data });
+      res.send({ data });
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * @ignore
    *
    * Loads the CyberChef UI.
    * @name /cyberchef
    */
-  miscAPIs.getCyberChefUI = (req, res) => {
+  static getCyberChefUI (req, res) {
     let found = false;
     let path = req.path.substring(1);
 
@@ -436,6 +498,6 @@ module.exports = (Config, Db, internals, sessionAPIs, userAPIs, ViewerUtils) => 
       }
     });
   };
-
-  return miscAPIs;
 };
+
+module.exports = MiscAPIs;

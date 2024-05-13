@@ -1,7 +1,7 @@
 'use strict'
 
 const utils = require('./utils')
-const { git } = require('./git')
+const { git } = require('../../../common/git')
 const webpack = require('webpack')
 const config = require('../config')
 const { merge } = require('webpack-merge')
@@ -11,10 +11,6 @@ const CopyWebpackPlugin = require('copy-webpack-plugin')
 const HtmlWebpackPlugin = require('html-webpack-plugin')
 const VueLoaderPlugin = require('vue-loader/lib/plugin')
 const ESLintPlugin = require('eslint-webpack-plugin')
-const portfinder = require('portfinder')
-
-const HOST = process.env.HOST
-const PORT = process.env.PORT && Number(process.env.PORT)
 
 const devWebpackConfig = merge(baseWebpackConfig, {
   module: {

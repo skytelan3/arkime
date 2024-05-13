@@ -1,34 +1,7 @@
 'use strict';
 
 const filters = require('../src/filters');
-const { fields } = require('./consts');
-
-test('round', () => {
-  expect(filters.round('asdf')).toBe(0); // default
-  expect(filters.round(123456)).toBe(123456);
-  expect(filters.round(123456.123)).toBe(123456);
-  expect(filters.round(123456.789)).toBe(123457);
-  expect(filters.round(123456.789, 1)).toBe(123456.8);
-  expect(filters.round(123456.789, 2)).toBe(123456.79);
-});
-
-test('commaString', () => {
-  expect(filters.commaString('asdf')).toBe(0); // default
-  expect(filters.commaString(123456)).toBe('123,456');
-  expect(filters.commaString(123456789)).toBe('123,456,789');
-  expect(filters.commaString(1234567890)).toBe('1,234,567,890');
-});
-
-test('roundCommaString', () => {
-  expect(filters.roundCommaString('asdf')).toBe(0); // default
-  expect(filters.roundCommaString(123456.654321)).toBe('123,457');
-  expect(filters.roundCommaString(123456, 2)).toBe('123,456.00');
-  expect(filters.roundCommaString(123456.654321, 2)).toBe('123,456.65');
-  expect(filters.roundCommaString(123456.654321, 3)).toBe('123,456.654');
-  expect(filters.roundCommaString(123456789.98765, 4)).toBe('123,456,789.9877');
-  expect(filters.roundCommaString(123456789.9, 4)).toBe('123,456,789.9000');
-  expect(filters.roundCommaString(123456789.90, 4)).toBe('123,456,789.9000');
-});
+const { fields } = require('../../../common/vueapp/tests/consts');
 
 test('extractIPv6String', () => {
   expect(filters.extractIPv6String()).toBe(''); // default
@@ -36,7 +9,7 @@ test('extractIPv6String', () => {
   expect(filters.extractIPv6String('1111:2222:3333:4444:5555:7777::')).toBe('1111::222:2:33:33:4:444::5555::777:7::');
 });
 
-test('round', () => {
+test('protocol', () => {
   expect(filters.protocol(0)).toBe(0); // default
   expect(filters.protocol(1)).toBe('icmp');
   expect(filters.protocol(2)).toBe('igmp');
@@ -76,28 +49,6 @@ test('humanReadableBytes', () => {
   expect(filters.humanReadableBytes('1152921500000000')).toBe('1.0Pi');
 });
 
-test('humanReadableNumber', () => {
-  expect(filters.humanReadableNumber('a')).toBe('0 ');
-  expect(filters.humanReadableNumber(1)).toBe('1 ');
-  expect(filters.humanReadableNumber(1000)).toBe('1.0k');
-  expect(filters.humanReadableNumber(10000)).toBe('10k');
-  expect(filters.humanReadableNumber(1000000)).toBe('1.0M');
-  expect(filters.humanReadableNumber(20000000)).toBe('20M');
-  expect(filters.humanReadableNumber(1000000000)).toBe('1.0G');
-  expect(filters.humanReadableNumber(321000000000)).toBe('321G');
-  expect(filters.humanReadableNumber(4000000000000)).toBe('4.0T');
-  expect(filters.humanReadableNumber(80000000000000)).toBe('80T');
-  expect(filters.humanReadableNumber(9000000000000000)).toBe('9.0P');
-  expect(filters.humanReadableNumber(987600000000000000)).toBe('988P');
-});
-
-test('timezoneDateString', () => {
-  expect(filters.timezoneDateString('a')).toBe('Invalid date');
-  expect(filters.timezoneDateString(0, 'gmt')).toBe('1970/01/01 00:00:00 UTC');
-  expect(filters.timezoneDateString(1624024589000, 'gmt')).toBe('2021/06/18 13:56:29 UTC');
-  expect(filters.timezoneDateString(1234567898765, 'gmt', true)).toBe('2009/02/13 23:31:38.765 UTC');
-});
-
 test('readableTime', () => {
   expect(filters.readableTime('a')).toBe('?');
   expect(filters.readableTime(0)).toBe('0');
@@ -111,7 +62,7 @@ test('readableTime', () => {
   expect(filters.readableTime(450067000)).toBe('5 days 05:01:07');
 });
 
-test('readableTime', () => {
+test('readableTimeCompact', () => {
   expect(filters.readableTimeCompact('a')).toBe('?');
   expect(filters.readableTimeCompact(0)).toBe('0h');
   expect(filters.readableTimeCompact(100)).toBe('0h');
@@ -125,15 +76,15 @@ test('readableTime', () => {
 });
 
 test('searchFields', () => {
-  expect(filters.searchFields(null, fields).length).toBe(fields.length - 4);
-  expect(filters.searchFields('', fields).length).toBe(fields.length - 4);
+  expect(filters.searchFields(null, fields)).toHaveLength(fields.length - 4);
+  expect(filters.searchFields('', fields)).toHaveLength(fields.length - 4);
   expect(filters.searchFields('src bytes', fields)[0].exp).toBe('bytes.src');
   expect(filters.searchFields('ip.dst:port', fields)[0].exp).toBe('ip.dst');
   expect(filters.searchFields('Dst IP', fields)[0].exp).toBe('ip.dst');
   expect(filters.searchFields('host', fields)[0].exp).toBe('host.http.tokens');
-  expect(filters.searchFields('Hostname Tokens', fields, true).length).toBe(0);
-  expect(filters.searchFields('filename', fields, false, true).length).toBe(0);
-  expect(filters.searchFields('info', fields, false, false, true).length).toBe(0);
+  expect(filters.searchFields('Hostname Tokens', fields, true)).toHaveLength(0);
+  expect(filters.searchFields('filename', fields, false, true)).toHaveLength(0);
+  expect(filters.searchFields('info', fields, false, false, true)).toHaveLength(0);
 });
 
 test('buildExpression', () => {

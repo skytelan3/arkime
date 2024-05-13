@@ -1,13 +1,17 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
 
   <div class="container-fluid">
 
-    <moloch-loading v-if="initialLoading && !error">
-    </moloch-loading>
+    <arkime-loading v-if="initialLoading && !error">
+    </arkime-loading>
 
-    <moloch-error v-if="error"
+    <arkime-error v-if="error"
       :message="error">
-    </moloch-error>
+    </arkime-error>
 
     <div v-show="!error">
 
@@ -16,15 +20,15 @@
         title="HINT: These graphs are 1440 pixels wide. Expand your browser window to at least 1500 pixels wide for best viewing.">
       </span>
 
-      <moloch-paging v-if="stats"
+      <arkime-paging v-if="stats"
         class="mt-1 ml-2"
         :records-total="recordsTotal"
         :records-filtered="recordsFiltered"
         v-on:changePaging="changePaging"
         length-default=200>
-      </moloch-paging>
+      </arkime-paging>
 
-      <moloch-table
+      <arkime-table
         id="captureStatsTable"
         :data="stats"
         :loadData="loadData"
@@ -36,12 +40,13 @@
         :info-row-function="toggleStatDetailWrapper"
         :desc="query.desc"
         :sortField="query.sortField"
+        :no-results-msg="`No results match your search.${cluster ? 'Try selecting a different cluster.' : ''}`"
         page="captureStats"
         table-animation="list"
-        table-classes="table-sm text-right small"
         table-state-name="captureStatsCols"
-        table-widths-state-name="captureStatsColWidths">
-      </moloch-table>
+        table-widths-state-name="captureStatsColWidths"
+        table-classes="table-sm table-hover text-right small">
+      </arkime-table>
 
     </div>
 
@@ -51,10 +56,11 @@
 
 <script>
 import '../../cubismoverrides.css';
-import MolochPaging from '../utils/Pagination';
-import MolochError from '../utils/Error';
-import MolochLoading from '../utils/Loading';
-import MolochTable from '../utils/Table';
+import Utils from '../utils/utils';
+import ArkimeError from '../utils/Error';
+import ArkimeTable from '../utils/Table';
+import ArkimeLoading from '../utils/Loading';
+import ArkimePaging from '../utils/Pagination';
 
 let oldD3, cubism; // lazy load old d3 and cubism
 
@@ -70,13 +76,14 @@ export default {
     'graphHide',
     'dataInterval',
     'refreshData',
-    'searchTerm'
+    'searchTerm',
+    'cluster'
   ],
   components: {
-    MolochPaging,
-    MolochError,
-    MolochLoading,
-    MolochTable
+    ArkimePaging,
+    ArkimeError,
+    ArkimeLoading,
+    ArkimeTable
   },
   data: function () {
     return {
@@ -95,7 +102,8 @@ export default {
         filter: this.searchTerm || undefined,
         sortField: 'nodeName',
         desc: true,
-        hide: this.graphHide || 'none'
+        hide: this.graphHide || 'none',
+        cluster: this.cluster || undefined
       },
       columns: [ // node stats table columns
         // default columns
@@ -108,10 +116,11 @@ export default {
         { id: 'packetQueue', name: 'Packet Q', sort: 'packetQueue', width: 95, default: true, doStats: true, dataFunction: (item) => { return this.$options.filters.roundCommaString(item.packetQueue); } },
         { id: 'diskQueue', name: 'Disk Q', sort: 'diskQueue', width: 85, default: true, doStats: true, dataFunction: (item) => { return this.$options.filters.roundCommaString(item.diskQueue); } },
         { id: 'esQueue', name: 'ES Q', sort: 'esQueue', width: 75, default: true, doStats: true, dataFunction: (item) => { return this.$options.filters.roundCommaString(item.esQueue); } },
-        { id: 'deltaPackets', name: 'Packet/s', sort: 'deltaPackets', width: 100, default: true, doStats: true, dataFunction: (item) => { return this.$options.filters.roundCommaString(item.deltaPackets); } },
-        { id: 'deltaBytesPerSec', name: 'Bytes/s', sort: 'deltaBytes', width: 80, dataFunction: (item) => { return this.$options.filters.humanReadableBytes(item.deltaBytesPerSec); }, default: true, doStats: true },
-        { id: 'deltaSessions', name: 'Sessions/s', sort: 'deltaSessions', width: 100, default: true, doStats: true, dataFunction: (item) => { return this.$options.filters.roundCommaString(item.deltaSessions); } },
-        { id: 'deltaDropped', name: 'Packet Drops/s', sort: 'deltaDropped', width: 130, default: true, doStats: true, dataFunction: (item) => { return this.$options.filters.roundCommaString(item.deltaDropped); } },
+        // deltaPackets, deltaSessions, deltaDropped use an id that doesn't match sort to not break saved columns
+        { id: 'deltaPackets', name: 'Packet/s', sort: 'deltaPacketsPerSec', width: 100, default: true, doStats: true, dataFunction: (item) => { return this.$options.filters.roundCommaString(item.deltaPacketsPerSec); } },
+        { id: 'deltaBytesPerSec', name: 'Bytes/s', sort: 'deltaBytesPerSec', width: 80, dataFunction: (item) => { return this.$options.filters.humanReadableBytes(item.deltaBytesPerSec); }, default: true, doStats: true },
+        { id: 'deltaSessions', name: 'Sessions/s', sort: 'deltaSessionsPerSec', width: 100, default: true, doStats: true, dataFunction: (item) => { return this.$options.filters.roundCommaString(item.deltaSessionsPerSec); } },
+        { id: 'deltaDropped', name: 'Packet Drops/s', sort: 'deltaDroppedPerSec', width: 130, default: true, doStats: true, dataFunction: (item) => { return this.$options.filters.roundCommaString(item.deltaDroppedPerSec); } },
         // all the rest of the available stats
         { id: 'deltaBitsPerSec', name: 'Bits/Sec', sort: 'deltaBitsPerSec', width: 100, doStats: true, dataFunction: (item) => { return this.$options.filters.humanReadableBits(item.deltaBitsPerSec); } },
         { id: 'deltaWrittenBytesPerSec', name: 'Written Bytes/s', sort: 'deltaWrittenBytesPerSec', width: 100, doStats: true, dataFunction: (item) => { return this.$options.filters.humanReadableBytes(item.deltaWrittenBytesPerSec); } },
@@ -190,10 +199,14 @@ export default {
       if (this.refreshData) {
         this.loadData();
       }
+    },
+    cluster: function () {
+      this.query.cluster = this.cluster;
+      this.loadData();
     }
   },
   created: function () {
-    this.loadData();
+    // don't need to load data (table component does it)
     // set a recurring server req if necessary
     if (this.dataInterval !== '0') {
       this.setRequestInterval();
@@ -234,6 +247,10 @@ export default {
       }, 500);
     },
     loadData: function (sortField, desc) {
+      if (!Utils.checkClusterSelection(this.query.cluster, this.$store.state.esCluster.availableCluster.active, this).valid) {
+        return;
+      }
+
       this.loading = true;
       respondedAt = undefined;
 
@@ -278,7 +295,7 @@ export default {
     toggleStatDetail: function (stat) {
       if (!stat.opened) { return; }
       const self = this;
-      const id = stat.id.replace(/[.:]/g, '\\$&');
+      const id = stat.id.replace(/[\\.:]/g, '\\$&');
 
       const wrap = document.getElementById('moreInfo-' + id);
       while (wrap.firstChild) {

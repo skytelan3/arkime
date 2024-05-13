@@ -7,7 +7,7 @@ import BootstrapVue from 'bootstrap-vue';
 import { render, fireEvent, waitFor } from '@testing-library/vue';
 import Table from '../src/components/utils/Table.vue';
 import UserService from '../src/components/users/UserService';
-const { userWithSettings } = require('./consts');
+const { userWithSettings } = require('../../../common/vueapp/tests/consts');
 
 console.info = jest.fn(); // don't display console.info messages
 
@@ -91,9 +91,9 @@ test('table', async () => {
 
   getByRole('dropdown'); // displays info column dropdown btn
   // displays column headers (and buttons in dropdown)
-  expect(getAllByText('Test Column 2').length).toBe(2);
+  expect(getAllByText('Test Column 2')).toHaveLength(2);
   // doesn't display non-visible visibleHeaders (just displays toggle)
-  expect(getAllByText('Column 3').length).toBe(1);
+  expect(getAllByText('Column 3')).toHaveLength(1);
 
   getByText('test value 0'); // rows are displayed
   expect(queryByText('column 3 value')).toBeNull(); // but not non-visible col values

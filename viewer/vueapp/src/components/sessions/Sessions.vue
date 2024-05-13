@@ -1,12 +1,16 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
 
   <div class="sessions-page"
     :class="{'hide-tool-bars': !showToolBars}">
 
-    <MolochCollapsible>
+    <ArkimeCollapsible>
       <span class="fixed-header">
         <!-- search navbar -->
-        <moloch-search
+        <arkime-search
           :fields="headers"
           :open-sessions="stickySessions"
           :num-visible-sessions="query.length"
@@ -15,33 +19,32 @@
           @changeSearch="cancelAndLoad(true)"
           @setView="loadNewView"
           @setColumns="loadColumns">
-        </moloch-search> <!-- /search navbar -->
+        </arkime-search> <!-- /search navbar -->
 
         <!-- paging navbar -->
         <form class="sessions-paging">
           <div class="form-inline">
-            <moloch-paging
+            <arkime-paging
               class="mt-1 ml-1"
               :records-total="sessions.recordsTotal"
               :records-filtered="sessions.recordsFiltered"
               @changePaging="changePaging">
-            </moloch-paging>
+            </arkime-paging>
           </div>
         </form> <!-- /paging navbar -->
       </span>
-    </MolochCollapsible>
+    </ArkimeCollapsible>
 
     <!-- visualizations -->
-    <moloch-visualizations
-      :graph-data="graphData"
-      :map-data="mapData"
+    <arkime-visualizations
+      v-if="graphData"
       :primary="true"
-      :timelineDataFilters="timelineDataFilters"
+      :map-data="mapData"
+      :graph-data="graphData"
       @fetchMapData="cancelAndLoad(true)"
-      @fetchGraphData="fetchGraphData"
-      :show-hide-btn="true"
-      page="sessions">
-    </moloch-visualizations> <!-- /visualizations -->
+      :timelineDataFilters="timelineDataFilters">
+    </arkime-visualizations>
+    <!-- /visualizations -->
 
     <div class="sessions-content ml-2"
       id="sessions-content"
@@ -49,14 +52,14 @@
 
       <!-- sticky (opened) sessions -->
       <transition name="leave">
-        <moloch-sticky-sessions
+        <arkime-sticky-sessions
           class="sticky-sessions"
           v-if="stickySessions.length"
           :ms="user.settings.ms"
           :sessions="stickySessions"
           @closeSession="closeSession"
           @closeAllSessions="closeAllSessions">
-        </moloch-sticky-sessions>
+        </arkime-sticky-sessions>
       </transition> <!-- /sticky (opened) sessions -->
 
       <!-- sessions results -->
@@ -73,15 +76,15 @@
             <th class="ignore-element" style="width:85px;">
               <!-- table fit button -->
               <div class="fit-btn-container">
-                <button
-                  type="button"
-                  @click="openAll"
-                  v-if="!loading && sessions.data && sessions.data.length <= 50"
-                  class="btn btn-xs btn-theme-tertiary open-all-btn"
-                  v-b-tooltip.hover.right="'Open all visible sessions (up to 50)'">
-                  <span class="fa fa-plus-circle">
-                  </span>
-                </button>
+                <template v-if="sessions.data && sessions.data.length <= 50">
+                  <button
+                    type="button"
+                    @click="openAll"
+                    class="btn btn-xs btn-theme-tertiary open-all-btn"
+                    v-b-tooltip.hover.right="'Open all visible sessions (up to 50)'">
+                    <span class="fa fa-plus-circle" />
+                  </button>
+                </template>
                 <button
                   type="button"
                   @click="closeAll"
@@ -97,7 +100,7 @@
                   v-if="showFitButton && !loading"
                   class="btn btn-xs btn-theme-quaternary fit-btn"
                   v-b-tooltip.hover.right="'Fit the table to the current window size'"
-                  :class="{'ml-4':stickySessions.length === 0, 'fit-btn-right':sessions.data.length <= 50 && stickySessions.length > 0}">
+                  :class="{'ml-4':stickySessions.length === 0, 'fit-btn-right':sessions.data && sessions.data.length <= 50 && stickySessions.length > 0}">
                   <span class="fa fa-arrows-h">
                   </span>
                 </button>
@@ -113,7 +116,7 @@
                 @show="colVisMenuOpen = true"
                 @hide="colVisMenuOpen = false">
                 <template slot="button-content">
-                  <span class="fa fa-th"
+                  <span class="fa fa-bars"
                     v-b-tooltip.hover.right
                     title="Toggle visible columns">
                   </span>
@@ -167,7 +170,7 @@
                 class="col-config-menu col-dropdown"
                 variant="theme-secondary">
                 <template slot="button-content">
-                  <span class="fa fa-columns"
+                  <span class="fa fa-save"
                     v-b-tooltip.hover.right
                     title="Save or load custom column configuration">
                   </span>
@@ -245,7 +248,7 @@
             <template v-if="headers && headers.length">
               <th v-for="header of headers"
                 :key="header.dbField"
-                class="moloch-col-header"
+                class="arkime-col-header"
                 :style="{'width': header.width > 0 ? `${header.width}px` : '100px'}"
                 :class="{'active':isSorted(header.sortBy || header.dbField) >= 0, 'info-col-header': header.dbField === 'info'}">
                 <div class="grip"
@@ -256,19 +259,109 @@
                 <span v-if="header.dbField === 'info'"
                   class="cursor-pointer">
                   {{ header.friendlyName }}
+                  <!-- info field config button -->
+                  <b-dropdown
+                    size="sm"
+                    right
+                    no-flip
+                    no-caret
+                    variant="theme-secondary"
+                    class="col-vis-menu info-vis-menu pull-right col-dropdown">
+                    <template slot="button-content">
+                      <span class="fa fa-save"
+                        v-b-tooltip.hover
+                        title="Save or load custom info field configuration">
+                      </span>
+                    </template>
+                    <b-dropdown-header>
+                      <div class="input-group input-group-sm">
+                        <input type="text"
+                          maxlength="30"
+                          class="form-control"
+                          v-model="newInfoConfigName"
+                          placeholder="Enter new info field configuration name"
+                          @keydown.enter="saveInfoFieldLayout"
+                        />
+                        <div class="input-group-append">
+                          <button type="button"
+                            class="btn btn-theme-secondary"
+                            :disabled="!newInfoConfigName"
+                            @click="saveInfoFieldLayout">
+                            <span class="fa fa-save">
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    </b-dropdown-header>
+                    <b-dropdown-divider>
+                    </b-dropdown-divider>
+                    <b-dropdown-item
+                      key="infodefault"
+                      id="infodefault"
+                      @click.stop.prevent="resetInfoVisibility">
+                      Arkime Default
+                    </b-dropdown-item>
+                    <b-tooltip
+                      key="infodefaulttooltip"
+                      target="infodefault"
+                      placement="left"
+                      boundary="window">
+                      Reset info column to default fields
+                    </b-tooltip>
+                    <transition-group name="list">
+                      <b-dropdown-divider key="infodivider" v-if="infoConfigs.length">
+                      </b-dropdown-divider>
+                      <b-dropdown-item
+                        v-for="(config, key) in infoConfigs"
+                        :key="config.name"
+                        @click.self.stop.prevent="loadInfoFieldLayout(key)">
+                        <button class="btn btn-xs btn-danger pull-right ml-1"
+                          type="button"
+                          @click.stop.prevent="deleteInfoFieldLayout(config.name, key)">
+                          <span class="fa fa-trash-o">
+                          </span>
+                        </button>
+                        <button class="btn btn-xs btn-warning pull-right"
+                          type="button"
+                          v-b-tooltip.hover.top
+                          title="Update this info field configuration with the currently visible columns"
+                          @click.stop.prevent="updateInfoFieldLayout(config.name, key)">
+                          <span class="fa fa-save">
+                          </span>
+                        </button>
+                        {{ config.name }}
+                      </b-dropdown-item>
+                      <b-dropdown-item
+                        key="info-config-error"
+                        v-if="infoConfigError">
+                        <span class="text-danger">
+                          <span class="fa fa-exclamation-triangle" />
+                          {{ infoConfigError }}
+                        </span>
+                      </b-dropdown-item>
+                      <b-dropdown-item
+                        key="info-config-success"
+                        v-if="infoConfigSuccess">
+                        <span class="text-success">
+                          <span class="fa fa-check" />
+                          {{ infoConfigSuccess }}
+                        </span>
+                      </b-dropdown-item>
+                    </transition-group>
+                  </b-dropdown> <!-- /info field config button -->
                   <!-- info field visibility button -->
                   <b-dropdown
                     size="sm"
                     no-flip
                     no-caret
                     right
-                    class="col-vis-menu info-vis-menu pull-right col-dropdown"
+                    class="col-vis-menu info-vis-menu pull-right col-dropdown mr-1"
                     variant="theme-primary"
                     @show="infoFieldVisMenuOpen = true"
                     @hide="infoFieldVisMenuOpen = false">
                     <template slot="button-content">
-                      <span class="fa fa-th-list"
-                        v-b-tooltip.hover.left
+                      <span class="fa fa-bars"
+                        v-b-tooltip.hover
                         title="Toggle visible info column fields">
                       </span>
                     </template>
@@ -280,20 +373,6 @@
                         placeholder="Search for fields..."
                       />
                     </b-dropdown-header>
-                    <b-dropdown-divider>
-                    </b-dropdown-divider>
-                    <template>
-                      <b-dropdown-item
-                        id="infodefault"
-                        @click.stop.prevent="resetInfoVisibility">
-                        Arkime Default
-                      </b-dropdown-item>
-                      <b-tooltip target="infodefault"
-                        placement="left"
-                        boundary="window">
-                        Reset info column to default fields
-                      </b-tooltip>
-                    </template>
                     <b-dropdown-divider>
                     </b-dropdown-divider>
                     <template v-if="infoFieldVisMenuOpen">
@@ -312,7 +391,7 @@
                             :id="key + k + 'infoitem'"
                             :key="key + k + 'infoitem'"
                             :class="{'active':isInfoVisible(field.dbField) >= 0}"
-                            @click.stop.prevent="toggleInfoVis(field.dbField)">
+                            @click.native.capture.stop.prevent="toggleInfoVis(field.dbField)">
                             {{ field.friendlyName }}
                             <small>({{ field.exp }})</small>
                           </b-dropdown-item>
@@ -372,6 +451,11 @@
                       @click="pivot(header.dbField, header.exp)">
                       Pivot on {{ header.friendlyName }}
                     </b-dropdown-item>
+                    <!-- field actions -->
+                    <field-actions
+                      :separator="true"
+                      :expr="header.exp"
+                    />
                   </template> <!-- /single field column -->
                   <!-- multiple field column -->
                   <template v-else-if="header.children && header.type !== 'seconds'">
@@ -410,6 +494,11 @@
                           @click="pivot(child.dbField, child.exp)">
                           Pivot on {{ child.friendlyName }}
                         </b-dropdown-item>
+                        <!-- field actions -->
+                        <field-actions
+                          :expr="child.exp"
+                          :separator="false"
+                        />
                       </template>
                     </span>
                   </template> <!-- /multiple field column -->
@@ -457,14 +546,14 @@
                 <span v-if="session.ipProtocol === 0">
                   notip
                 </span>
-                <moloch-session-field v-else
+                <arkime-session-field v-else
                   :field="{dbField:'ipProtocol', exp:'ip.protocol', type:'lotermfield', group:'general', transform:'ipProtocolLookup'}"
                   :session="session"
                   :expr="'ip.protocol'"
                   :value="session.ipProtocol"
                   :pull-left="true"
                   :parse="true">
-                </moloch-session-field>
+                </arkime-session-field>
                 &nbsp;
               </td> <!-- /toggle button and ip protocol -->
               <!-- field values -->
@@ -475,25 +564,25 @@
                 <span v-if="Array.isArray(session[col.dbField])">
                   <span v-for="value in session[col.dbField]"
                     :key="value + col.dbField">
-                    <moloch-session-field
+                    <arkime-session-field
                       :field="col"
                       :session="session"
                       :expr="col.exp"
                       :value="value"
                       :parse="true">
-                    </moloch-session-field>
+                    </arkime-session-field>
                   </span>
                 </span> <!-- /field value is an array -->
                 <!-- field value a single value -->
                 <span v-else>
-                  <moloch-session-field
+                  <arkime-session-field
                     :field="col"
                     :session="session"
                     :expr="col.exp"
                     :value="session[col.dbField]"
                     :parse="true"
                     :info-fields="infoFields">
-                  </moloch-session-field>
+                  </arkime-session-field>
                 </span> <!-- /field value a single value -->
               </td> <!-- /field values -->
             </tr>
@@ -503,12 +592,13 @@
               class="session-detail-row">
               <td :colspan="headers.length + 1"
                 :style="tableWidthStyle">
-                <moloch-session-detail
+                <arkime-session-detail
                   :session="session"
                   :session-index="index"
                   @toggleColVis="toggleColVis"
-                  @toggleInfoVis="toggleInfoVis">
-                </moloch-session-detail>
+                  @toggleInfoVis="toggleInfoVis"
+                  :session-detail-dl-width="dlWidth">
+                </arkime-session-detail>
               </td>
             </tr> <!-- /session detail -->
           </template> <!-- /session + detail -->
@@ -516,26 +606,26 @@
       </table> <!-- /sessions results -->
 
       <!-- loading overlay -->
-      <moloch-loading
+      <arkime-loading
         :can-cancel="true"
         v-if="loading && !error"
         @cancel="cancelAndLoad(false)">
-      </moloch-loading> <!-- /loading overlay -->
+      </arkime-loading> <!-- /loading overlay -->
 
       <!-- page error -->
-      <moloch-error
+      <arkime-error
         v-if="error"
         :message="error"
         class="mt-5 mb-5">
-      </moloch-error> <!-- /page error -->
+      </arkime-error> <!-- /page error -->
 
       <!-- no results -->
-      <moloch-no-results
+      <arkime-no-results
         v-if="!error && !loading && !(sessions.data && sessions.data.length)"
         class="mt-5 mb-5"
         :records-total="sessions.recordsTotal"
         :view="query.view">
-      </moloch-no-results> <!-- /no results -->
+      </arkime-no-results> <!-- /no results -->
 
     </div>
 
@@ -553,17 +643,18 @@ import UserService from '../users/UserService';
 import ConfigService from '../utils/ConfigService';
 import Utils from '../utils/utils';
 // import components
-import MolochSearch from '../search/Search';
+import ArkimeSearch from '../search/Search';
 import customCols from './customCols.json';
-import MolochPaging from '../utils/Pagination';
-import ToggleBtn from '../utils/ToggleBtn';
-import MolochError from '../utils/Error';
-import MolochLoading from '../utils/Loading';
-import MolochNoResults from '../utils/NoResults';
-import MolochSessionDetail from './SessionDetail';
-import MolochCollapsible from '../utils/CollapsibleWrapper';
-import MolochVisualizations from '../visualizations/Visualizations';
-import MolochStickySessions from './StickySessions';
+import ArkimePaging from '../utils/Pagination';
+import ToggleBtn from '../../../../../common/vueapp/ToggleBtn';
+import ArkimeError from '../utils/Error';
+import ArkimeLoading from '../utils/Loading';
+import ArkimeNoResults from '../utils/NoResults';
+import ArkimeSessionDetail from './SessionDetail';
+import ArkimeCollapsible from '../utils/CollapsibleWrapper';
+import ArkimeVisualizations from '../visualizations/Visualizations';
+import ArkimeStickySessions from './StickySessions';
+import FieldActions from './FieldActions';
 // import external
 import Sortable from 'sortablejs';
 
@@ -692,16 +783,17 @@ let pendingPromise;
 export default {
   name: 'Sessions',
   components: {
-    MolochSearch,
-    MolochPaging,
+    ArkimeSearch,
+    ArkimePaging,
     ToggleBtn,
-    MolochError,
-    MolochLoading,
-    MolochNoResults,
-    MolochSessionDetail,
-    MolochVisualizations,
-    MolochStickySessions,
-    MolochCollapsible
+    ArkimeError,
+    ArkimeLoading,
+    ArkimeNoResults,
+    ArkimeSessionDetail,
+    ArkimeVisualizations,
+    ArkimeStickySessions,
+    ArkimeCollapsible,
+    FieldActions
   },
   data: function () {
     return {
@@ -725,16 +817,20 @@ export default {
       stickyHeader: false,
       tableHeaderOverflow: undefined,
       showFitButton: false,
-      multiviewer: this.$constants.MOLOCH_MULTIVIEWER,
       tableWidth: window.innerWidth - 20, // account for margins
       filteredFields: [],
       filteredFieldsCount: 0,
       filteredInfoFields: [],
-      filteredInfoFieldsCount: 0
+      filteredInfoFieldsCount: 0,
+      infoConfigs: [],
+      newInfoConfigName: '',
+      infoConfigError: '',
+      infoConfigSuccess: ''
     };
   },
   created: function () {
     this.getSessionsConfig(); // IMPORTANT: kicks off the initial search query!
+    ConfigService.getFieldActions();
 
     // watch for window resizing and update the info column width
     // this is only registered when the user has not set widths for any
@@ -749,6 +845,10 @@ export default {
     window.addEventListener('resize', windowResizeEvent, { passive: true });
     this.$root.$on('bv::dropdown::show', this.dropdownShowListener);
     this.$root.$on('bv::dropdown::hide', this.dropdownHideListener);
+
+    UserService.getState('sessionDetailDLWidth').then((response) => {
+      this.$store.commit('setSessionDetailDLWidth', response.data.width ?? 160);
+    });
   },
   computed: {
     query: function () {
@@ -796,12 +896,26 @@ export default {
     },
     fields: function () {
       return this.$store.state.fieldsMap;
+    },
+    hideViz: function () {
+      return this.$store.state.hideViz;
+    },
+    dlWidth: {
+      get: function () {
+        return this.$store.state.sessionDetailDLWidth || 160;
+      },
+      set: function (newValue) {
+        this.$store.commit('setSessionDetailDLWidth', newValue);
+      }
     }
   },
   watch: {
     '$store.state.stickyViz': function () {
       this.stickyHeader = this.$store.state.stickyViz;
       this.toggleStickyHeader();
+    },
+    '$store.state.fetchGraphData': function (value) {
+      if (value) { this.fetchGraphData(); }
     }
   },
   methods: {
@@ -1146,7 +1260,7 @@ export default {
         order: this.tableState.order.slice()
       };
 
-      UserService.createColumnConfig(data).then((response) => {
+      UserService.createLayout('sessionstable', data).then((response) => {
         data.name = response.name; // update column config name
 
         this.colConfigs.push(data);
@@ -1193,7 +1307,7 @@ export default {
      * @param {int} index       The index in the array of the column config to remove
      */
     deleteColumnConfiguration: function (colName, index) {
-      UserService.deleteColumnConfig(colName).then((response) => {
+      UserService.deleteLayout('sessionstable', colName).then((response) => {
         this.colConfigs.splice(index, 1);
         this.colConfigError = false;
       }).catch((error) => {
@@ -1212,7 +1326,7 @@ export default {
         order: JSON.parse(JSON.stringify(this.tableState.order))
       };
 
-      UserService.updateColumnConfig(data).then((response) => {
+      UserService.updateLayout('sessionstable', data).then((response) => {
         this.colConfigs[index] = data;
         this.colConfigError = false;
         this.colConfigSuccess = response.text;
@@ -1287,7 +1401,6 @@ export default {
         const field = FieldService.getField(id);
         if (field) { this.infoFields.push(field); }
       }
-
       this.saveInfoFields();
 
       if (reloadData) { // need data from the server
@@ -1295,6 +1408,72 @@ export default {
       } else { // have all the data, just need to reload the table
         this.reloadTable();
       }
+    },
+    /* Saves a custom info field column configuration */
+    saveInfoFieldLayout () {
+      if (!this.newInfoConfigName) {
+        this.infoConfigError = 'You must name your new info field configuration';
+        return;
+      }
+
+      const data = {
+        name: this.newInfoConfigName,
+        fields: this.infoFields.map((field) => field.dbField)
+      };
+
+      UserService.createLayout('sessionsinfofields', data).then((response) => {
+        data.name = response.name; // update info config name because server sanitizes it
+        this.infoConfigs.push(data);
+        this.newInfoConfigName = null;
+        this.infoConfigError = false;
+      }).catch((error) => {
+        this.infoConfigError = error.text;
+      });
+    },
+    /**
+     * Loads a previously saved custom info field column configuration and updates the table
+     * @param {int} index The index in the array of the info field config to load
+     */
+    loadInfoFieldLayout (index) {
+      const fieldObjects = [];
+      for (const field of this.infoConfigs[index].fields) {
+        fieldObjects.push(FieldService.getField(field));
+      }
+      this.infoFields = fieldObjects;
+      this.saveInfoFields();
+    },
+    /**
+     * Deletes a previously saved custom info field column layout
+     * @param {string} layoutName  The name of the layout to remove
+     * @param {int} index          The index in the array of layouts to remove
+     */
+    deleteInfoFieldLayout (layoutName, index) {
+      UserService.deleteLayout('sessionsinfofields', layoutName).then((response) => {
+        this.infoConfigs.splice(index, 1);
+        this.infoConfigError = false;
+      }).catch((error) => {
+        this.infoConfigError = error.text;
+      });
+    },
+    /**
+      * Updates a previously saved custom info field layout
+      * @param {string} layoutName  The name of the layout to update
+      * @param {int} index          The index in the array of layouts to update
+      */
+    updateInfoFieldLayout (layoutName, index) {
+      const data = {
+        name: layoutName,
+        fields: this.infoFields.slice()
+      };
+
+      UserService.updateLayout('sessionsinfofields', data).then((response) => {
+        this.infoConfigs[index] = data;
+        this.infoConfigError = false;
+        this.infoConfigSuccess = response.text;
+        setTimeout(() => { this.infoConfigSuccess = ''; }, 5000);
+      }).catch((error) => {
+        this.infoConfigError = error.text;
+      });
     },
     /* Resets the visible fields in the info column to the default */
     resetInfoVisibility: function () {
@@ -1310,13 +1489,13 @@ export default {
       this.cancelAndLoad(true, true);
     },
     /* Saves the info fields on the user settings */
-    saveInfoFields: function () {
+    saveInfoFields () {
       const infoDBFields = [];
       for (const field of this.infoFields) {
         infoDBFields.push(field.dbField);
       }
       this.user.settings.infoFields = infoDBFields;
-      customCols.info.children = infoDBFields;
+      customCols.info.children = this.infoFields;
       UserService.saveSettings(this.user.settings);
     },
     /* Fits the table to the width of the current window size */
@@ -1379,7 +1558,7 @@ export default {
         path: '/sessions',
         query: {
           ...this.$route.query,
-          expression: expression
+          expression
         }
       });
 
@@ -1416,7 +1595,7 @@ export default {
         filteredGroupedFields[group] = filteredFields;
       }
 
-      return { count: count, fields: filteredGroupedFields };
+      return { count, fields: filteredGroupedFields };
     },
 
     /* helper functions ---------------------------------------------------- */
@@ -1432,6 +1611,7 @@ export default {
         this.colWidths = response.colWidths;
         this.colConfigs = response.colConfigs;
         this.tableState = response.tableState;
+        this.infoConfigs = response.infoConfigs;
 
         this.$store.commit('setSessionsTableState', this.tableState);
         if (Object.keys(this.tableState).length === 0 ||
@@ -1487,20 +1667,15 @@ export default {
      * @param {bool} updateTable Whether the table needs updating
      */
     loadData: function (updateTable) {
+      if (!Utils.checkClusterSelection(this.query.cluster, this.$store.state.esCluster.availableCluster.active, this).valid) {
+        this.sessions.data = undefined;
+        this.dataLoading = false;
+        pendingPromise = null;
+        return;
+      }
+
       this.loading = true;
       this.error = '';
-
-      if (this.multiviewer) {
-        const availableCluster = this.$store.state.esCluster.availableCluster.active;
-        const selection = Utils.checkClusterSelection(this.query.cluster, availableCluster);
-        if (!selection.valid) { // invlaid selection
-          pendingPromise = null;
-          this.sessions.data = undefined;
-          this.error = selection.error;
-          this.dataLoading = false;
-          return;
-        }
-      }
 
       // save expanded sessions
       const expandedSessions = [];
@@ -1511,12 +1686,10 @@ export default {
       this.sorts = this.tableState.order || JSON.parse(JSON.stringify(Utils.getDefaultTableState().order));
 
       if (this.viewChanged && this.views) {
-        for (const view in this.views) {
-          if (view === this.query.view && this.views[view].sessionsColConfig) {
-            this.tableState = JSON.parse(JSON.stringify(this.views[view].sessionsColConfig));
-            this.sorts = this.tableState.order;
-            this.saveTableState();
-          }
+        const view = this.views.find(v => v.id === this.query.view);
+        if (view && view.sessionsColConfig) {
+          this.tableState = JSON.parse(JSON.stringify(view.sessionsColConfig));
+          this.saveTableState();
         }
 
         this.mapHeadersToFields();
@@ -1739,7 +1912,7 @@ export default {
     initializeColResizable () {
       colResizeInitialized = true;
 
-      cols = document.getElementsByClassName('moloch-col-header');
+      cols = document.getElementsByClassName('arkime-col-header');
       table = this.$refs.sessionsTable;
 
       for (const col of cols) { // listen for grip dragging
@@ -1902,20 +2075,20 @@ export default {
 }
 
 /* needed for grips */
-.moloch-col-header {
+.arkime-col-header {
   position: relative;
 }
 
 /* small dropdown buttons in column headers */
-.moloch-col-header .btn-group button.btn {
+.arkime-col-header .btn-group button.btn {
   padding: 0 6px;
 }
-.moloch-col-header .dropdown-menu {
+.arkime-col-header .dropdown-menu {
   max-height: 250px;
   overflow: auto;
 }
 
-.moloch-col-header .btn-group:not(.info-vis-menu) {
+.arkime-col-header .btn-group:not(.info-vis-menu) {
   visibility: hidden;
   margin-left: -25px;
 }
@@ -1927,6 +2100,10 @@ export default {
 </style>
 
 <style scoped>
+.sessions-page {
+  overflow: hidden;
+}
+
 form.sessions-paging {
   height: 40px;
 }
@@ -1941,6 +2118,7 @@ form.sessions-paging {
 /* sessions table styles --------------------- */
 table.sessions-table {
   margin-bottom: 20px;
+  table-layout: fixed;
 }
 
 /* borders for header */
@@ -2014,26 +2192,31 @@ table.sessions-table.sticky-header > tbody > tr {
   display: table;
   table-layout: fixed;
 }
+/* need this when reloading the page with sticky headers */
+table.sessions-table.sticky-header > tbody {
+  display: block;
+  margin-top: 53px;
+}
 
 /* table column headers -------------------- */
-.moloch-col-header {
+.arkime-col-header {
   font-size: .9rem;
 }
 
-.moloch-col-header.active {
+.arkime-col-header.active {
   color: var(--color-foreground-accent);
 }
 
-.moloch-col-header:hover .btn-group {
+.arkime-col-header:hover .btn-group {
   visibility: visible;
 }
 
-.moloch-col-header .header-text {
+.arkime-col-header .header-text {
   display: inline-block;
   width: calc(100% - 24px);
 }
 
-.moloch-col-header .header-sort {
+.arkime-col-header .header-sort {
   display: inline-block;
   width: 8px;
   vertical-align: top;
@@ -2045,7 +2228,7 @@ table.sessions-table.sticky-header > tbody > tr {
 .info-vis-menu {
   margin-right: 10px;
 }
-.moloch-col-header:not(:last-child) .info-vis-menu {
+.arkime-col-header:not(:last-child) .info-vis-menu {
   margin-right: 5px;
 }
 

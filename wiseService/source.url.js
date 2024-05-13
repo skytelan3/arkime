@@ -3,22 +3,12 @@
  *
  * Copyright 2012-2016 AOL Inc. All rights reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this Software except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
  */
 'use strict';
 
 const SimpleSource = require('./simpleSource.js');
-const request = require('request');
+const axios = require('axios');
 
 class URLSource extends SimpleSource {
 // ----------------------------------------------------------------------------
@@ -29,6 +19,8 @@ class URLSource extends SimpleSource {
     if (this.urlScrapeRedirect) {
       this.urlScrapeRedirect = new RegExp(this.urlScrapeRedirect);
     }
+    this.urlScrapePrefix = api.getConfig(section, 'urlScrapePrefix', '');
+    this.urlScrapeSuffix = api.getConfig(section, 'urlScrapeSuffix', '');
     this.headers = {};
     const headers = api.getConfig(section, 'headers');
 
@@ -53,28 +45,31 @@ class URLSource extends SimpleSource {
       return;
     }
 
-    request(this.url, { headers: this.headers }, (err, response, body) => {
-      if (err || response.statusCode !== 200) {
-        return cb(err);
-      }
-
-      if (this.urlScrapeRedirect) {
-        const match = body.match(this.urlScrapeRedirect);
-        if (!match) {
-          return cb('URL Scrape not found');
+    axios.get(this.url, { headers: this.headers, transformResponse: x => x })
+      .then((response) => {
+        console.log(this.url, response.status);
+        if (response.status !== 200) {
+          return cb(response.status);
         }
-
-        request(match[0], { headers: this.headers }, (err, subResponse, subBody) => {
-          if (err || subResponse.statusCode !== 200) {
-            return cb(err);
+        if (this.urlScrapeRedirect) {
+          const match = response.data.match(this.urlScrapeRedirect);
+          if (!match) {
+            return cb('URL Scrape not found');
           }
 
-          return cb(null, subBody);
-        });
-      } else {
-        return cb(null, body);
-      }
-    });
+          const url = `${this.urlScrapePrefix}${match[0]}${this.urlScrapeSuffix}`;
+          axios.get(url, { headers: this.headers, transformResponse: x => x })
+            .then((subResponse) => {
+              return cb(null, subResponse.data);
+            }).catch((subError) => {
+              return cb(subError);
+            });
+        } else {
+          return cb(null, response.data);
+        }
+      }).catch((error) => {
+        return cb(error);
+      });
   }
 }
 
@@ -90,12 +85,14 @@ exports.initSource = function (api) {
     fields: [
       { name: 'type', required: true, help: 'The wise query type this source supports' },
       { name: 'tags', required: false, help: 'Comma separated list of tags to set for matches', regex: '^[-a-z0-9,]+' },
-      { name: 'format', required: false, help: 'The format data is in: csv (default), tagger, or json', regex: '^(csv|tagger|json)$' },
+      { name: 'format', required: false, help: 'The format data is in: csv (default), tagger, jsonl, jsonl, or json', regex: '^(csv|tagger|jsonl|json)$' },
       { name: 'column', required: false, help: 'The numerical column number to use as the key', regex: '^[0-9]*$', ifField: 'format', ifValue: 'csv' },
-      { name: 'arrayPath', required: false, help: "The path of where to find the array, if the json result isn't an array", ifField: 'format', ifValue: 'json' },
-      { name: 'keyPath', required: true, help: 'The path of what field to use as the key', ifField: 'format', ifValue: 'json' },
+      { name: 'arrayPath', required: false, help: "The path of where to find the array, if the json result isn't an array", ifField: 'format', ifValue: ['jsonl', 'json'] },
+      { name: 'keyPath', required: true, help: 'The path of what field to use as the key', ifField: 'format', ifValue: ['jsonl', 'json'] },
       { name: 'url', required: true, help: 'The URL to load' },
-      { name: 'urlScrapeRedirect', required: false, help: 'If set this is a redirect to match against the results of URL to find the url with the real data' },
+      { name: 'urlScrapeRedirect', required: false, help: 'If set this is a regex to match against the results of URL to find the url with the real data' },
+      { name: 'urlScrapePrefix', required: false, help: 'If set, prefix the results of urlScrapeRedirect with this value' },
+      { name: 'urlScrapeSuffix', required: false, help: 'If set, add this value as the suffix to the  results of urlScrapeRedirect' },
       { name: 'reload', required: false, help: 'How often in minutes to refresh the file, or -1 (default) to never refresh it' },
       { name: 'headers', required: false, multiline: ';', help: 'List of headers to send in the URL request' }
     ]

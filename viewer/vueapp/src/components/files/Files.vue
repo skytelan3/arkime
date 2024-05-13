@@ -1,10 +1,17 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
 
   <div>
-    <MolochCollapsible>
+    <ArkimeCollapsible>
       <span class="fixed-header">
         <div class="files-search">
           <div class="p-1">
+            <Clusters
+              class="pull-right flex-grow-1"
+            />
             <div class="input-group input-group-sm pull-right" style="max-width:50%;">
               <div class="input-group-prepend">
                 <span class="input-group-text input-group-text-fw">
@@ -20,9 +27,10 @@
               <input type="text"
                 class="form-control"
                 v-model="query.filter"
-                v-focus-input="focusInput"
+                v-focus="focusInput"
                 @blur="onOffFocus"
                 @input="searchForFiles"
+                @keydown.enter="searchForFiles"
                 placeholder="Begin typing to search for files by name"
               />
               <span class="input-group-append">
@@ -35,29 +43,29 @@
                 </button>
               </span>
             </div>
-            <moloch-paging v-if="files"
+            <arkime-paging v-if="files"
               :records-total="recordsTotal"
               :records-filtered="recordsFiltered"
               v-on:changePaging="changePaging"
               length-default=500 >
-            </moloch-paging>
+            </arkime-paging>
           </div>
         </div>
       </span>
-    </MolochCollapsible>
+    </ArkimeCollapsible>
 
     <div class="files-content container-fluid">
 
-      <moloch-loading v-if="loading && !error">
-      </moloch-loading>
+      <arkime-loading v-if="loading && !error">
+      </arkime-loading>
 
-      <moloch-error v-if="error"
+      <arkime-error v-if="error"
         :message="error">
-      </moloch-error>
+      </arkime-error>
 
       <div v-if="!error"
         class="ml-2 mr-2">
-        <moloch-table
+        <arkime-table
           id="fieldTable"
           :data="files"
           :load-data="loadData"
@@ -66,12 +74,13 @@
           :desc="query.desc"
           :sort-field="query.sortField"
           :action-column="true"
+          :no-results-msg="`No results match your search.${query.cluster ? 'Try selecting a different cluster.' : ''}`"
           page="files"
           table-animation="list"
           table-classes="table-sm"
           table-state-name="fieldsCols"
           table-widths-state-name="filesColWidths">
-        </moloch-table>
+        </arkime-table>
       </div>
 
     </div>
@@ -81,26 +90,29 @@
 </template>
 
 <script>
-import MolochPaging from '../utils/Pagination';
-import MolochError from '../utils/Error';
-import MolochLoading from '../utils/Loading';
-import MolochTable from '../utils/Table';
-import MolochCollapsible from '../utils/CollapsibleWrapper';
-import FocusInput from '../utils/FocusInput';
+import Utils from '../utils/utils';
 import FileService from './FileService';
+import ArkimeError from '../utils/Error';
+import ArkimeTable from '../utils/Table';
+import Clusters from '../utils/Clusters';
+import ArkimeLoading from '../utils/Loading';
+import ArkimePaging from '../utils/Pagination';
+import ArkimeCollapsible from '../utils/CollapsibleWrapper';
+import Focus from '../../../../../common/vueapp/Focus';
 
 let searchInputTimeout; // timeout to debounce the search input
 
 export default {
   name: 'Files',
   components: {
-    MolochPaging,
-    MolochError,
-    MolochLoading,
-    MolochTable,
-    MolochCollapsible
+    ArkimePaging,
+    ArkimeError,
+    ArkimeLoading,
+    ArkimeTable,
+    ArkimeCollapsible,
+    Clusters
   },
-  directives: { FocusInput },
+  directives: { Focus },
   data: function () {
     return {
       error: '',
@@ -113,7 +125,8 @@ export default {
         start: 0,
         filter: null,
         sortField: 'num',
-        desc: false
+        desc: false,
+        cluster: this.$route.query.cluster || undefined
       },
       columns: [ // node stats table columns
         { id: 'num', name: 'File #', classes: 'text-right', sort: 'num', help: 'Internal file number, unique per node', width: 140, default: true },
@@ -127,7 +140,8 @@ export default {
         { id: 'packets', sort: 'packets', name: 'Packets', classes: 'text-right', help: 'Number of packets in file', width: 130 },
         { id: 'packetsSize', sort: 'packetsSize', name: 'Packets Bytes', classes: 'text-right', help: 'Size of packets before compression', width: 150, dataFunction: (item) => { return this.$options.filters.commaString(item.packetsSize); } },
         { id: 'uncompressedBits', sort: 'uncompressedBits', name: 'UC Bits', classes: 'text-right', help: 'Number of bits used to store uncompressed position', width: 100 },
-        { id: 'compression', name: 'Compression', classes: 'text-right', help: '1 - compressed/uncompressed in bytes', width: 100, dataFunction: (item) => { return item.compression + '%'; } }
+        { id: 'cratio', name: 'C Ratio', classes: 'text-right', help: '1 - compressed/uncompressed in bytes', width: 100, dataFunction: (item) => { return item.cratio + '%'; } },
+        { id: 'compression', name: 'Compression', help: 'Compression Algorithm', width: 100 }
       ]
     };
   },
@@ -145,6 +159,16 @@ export default {
     },
     shiftKeyHold: function () {
       return this.$store.state.shiftKeyHold;
+    }
+  },
+  watch: {
+    '$route.query.cluster': {
+      handler: function (newVal, oldVal) {
+        if (newVal !== oldVal) {
+          this.query.cluster = newVal;
+          this.loadData();
+        }
+      }
     }
   },
   methods: {
@@ -172,6 +196,10 @@ export default {
     },
     /* helper functions ---------------------------------------------------- */
     loadData: function (sortField, desc) {
+      if (!Utils.checkClusterSelection(this.query.cluster, this.$store.state.esCluster.availableCluster.active, this).valid) {
+        return;
+      }
+
       this.loading = true;
 
       if (desc !== undefined) { this.query.desc = desc; }

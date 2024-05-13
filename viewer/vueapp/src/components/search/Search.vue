@@ -1,6 +1,64 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
 
   <form class="position-relative">
+
+    <!-- viz options button -->
+    <div class="viz-options-btn-container"
+      v-if="!actionForm && (basePath === 'spigraph' || basePath === 'sessions' || basePath === 'spiview')">
+      <b-dropdown
+        split
+        right
+        size="sm"
+        variant="primary"
+        class="viz-options-btn"
+        @click="overrideDisabledAggregations(1)">
+        <template #button-content>
+          <span class="fa fa-gear fa-fw" />
+          <span v-if="!hideViz && disabledAggregations">
+            Fetch Viz Data
+          </span>
+        </template>
+        <template v-if="!hideViz && disabledAggregations">
+          <b-dropdown-item
+            @click="overrideDisabledAggregations(1)"
+            v-b-tooltip.hover.left="'might take a while'">
+            Fetch visualizations for this query
+          </b-dropdown-item>
+          <b-dropdown-item
+            @click="overrideDisabledAggregations(0)"
+            v-b-tooltip.hover.left="'slows down future searches until you close this tab'">
+            Fetch visualizations for this browser session
+          </b-dropdown-item>
+          <b-dropdown-item
+            @click="overrideDisabledAggregations(-1)"
+            v-b-tooltip.hover.left="'slows down future searches until you turn it off'">
+            Always fetch visualizations for this browser
+          </b-dropdown-item>
+        </template>
+        <template v-if="forcedAggregations">
+          <b-dropdown-item
+            @click="overrideDisabledAggregations(undefined)">
+            Disable forced visualizations
+          </b-dropdown-item>
+        </template>
+        <b-dropdown-divider v-if="!hideViz && disabledAggregations" />
+        <b-dropdown-item
+          @click="toggleStickyViz">
+          {{ !stickyViz ? 'Pin' : 'Unpin' }}{{ basePath && basePath === 'spigraph' ? ' top' : '' }} {{ basePath && basePath === 'sessions' ? 'graph, map, and column headers' : 'graph and map' }}
+        </b-dropdown-item>
+        <b-dropdown-item
+          @click="toggleHideViz"
+          v-if="basePath !== 'spigraph'"
+          v-b-tooltip.hover.left="!hideViz ? 'Speeds up large queries!' : 'Show graph & map'">
+          {{ !hideViz ? 'Hide' : 'Show' }} graph and map
+        </b-dropdown-item>
+      </b-dropdown>
+    </div> <!-- /viz options button -->
+
     <div class="pr-1 pl-1 pt-1 pb-1">
 
       <!-- actions dropdown menu -->
@@ -39,7 +97,7 @@
           <span class="fa fa-fw fa-trash-o"></span>&nbsp;
           Remove Data
         </b-dropdown-item>
-        <b-dropdown-item v-for="(cluster, key) in molochClusters"
+        <b-dropdown-item v-for="(cluster, key) in arkimeClusters"
           :key="key"
           @click="sendSession(key)"
           :title="`Send to ${cluster.name}`">
@@ -73,11 +131,11 @@
         toggle-class="rounded"
         variant="theme-secondary">
         <template slot="button-content">
-          <div v-if="view && views && views[view]"
+          <div v-if="view && views && getView(view)"
             v-b-tooltip.hover.left
-            :title="views[view].expression">
+            :title="getView(view).expression || ''">
             <span class="fa fa-eye"></span>
-            <span v-if="view">{{ view }}</span>
+            <span v-if="view">{{ getView(view).name || view }}</span>
             <span class="sr-only">Views</span>
           </div>
           <div v-else>
@@ -95,32 +153,36 @@
           :class="{'active':!view}">
           None
         </b-dropdown-item>
-        <b-dropdown-item v-for="(value, key) in views"
-          :key="key"
-          :class="{'active':view === key}"
-          @click.self="setView(key)"
+        <b-dropdown-item v-for="(value, index) in views"
+          :key="value.id"
+          :class="{'active':view === value.id}"
+          @click.self="setView(value.id)"
           v-b-tooltip.hover.left
           :title="value.expression">
           <span v-if="value.shared"
             class="fa fa-share-square">
           </span>
           <!-- view action buttons -->
-          <button class="btn btn-xs btn-danger pull-right ml-1"
-            type="button"
-            v-b-tooltip.hover.top
-            title="Delete this view."
-            @click.stop.prevent="deleteView(value, key)">
-            <span class="fa fa-trash-o">
-            </span>
-          </button>
-          <button class="btn btn-xs btn-warning pull-right ml-1"
-            type="button"
-            v-b-tooltip.hover.top
-            title="Edit this view."
-            @click.stop.prevent="modView(views[key])">
-            <span class="fa fa-edit">
-            </span>
-          </button>
+          <template v-if="canEditView(value)">
+            <button
+              type="button"
+              v-b-tooltip.hover.top
+              title="Delete this view."
+              class="btn btn-xs btn-danger pull-right ml-1"
+              @click.stop.prevent="deleteView(value.id, index)">
+              <span class="fa fa-trash-o">
+              </span>
+            </button>
+            <button
+              type="button"
+              v-b-tooltip.hover.top
+              title="Edit this view."
+              @click.stop.prevent="modView(views[index])"
+              class="btn btn-xs btn-warning pull-right ml-1">
+              <span class="fa fa-edit">
+              </span>
+            </button>
+          </template>
           <button class="btn btn-xs btn-theme-secondary pull-right ml-1"
             type="button"
             v-b-tooltip.hover.top
@@ -138,64 +200,11 @@
             <span class="fa fa-columns">
             </span>
           </button> <!-- /view action buttons -->
-          {{ key }}&nbsp;
+          {{ value.name }}&nbsp;
         </b-dropdown-item>
       </b-dropdown> <!-- /views dropdown menu -->
 
-      <!-- ES cluster dropdown menu -->
-      <b-dropdown v-if="multiviewer"
-        right
-        size="sm"
-        class="multies-menu-dropdown pull-right ml-1"
-        no-caret
-        toggle-class="rounded"
-        variant="theme-secondary"
-        @show="esVisMenuOpen = true"
-        @hide="esVisMenuOpen = false">
-        <template slot="button-content">
-          <div v-b-tooltip.hover.left :title="esMenuHoverText">
-            <span class="fa fa-database"> </span>
-            <span> {{ selectedCluster.length }} </span>
-          </div>
-        </template>
-        <b-dropdown-header>
-          <input type="text"
-            v-model="esQuery"
-            class="form-control form-control-sm dropdown-typeahead"
-            placeholder="Search for Clusters..."
-          />
-        </b-dropdown-header>
-        <b-dropdown-divider>
-        </b-dropdown-divider>
-         <b-dropdown-item @click.native.capture.stop.prevent="selectAllCluster">
-          <span class="fa fa-list"></span>&nbsp;
-          Select All
-        </b-dropdown-item>
-        <b-dropdown-item @click.native.capture.stop.prevent="clearAllCluster">
-          <span class="fa fa-eraser"></span>&nbsp;
-          Clear All
-        </b-dropdown-item>
-        <b-dropdown-divider>
-        </b-dropdown-divider>
-        <template v-if="esVisMenuOpen">
-          <template v-for="(clusters, group) in filteredClusteres">
-            <b-dropdown-header
-              :key="group"
-              class="group-header">
-              {{ group + ' (' + clusters.length + ')' }}
-            </b-dropdown-header>
-            <template v-for="cluster in clusters">
-              <b-dropdown-item
-                :id="group + cluster + 'item'"
-                :key="group + cluster + 'item'"
-                :class="{'active':isClusterVis(cluster)}"
-                @click.native.capture.stop.prevent="toggleClusterSelection(cluster)">
-                {{ cluster }}
-              </b-dropdown-item>
-            </template>
-          </template>
-        </template>
-      </b-dropdown> <!-- /Es cluster dropdown menu -->
+      <Clusters /> <!-- cluster dropdown menu -->
 
       <!-- search button -->
       <a class="btn btn-sm btn-theme-tertiary pull-right ml-1 search-btn"
@@ -221,19 +230,19 @@
       </expression-typeahead> <!-- /search box typeahead -->
 
       <!-- time inputs -->
-      <moloch-time
+      <arkime-time
         :timezone="user.settings.timezone"
         @timeChange="timeChange"
         :hide-interval="hideInterval"
         :updateTime="updateTime">
-      </moloch-time> <!-- /time inputs -->
+      </arkime-time> <!-- /time inputs -->
 
       <!-- form message -->
       <div class="small mt-1">
-        <moloch-toast :message="message"
+        <arkime-toast :message="message"
           :type="messageType"
           :done="messageDone">
-        </moloch-toast>
+        </arkime-toast>
       </div> <!-- /form message -->
 
       <div v-if="actionForm">
@@ -272,13 +281,13 @@
           </div>
           <!-- actions menu forms -->
           <div :class="{'col-md-9':showApplyButtons,'col-md-12':!showApplyButtons}">
-            <moloch-modify-view v-if="actionForm === 'modify:view'"
+            <arkime-modify-view v-if="actionForm === 'modify:view'"
               :done="actionFormDone"
               :editView="editableView"
               :initialExpression="expression"
               @setView="setView">
-            </moloch-modify-view>
-            <moloch-tag-sessions v-else-if="actionForm === 'add:tags' || actionForm === 'remove:tags'"
+            </arkime-modify-view>
+            <arkime-tag-sessions v-else-if="actionForm === 'add:tags' || actionForm === 'remove:tags'"
               :add="actionForm === 'add:tags'"
               :start="start"
               :done="actionFormDone"
@@ -286,16 +295,16 @@
               :num-visible="numVisibleSessions"
               :num-matching="numMatchingSessions"
               :apply-to="actionFormItemRadio">
-            </moloch-tag-sessions>
-            <moloch-remove-data v-else-if="actionForm === 'remove:data'"
+            </arkime-tag-sessions>
+            <arkime-remove-data v-else-if="actionForm === 'remove:data'"
               :start="start"
               :done="actionFormDone"
               :sessions="openSessions"
               :num-visible="numVisibleSessions"
               :num-matching="numMatchingSessions"
               :apply-to="actionFormItemRadio">
-            </moloch-remove-data>
-            <moloch-send-sessions v-else-if="actionForm === 'send:session'"
+            </arkime-remove-data>
+            <arkime-send-sessions v-else-if="actionForm === 'send:session'"
               :start="start"
               :cluster="cluster"
               :done="actionFormDone"
@@ -303,16 +312,16 @@
               :num-visible="numVisibleSessions"
               :num-matching="numMatchingSessions"
               :apply-to="actionFormItemRadio">
-            </moloch-send-sessions>
-            <moloch-export-pcap v-else-if="actionForm === 'export:pcap'"
+            </arkime-send-sessions>
+            <arkime-export-pcap v-else-if="actionForm === 'export:pcap'"
               :start="start"
               :done="actionFormDone"
               :sessions="openSessions"
               :num-visible="numVisibleSessions"
               :num-matching="numMatchingSessions"
               :apply-to="actionFormItemRadio">
-            </moloch-export-pcap>
-            <moloch-export-csv v-else-if="actionForm === 'export:csv'"
+            </arkime-export-pcap>
+            <arkime-export-csv v-else-if="actionForm === 'export:csv'"
               :start="start"
               :fields="fields"
               :done="actionFormDone"
@@ -320,11 +329,11 @@
               :num-visible="numVisibleSessions"
               :num-matching="numMatchingSessions"
               :apply-to="actionFormItemRadio">
-            </moloch-export-csv>
-            <moloch-intersection v-else-if="actionForm === 'view:intersection'"
+            </arkime-export-csv>
+            <arkime-intersection v-else-if="actionForm === 'view:intersection'"
               :done="actionFormDone"
               :fields="fields">
-            </moloch-intersection>
+            </arkime-intersection>
           </div> <!-- /actions menu forms -->
         </div>
       </div>
@@ -335,31 +344,33 @@
 </template>
 
 <script>
-import UserService from '../users/UserService';
+import SettingsService from '../settings/SettingsService';
 import ExpressionTypeahead from './ExpressionTypeahead';
-import MolochTime from './Time';
-import MolochToast from '../utils/Toast';
-import MolochModifyView from '../sessions/ModifyView';
-import MolochTagSessions from '../sessions/Tags';
-import MolochRemoveData from '../sessions/Remove';
-import MolochSendSessions from '../sessions/Send';
-import MolochExportPcap from '../sessions/ExportPcap';
-import MolochExportCsv from '../sessions/ExportCsv';
-import MolochIntersection from '../sessions/Intersection';
+import ArkimeTime from './Time';
+import ArkimeToast from '../utils/Toast';
+import ArkimeModifyView from '../sessions/ModifyView';
+import ArkimeTagSessions from '../sessions/Tags';
+import ArkimeRemoveData from '../sessions/Remove';
+import ArkimeSendSessions from '../sessions/Send';
+import ArkimeExportPcap from '../sessions/ExportPcap';
+import ArkimeExportCsv from '../sessions/ExportCsv';
+import ArkimeIntersection from '../sessions/Intersection';
+import Clusters from '../utils/Clusters';
 
 export default {
-  name: 'MolochSearch',
+  name: 'ArkimeSearch',
   components: {
     ExpressionTypeahead,
-    MolochTime,
-    MolochToast,
-    MolochModifyView,
-    MolochTagSessions,
-    MolochRemoveData,
-    MolochSendSessions,
-    MolochExportPcap,
-    MolochExportCsv,
-    MolochIntersection
+    ArkimeTime,
+    ArkimeToast,
+    ArkimeModifyView,
+    ArkimeTagSessions,
+    ArkimeRemoveData,
+    ArkimeSendSessions,
+    ArkimeExportPcap,
+    ArkimeExportCsv,
+    ArkimeIntersection,
+    Clusters
   },
   props: [
     'openSessions',
@@ -381,14 +392,13 @@ export default {
       actionForm: undefined,
       showApplyButtons: false,
       cluster: {},
-      esVisMenuOpen: false,
-      esQuery: '', // query for ES to toggle visibility
       view: this.$route.query.view,
       message: undefined,
       messageType: undefined,
       updateTime: false,
       editableView: undefined, // Not necessarily active view
-      multiviewer: this.$constants.MOLOCH_MULTIVIEWER
+      multiviewer: this.$constants.MULTIVIEWER,
+      basePath: undefined
     };
   },
   computed: {
@@ -417,42 +427,7 @@ export default {
     user: function () {
       return this.$store.state.user;
     },
-    esMenuHoverText: function () {
-      if (this.selectedCluster.length === 0) {
-        return 'No Selection';
-      } else if (this.selectedCluster.length === 1) {
-        return this.selectedCluster[0];
-      } else {
-        return this.selectedCluster.length + ' out of ' + this.availableCluster.active.length + ' selected';
-      }
-    },
-    availableCluster: {
-      get: function () {
-        return this.$store.state.esCluster.availableCluster;
-      },
-      set: function (newValue) {
-        this.$store.commit('setAvailableCluster', newValue);
-      }
-    },
-    selectedCluster: {
-      get: function () {
-        return this.$store.state.esCluster.selectedCluster || [];
-      },
-      set: function (newValue) {
-        this.$store.commit('setSelectedCluster', newValue);
-      }
-    },
-    filteredClusteres: function () {
-      const filteredGroupedClusters = {};
-      for (const group in this.availableCluster) {
-        filteredGroupedClusters[group] = this.$options.filters.searchCluster(
-          this.esQuery,
-          this.availableCluster[group]
-        );
-      }
-      return filteredGroupedClusters;
-    },
-    molochClusters: function () {
+    arkimeClusters: function () {
       return this.$store.state.remoteclusters;
     },
     openItemsTooltip: function () {
@@ -463,6 +438,20 @@ export default {
     },
     matchingItemsTooltip: function () {
       return 'Apply action to ' + this.$options.filters.commaString(this.numMatchingSessions) + ' query matching sessions';
+    },
+    stickyViz: {
+      get: function () { return this.$store.state.stickyViz; },
+      set: function (newValue) { this.$store.commit('toggleStickyViz', newValue); }
+    },
+    hideViz: {
+      get: function () { return this.$store.state.hideViz; },
+      set: function (newValue) { this.$store.commit('toggleHideViz', newValue); }
+    },
+    disabledAggregations: function () {
+      return this.$store.state.disabledAggregations;
+    },
+    forcedAggregations: function () {
+      return this.$store.state.forcedAggregations;
     }
   },
   watch: {
@@ -484,19 +473,13 @@ export default {
     }
   },
   created: function () {
-    if (this.multiviewer) { // set clusters to search if in multiviewer mode
-      const clusters = this.$route.query.cluster ? this.$route.query.cluster.split(',') : [];
-      if (clusters.length === 0) {
-        this.selectedCluster = this.availableCluster.active;
-      } else {
-        this.selectedCluster = [];
-        for (let i = 0; i < clusters.length; i++) {
-          if (this.availableCluster.active.includes(clusters[i])) {
-            this.selectedCluster.push(clusters[i]);
-          }
-        }
-      }
-    }
+    this.basePath = this.$route.path.split('/')[1];
+
+    this.stickyViz = localStorage && localStorage[`${this.basePath}-sticky-viz`] &&
+      localStorage[`${this.basePath}-sticky-viz`] !== 'false';
+
+    this.hideViz = localStorage && localStorage[`${this.basePath}-hide-viz`] &&
+      localStorage[`${this.basePath}-hide-viz`] !== 'false';
   },
   methods: {
     /* exposed page functions ------------------------------------ */
@@ -551,9 +534,14 @@ export default {
       this.showApplyButtons = true;
     },
     modView: function (view) {
-      this.editableView = view;
-      this.actionForm = 'modify:view';
-      this.showApplyButtons = false;
+      this.editableView = undefined;
+      this.actionForm = undefined;
+
+      this.$nextTick(() => {
+        this.editableView = view;
+        this.actionForm = 'modify:view';
+        this.showApplyButtons = false;
+      });
     },
     viewIntersection: function () {
       this.actionForm = 'view:intersection';
@@ -582,35 +570,37 @@ export default {
         this.messageType = success ? 'success' : 'warning';
       }
     },
-    deleteView: function (view, viewName) {
-      UserService.deleteView(view, viewName, this.user.userId).then((response) => {
+    canEditView: function (view) {
+      return this.user.roles.includes('arkimeAdmin') || (view.user && view.user === this.user.userId);
+    },
+    deleteView: function (viewId, index) {
+      SettingsService.deleteView(viewId, this.user.userId).then((response) => {
         // check if deleting current view
-        if (this.view === viewName) {
+        if (this.view === viewId) {
           this.setView(undefined);
         }
         // remove the view from the view list
-        this.$store.commit('deleteViews', viewName);
+        this.views.splice(index, 1);
         // display success message to user
         this.msg = response.text;
         this.msgType = 'success';
       }).catch((error) => {
-        console.log(error);
         // display error message to user
         this.msg = error.text;
         this.msgType = 'danger';
       });
     },
-    setView: function (view) {
-      this.view = view;
+    setView: function (viewId) {
+      this.view = viewId;
 
       // update the url and session storage (to persist user's choice)
       // triggers the '$route.query.view' watcher that issues changeSearch event
-      sessionStorage['moloch-view'] = view;
-      if (this.$route.query.view !== view) { // view name changed
+      sessionStorage['moloch-view'] = viewId;
+      if (this.$route.query.view !== viewId) { // view name changed
         this.$router.push({
           query: {
             ...this.$route.query,
-            view: view
+            view: viewId
           }
         });
 
@@ -626,27 +616,63 @@ export default {
         this.$store.commit('setFocusSearch', false);
       }, 1000);
     },
+    getView: function (viewId) {
+      return this.views.find(v => v.id === viewId || v.name === viewId);
+    },
     applyColumns: function (view) {
       this.$emit('setColumns', view.sessionsColConfig);
     },
-    /* MultiES functions ------------------------------------------ */
-    isClusterVis: function (cluster) {
-      if (this.availableCluster.active.includes(cluster)) { // found in active cluster list
-        return this.selectedCluster.includes(cluster); // returns True if found in selected cluster list
-      } else { // inactive cluster
-        return false;
+    toggleStickyViz: function () {
+      this.stickyViz = !this.stickyViz;
+      localStorage[`${this.basePath}-sticky-viz`] = this.stickyViz;
+    },
+    toggleHideViz: function () {
+      this.hideViz = !this.hideViz;
+      localStorage[`${this.basePath}-hide-viz`] = this.hideViz;
+      if (!this.hideViz) { // watch for $store.state.fetchGraphData
+        // wherever graph data needs to be updated when viz is shown
+        this.$store.commit('setFetchGraphData', true);
+        setTimeout(() => {
+          this.$store.commit('setFetchGraphData', false);
+        }, 500);
       }
     },
-    updateRouteQueryForClusters: function (clusters) {
-      const cluster = clusters.length > 0 ? clusters.join(',') : 'none';
-      if (!this.$route.query.cluster || this.$route.query.cluster !== cluster) {
-        this.$router.push({
-          query: {
-            ...this.$route.query,
-            cluster: cluster
-          }
-        });
+    /**
+     * Overrides the server's diabling of aggregations on large time ranges
+     * @param {number} option - How long to disable the aggregation
+     *                          -1 = forever
+     *                          0  = this session
+     *                          1  = once
+     */
+    overrideDisabledAggregations: function (option) {
+      if (option === undefined) {
+        localStorage['force-aggregations'] = false;
+        sessionStorage['force-aggregations'] = false;
+        this.$store.commit('setForcedAggregations', false);
+        return;
       }
+
+      if (option === -1) {
+        localStorage['force-aggregations'] = true;
+        this.$store.commit('setForcedAggregations', true);
+      } else {
+        sessionStorage['force-aggregations'] = true;
+        this.$store.commit('setForcedAggregations', true);
+      }
+
+      if (this.hideViz || this.disabledAggregations) { // data is missing
+        this.$store.commit('setFetchGraphData', true); // fetch the data
+      }
+
+      this.hideViz = false;
+      setTimeout(() => {
+        this.$store.commit('setFetchGraphData', false); // unset for future data fetching
+        this.$store.commit('setForcedAggregations', true);
+        if (option === 1) { // if just override just once, unset it for future calls to disable aggs
+          sessionStorage['force-aggregations'] = false;
+          this.$store.commit('setForcedAggregations', false);
+        }
+      }, 500);
     },
     /**
      * If the start/stop time has changed:
@@ -706,24 +732,6 @@ export default {
       } else {
         this.$emit('changeSearch');
       }
-    },
-    selectAllCluster: function () {
-      this.selectedCluster = this.availableCluster.active;
-      this.updateRouteQueryForClusters(this.selectedCluster);
-    },
-    clearAllCluster: function () {
-      this.selectedCluster = [];
-      this.updateRouteQueryForClusters(this.selectedCluster);
-    },
-    toggleClusterSelection: function (cluster) {
-      if (this.selectedCluster.includes(cluster)) { // already selected; remove from selection
-        this.selectedCluster = this.selectedCluster.filter((item) => {
-          return item !== cluster;
-        });
-      } else if (!this.availableCluster.inactive.includes(cluster)) { // not in inactive cluster
-        this.selectedCluster.push(cluster); // add to selected list
-      }
-      this.updateRouteQueryForClusters(this.selectedCluster);
     }
   }
 };
@@ -773,5 +781,12 @@ form {
 .action-menu-dropdown { z-index: 1030; }
 .form-group {
   margin-bottom: 0;
+}
+
+/* viz options button position above viz in nav */
+.viz-options-btn-container {
+  top: 118px;
+  right: 4px;
+  position: fixed;
 }
 </style>

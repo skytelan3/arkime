@@ -1,4 +1,4 @@
-AC_INIT([arkime], [3.3.2-GIT])
+AC_INIT([arkime], [5.2.0-GIT])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 AC_PROG_CC
 AC_PROG_CXX
@@ -19,10 +19,11 @@ AC_CONFIG_FILES([
   db/Makefile
   tests/plugins/Makefile
   viewer/Makefile
-  viewer/version.js
+  common/version.js
   parliament/Makefile
   release/Makefile
   wiseService/Makefile
+  cont3xt/Makefile
 ])
 
 AC_CHECK_LIB(pcre, main,,AC_MSG_ERROR(please install PCRE library))
@@ -248,6 +249,14 @@ AC_ARG_WITH(yara,
       fi
       YARA_CFLAGS="-I$withval/libyara/include"
       YARA_LIBS="$withval/libyara/.libs/libyara.a"
+    elif test -f $withval/libyara/include/yara.h -a -f $withval/.libs/libyara.a; then
+      owd=`pwd`
+      if cd $withval; then
+        withval=`pwd`;
+        cd $owd;
+      fi
+      YARA_CFLAGS="-I$withval/libyara/include"
+      YARA_LIBS="$withval/.libs/libyara.a"
     elif test -f $withval/include/yara.h -a -f $withval/lib/libyara.a; then
       owd=`pwd`
       if cd $withval; then
@@ -270,7 +279,7 @@ esac ], [
   else
     TMP=$LIBS
     LIBS="-lyara $LIBS"
-    AC_TRY_LINK([#include <yara.h>], yr_init(), LIBYARA_FOUND=1,LIBYARA_FOUND=0)
+    AC_TRY_LINK([#include <yara.h>], yr_initialize(), LIBYARA_FOUND=1,LIBYARA_FOUND=0)
     LIBS=$TMP
     if test $LIBYARA_FOUND = 1 ; then
       YARA_LIBS="-lyara"
@@ -507,6 +516,42 @@ AC_MSG_RESULT(yes) ])
 AC_SUBST(NGHTTP2_CFLAGS)
 AC_SUBST(NGHTTP2_LIBS)
 
+
+dnl Checks for zstd
+AC_MSG_CHECKING(for zstd)
+AC_ARG_WITH(zstd,
+[  --with-zstd=DIR use zstd build directory],
+[ case "$withval" in
+  yes)
+     AC_CHECK_LIB(zstd, main, AC_DEFINE([HAVE_ZSTD], [1], [Define if libzstd is available]) ZSTD_LIBS=-lzstd, AC_MSG_ERROR(please install zstd library))
+     ;;
+  no)
+     AC_MSG_RESULT(no)
+     ;;
+  *)
+    AC_MSG_RESULT($withval)
+    UNDEFINED_FLAGS+=" -u ZSTD_decompress"
+    if test -f $withval/lib/zstd.h -a -f $withval/lib/libzstd.a; then
+      owd=`pwd`
+      if cd $withval; then
+        withval=`pwd`;
+        cd $owd;
+      fi
+      ZSTD_CFLAGS="-I$withval/lib"
+      ZSTD_LIBS="$withval/lib/libzstd.a"
+      AC_DEFINE([HAVE_ZSTD], [1], [Define if libzstd is available])
+    else
+      AC_ERROR(zstd.h or libzstd.a not found in $withval)
+    fi
+    ;;
+esac ], [
+  AC_DEFINE([HAVE_ZSTD], [1], [Define if libzstd is available])
+  ZSTD_CFLAGS=`pkg-config libzstd --cflags`
+  ZSTD_LIBS=`pkg-config libzstd --libs`
+AC_MSG_RESULT(yes) ])
+AC_SUBST(ZSTD_CFLAGS)
+AC_SUBST(ZSTD_LIBS)
+
 dnl Checks for kafka
 AC_MSG_CHECKING(for kafka)
 AC_ARG_WITH(kafka,
@@ -524,9 +569,7 @@ AC_ARG_WITH(kafka,
   AC_MSG_RESULT($withval)
     if test -f $withval/src/rdkafka.h -a -f $withval/src/librdkafka.a; then
       KAFKA_CFLAGS="-I$withval/src"
-      #KAFKA_LIBS=$withval/src/librdkafka.a
-      KAFKA_LIBS=""
-      #cp $withval/src/librdkafka.so capture/plugins/
+      KAFKA_LIBS=$withval/src/librdkafka.a
     elif test -f $withval/rdkafka.h; then
       KAFKA_CFLAGS="-I$withval"
       KAFKA_LIBS="-lrdkafka"

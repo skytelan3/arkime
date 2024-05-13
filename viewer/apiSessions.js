@@ -1,5 +1,14 @@
+/******************************************************************************/
+/* apiSessions.js -- api calls for sessions tab
+ *
+ * Copyright Yahoo Inc.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 'use strict';
 
+const Config = require('./config.js');
+const Db = require('./db.js');
 const async = require('async');
 const contentDisposition = require('content-disposition');
 const fs = require('fs');
@@ -10,24 +19,28 @@ const pug = require('pug');
 const util = require('util');
 const decode = require('./decode.js');
 const ArkimeUtil = require('../common/arkimeUtil');
+const ArkimeConfig = require('../common/arkimeConfig');
 const Auth = require('../common/auth');
-const User = require('../common/user');
 const Pcap = require('./pcap.js');
-const version = require('./version');
-const molochparser = require('./molochparser.js');
+const version = require('../common/version');
+const arkimeparser = require('./arkimeparser.js');
+const internals = require('./internals');
+const ViewerUtils = require('./viewerUtils');
+const ipaddr = require('ipaddr.js');
+const LRU = require('lru-cache');
 
-module.exports = (Config, Db, internals, ViewerUtils) => {
-  const sessionAPIs = {};
+const headerlru = new LRU({ max: 100 });
 
+class SessionAPIs {
   // --------------------------------------------------------------------------
   // INTERNAL HELPERS
   // --------------------------------------------------------------------------
-  function sessionsListFromQuery (req, res, fields, cb) {
+  static #sessionsListFromQuery (req, res, fields, cb) {
     if (req.query.segments && req.query.segments.match(/^(time|all)$/) && fields.indexOf('rootId') === -1) {
       fields.push('rootId');
     }
 
-    sessionAPIs.buildSessionQuery(req, (err, query, indices) => {
+    SessionAPIs.buildSessionQuery(req, (err, query, indices) => {
       if (err) {
         return res.send('Could not build query.  Err: ' + err);
       }
@@ -45,7 +58,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         }
         const list = result.hits.hits;
         if (req.query.segments && req.query.segments.match(/^(time|all)$/)) {
-          sessionsListAddSegments(req, indices, query, list, (err, addSegmentsList) => {
+          SessionAPIs.#sessionsListAddSegments(req, indices, query, list, (err, addSegmentsList) => {
             cb(err, addSegmentsList);
           });
         } else {
@@ -55,6 +68,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * Adds the sort options to the elasticsearch query
    * @ignore
@@ -63,7 +77,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @param {object} info - the query params from the client
    * @param {string} defaultSort - the default sort
    */
-  function addSortToQuery (query, info, defaultSort) {
+  static #addSortToQuery (query, info, defaultSort) {
     function addSortDefault () {
       if (defaultSort) {
         if (!query.sort) {
@@ -95,6 +109,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       info.order.split(',').forEach((item) => {
         const parts = item.split(':');
         const field = parts[0];
+        if (field === '__proto__') { return; }
 
         const obj = {};
         if (field === 'firstPacket') {
@@ -150,6 +165,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     }
   }
 
+  // --------------------------------------------------------------------------
   /**
    * Adds the view search expression to the elasticsearch query
    * @ignore
@@ -161,51 +177,67 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @param {boolean} queryOverride=null - override the client query with overriding query
    * @returns {function} - the callback to call once the session query is built or an error occurs
    */
-  function addViewToQuery (req, query, continueBuildQueryCb, finalCb, queryOverride = null) {
-    let err;
-    let viewExpression;
-
+  static async #addViewToQuery (req, query, continueBuildQueryCb, finalCb, queryOverride = null) {
     // queryOverride can supercede req.query if specified
     const reqQuery = queryOverride || req.query;
 
-    if (req.user.views && req.user.views[reqQuery.view]) { // it's a user's view
-      try {
-        viewExpression = molochparser.parse(req.user.views[reqQuery.view].expression);
-        query.query.bool.filter.push(viewExpression);
-      } catch (e) {
-        console.log(`ERROR - User expression (${reqQuery.view}) doesn't compile -`, util.inspect(e, false, 50));
-        err = e;
-      }
-      return continueBuildQueryCb(req, query, err, finalCb, queryOverride);
-    } else { // it's a shared view
-      User.getUserCache('_moloch_shared', (err, sharedUser) => {
-        if (sharedUser) {
-          sharedUser.views = sharedUser.views || {};
-          for (const viewName in sharedUser.views) {
-            if (viewName === reqQuery.view) {
-              viewExpression = sharedUser.views[viewName].expression;
-              break;
-            }
+    try {
+      const roles = [...await req.user.getRoles()]; // es requries an array for terms search
+
+      const viewQuery = { // search for the shortcut
+        size: 1,
+        query: {
+          bool: {
+            filter: [{
+              bool: {
+                must: [{ // needs to match the id OR name
+                  bool: {
+                    should: [ // match id OR name
+                      { term: { _id: reqQuery.view } }, // matches the id
+                      { term: { name: reqQuery.view } } // matches the name
+                    ]
+                  }
+                }, { // AND be shared with the user via role, user, OR creator
+                  bool: {
+                    should: [
+                      { terms: { roles } }, // shared via user role
+                      { term: { users: req.user.userId } }, // shared via userId
+                      { term: { user: req.user.userId } } // created by this user
+                    ]
+                  }
+                }]
+              }
+            }]
           }
-          if (sharedUser.views[reqQuery.view]) {
-            try {
-              viewExpression = molochparser.parse(sharedUser.views[reqQuery.view].expression);
-              query.query.bool.filter.push(viewExpression);
-            } catch (e) {
-              console.log(`ERROR - Shared user expression (${reqQuery.view}) doesn't compile -`, util.inspect(e, false, 50));
-              err = e;
-            }
-          }
-          return continueBuildQueryCb(req, query, err, finalCb, queryOverride);
         }
-      });
+      };
+
+      const { body: { hits: { hits: views } } } = await Db.searchViews(viewQuery);
+
+      if (!views.length) {
+        console.log(`ERROR - User does not have permission to access this view or the view doesn't exist: ${reqQuery.view}`);
+        return continueBuildQueryCb(req, query, "Can't find view", finalCb, queryOverride);
+      }
+
+      const view = views[0]._source;
+
+      try {
+        const viewExpression = arkimeparser.parse(view.expression);
+        query.query.bool.filter.push(viewExpression);
+        return continueBuildQueryCb(req, query, undefined, finalCb, queryOverride);
+      } catch (err) {
+        console.log('ERROR - User expression (%s) doesn\'t compile -', ArkimeUtil.sanitizeStr(reqQuery.view), util.inspect(err, false, 50));
+        return continueBuildQueryCb(req, query, err, finalCb, queryOverride);
+      }
+    } catch (err) {
+      console.log('ERROR - Can\'t find view (%s) -', ArkimeUtil.sanitizeStr(reqQuery.view), util.inspect(err, false, 50));
+      return continueBuildQueryCb(req, query, err, finalCb, queryOverride);
     }
   }
 
-  function csvListWriter (req, res, list, fields, pcapWriter, extension) {
+  // --------------------------------------------------------------------------
+  static #csvListWriter (req, res, list, fields, pcapWriter, extension) {
     if (list.length > 0 && list[0].fields) {
-      list = list.sort((a, b) => { return a.fields.lastPacket - b.fields.lastPacket; });
-    } else if (list.length > 0 && list[0].fields) {
       list = list.sort((a, b) => { return a.fields.lastPacket - b.fields.lastPacket; });
     }
 
@@ -258,7 +290,8 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     res.end();
   }
 
-  function sessionsListAddSegments (req, indices, query, list, cb) {
+  // --------------------------------------------------------------------------
+  static #sessionsListAddSegments (req, indices, query, list, cb) {
     const processedRo = {};
 
     // Index all the ids we have, so we don't include them again
@@ -305,7 +338,8 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   }
 
-  function sortFields (session) {
+  // --------------------------------------------------------------------------
+  static #sortFields (session) {
     if (session.tags) {
       session.tags = session.tags.sort();
     }
@@ -325,8 +359,9 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     }
   }
 
-  function reqGetRawBody (req, cb) {
-    sessionAPIs.processSessionIdAndDecode(req.params.id, 10000, (err, session, incoming) => {
+  // --------------------------------------------------------------------------
+  static #reqGetRawBody (req, cb) {
+    SessionAPIs.processSessionIdAndDecode(req.params.id, 10000, (err, session, incoming) => {
       if (err) {
         return cb(err);
       }
@@ -376,14 +411,15 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
-  function localSessionDetailReturnFull (req, res, session, incoming) {
+  // --------------------------------------------------------------------------
+  static #localSessionDetailReturnFull (req, res, session, incoming) {
     if (req.packetsOnly) { // only return packets
       res.render('sessionPackets.pug', {
         filename: 'sessionPackets',
         cache: internals.isProduction,
         compileDebug: !internals.isProduction,
         user: req.user,
-        session: session,
+        session,
         data: incoming,
         reqPackets: req.query.packets,
         query: req.query,
@@ -405,7 +441,8 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     }
   }
 
-  function localSessionDetailReturn (req, res, session, incoming) {
+  // --------------------------------------------------------------------------
+  static #localSessionDetailReturn (req, res, session, incoming) {
     // console.log("ALW", JSON.stringify(incoming));
     const numPackets = req.query.packets || 200;
     if (incoming.length > numPackets) {
@@ -413,7 +450,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     }
 
     if (incoming.length === 0) {
-      return localSessionDetailReturnFull(req, res, session, []);
+      return SessionAPIs.#localSessionDetailReturnFull(req, res, session, []);
     }
 
     const options = {
@@ -472,7 +509,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     }
     options.order.push('ITEM-CB');
     options['ITEM-CB'].cb = (err, outgoing) => {
-      localSessionDetailReturnFull(req, res, session, outgoing);
+      SessionAPIs.#localSessionDetailReturnFull(req, res, session, outgoing);
     };
 
     if (Config.debug) {
@@ -482,7 +519,8 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     decode.createPipeline(options, options.order, new decode.Pcap2ItemStream(options, incoming));
   }
 
-  function localSessionDetail (req, res) {
+  // --------------------------------------------------------------------------
+  static #localSessionDetail (req, res) {
     if (!req.query) {
       req.query = { gzip: false, line: false, base: 'natural', packets: 200 };
     }
@@ -504,14 +542,14 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     }
 
     const packets = [];
-    sessionAPIs.processSessionId(req.params.id, !req.packetsOnly, null, (pcap, buffer, cb, i) => {
+    SessionAPIs.processSessionId(req.params.id, !req.packetsOnly, null, (pcap, buffer, cb, i) => {
       let obj = {};
       if (buffer.length > 16) {
         try {
           pcap.decode(buffer, obj);
         } catch (e) {
           obj = { ip: { p: 'Error decoding' + e } };
-          console.trace('loadSessionDetail error', e.stack);
+          console.trace('loadSessionDetail error', ArkimeUtil.sanitizeStr(e.stack));
         }
       } else {
         obj = { ip: { p: 'Empty' } };
@@ -523,7 +561,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         return res.end('Problem loading packets for ' + ArkimeUtil.safeStr(req.params.id) + ' Error: ' + err);
       }
       session.id = req.params.id;
-      sortFields(session);
+      SessionAPIs.#sortFields(session);
 
       if (session.source?.ip) {
         const sep = session.source.ip.includes(':') ? '.' : ':';
@@ -539,58 +577,58 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
           session._err = err;
           session.sourceKey = sourceKey;
           session.destinationKey = destinationKey;
-          localSessionDetailReturn(req, res, session, results || []);
+          SessionAPIs.#localSessionDetailReturn(req, res, session, results || []);
         });
       } else if (packets.length === 0) {
         session._err = 'No pcap data found';
-        localSessionDetailReturn(req, res, session, []);
+        SessionAPIs.#localSessionDetailReturn(req, res, session, []);
       } else if (packets[0].ether !== undefined && packets[0].ether.data !== undefined) {
         Pcap.reassemble_generic_ether(packets, +req.query.packets || 200, (err, results) => {
           session._err = err;
-          localSessionDetailReturn(req, res, session, results || []);
+          SessionAPIs.#localSessionDetailReturn(req, res, session, results || []);
         });
       } else if (packets[0].ip === undefined) {
         session._err = "Couldn't decode pcap file, check viewer log";
-        localSessionDetailReturn(req, res, session, []);
+        SessionAPIs.#localSessionDetailReturn(req, res, session, []);
       } else if (packets[0].ip.p === 1) {
         Pcap.reassemble_icmp(packets, +req.query.packets || 200, (err, results) => {
           session._err = err;
-          localSessionDetailReturn(req, res, session, results || []);
+          SessionAPIs.#localSessionDetailReturn(req, res, session, results || []);
         });
       } else if (packets[0].ip.p === 6) {
-        const key = session.source.ip;
+        const key = ipaddr.parse(session.source.ip).toString();
         Pcap.reassemble_tcp(packets, +req.query.packets || 200, key + ':' + session.source.port, (err, results) => {
           session._err = err;
-          localSessionDetailReturn(req, res, session, results || []);
+          SessionAPIs.#localSessionDetailReturn(req, res, session, results || []);
         });
       } else if (packets[0].ip.p === 17) {
         Pcap.reassemble_udp(packets, +req.query.packets || 200, (err, results) => {
           session._err = err;
-          localSessionDetailReturn(req, res, session, results || []);
+          SessionAPIs.#localSessionDetailReturn(req, res, session, results || []);
         });
       } else if (packets[0].ip.p === 132) {
         Pcap.reassemble_sctp(packets, +req.query.packets || 200, (err, results) => {
           session._err = err;
-          localSessionDetailReturn(req, res, session, results || []);
+          SessionAPIs.#localSessionDetailReturn(req, res, session, results || []);
         });
       } else if (packets[0].ip.p === 50) {
         Pcap.reassemble_esp(packets, +req.query.packets || 200, (err, results) => {
           session._err = err;
-          localSessionDetailReturn(req, res, session, results || []);
+          SessionAPIs.#localSessionDetailReturn(req, res, session, results || []);
         });
       } else if (packets[0].ip.p === 58) {
         Pcap.reassemble_icmp(packets, +req.query.packets || 200, (err, results) => {
           session._err = err;
-          localSessionDetailReturn(req, res, session, results || []);
+          SessionAPIs.#localSessionDetailReturn(req, res, session, results || []);
         });
       } else if (packets[0].ip.data !== undefined) {
         Pcap.reassemble_generic_ip(packets, +req.query.packets || 200, (err, results) => {
           session._err = err;
-          localSessionDetailReturn(req, res, session, results || []);
+          SessionAPIs.#localSessionDetailReturn(req, res, session, results || []);
         });
       } else {
         session._err = 'Unknown ip.p=' + packets[0].ip.p;
-        localSessionDetailReturn(req, res, session, []);
+        SessionAPIs.#localSessionDetailReturn(req, res, session, []);
       }
     },
     // *2 because the packets can be out of order, we truncate again
@@ -598,7 +636,8 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     +req.query.packets * 2, 10);
   }
 
-  function processSessionIdDisk (session, headerCb, packetCb, endCb, limit) {
+  // --------------------------------------------------------------------------
+  static #processSessionIdDisk (session, headerCb, packetCb, endCb, limit) {
     function processFile (pcap, pos, i, nextCb) {
       pcap.ref();
 
@@ -650,7 +689,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       } else if (!opcap.isOpen()) {
         Db.fileIdToFile(fields.node, fileNum, (file) => {
           if (!file) {
-            console.log("WARNING - Only have SPI data, PCAP file no longer available.  Couldn't look up in file table", fields.node + '-' + fileNum);
+            console.log("WARNING - Only have SPI data, PCAP file no longer available.  Couldn't look up %s-%s in files index", fields.node, fileNum);
             return nextCb('Only have SPI data, PCAP file no longer available for ' + fields.node + '-' + fileNum);
           }
           if (file.kekId) {
@@ -716,12 +755,76 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   }
 
-  function sessionsPcapList (req, res, list, pcapWriter, extension) {
+  // --------------------------------------------------------------------------
+  static async #getHeader (node, fileNum, getBlock) {
+    const info = await Db.fileIdToFile(node, fileNum);
+    const key = `${node}:${fileNum}`;
+    let obj = headerlru.get(key);
+    if (obj) {
+      return obj;
+    }
+
+    const block = await getBlock(info, 0);
+    obj = { info, header: block };
+    headerlru.set(key, obj);
+    return obj;
+  }
+
+  // --------------------------------------------------------------------------
+  static async #getPacket (pcap, info, pos, getBlock) {
+    let block = await getBlock(info, pos);
+    if (block.length < 16) {
+      const block2 = await getBlock(info, pos + block.length);
+      block = Buffer.concat([block, block2]);
+    }
+    const len = (pcap.bigEndian ? block.readUInt32BE(8) : block.readUInt32LE(8)) + 16;
+
+    if (block.length < len) {
+      const block2 = await getBlock(info, pos + block.length);
+      block = Buffer.concat([block, block2]);
+    }
+
+    return block.slice(0, len);
+  }
+
+  // --------------------------------------------------------------------------
+  static async #processSessionIdBlock (session, headerCb, packetCb, endCb, limit, getBlock) {
+    const fields = session.fields;
+
+    let pcap;
+    let packetNum = 0;
+    let h;
+    async.eachLimit(fields.packetPos, 1, async (pos) => {
+      if (pos > 0) {
+        const packet = await SessionAPIs.#getPacket(pcap, h.info, pos, getBlock);
+        if (packetCb) {
+          const promise = new Promise((resolve, reject) => {
+            packetCb(pcap, packet, (err) => { if (err) { reject(err); } else { resolve(); } }, packetNum++);
+          });
+          await promise;
+        }
+        return;
+      }
+
+      try {
+        h = await SessionAPIs.#getHeader(fields.node, -pos, getBlock);
+      } catch (e) {
+        console.log('Failure fetching header', e.response);
+        return endCb('Only have SPI data, PCAP file no longer available for ' + e.response?.config?.url);
+      }
+      pcap = Pcap.make(h.info.name, h.header);
+      if (headerCb) {
+        headerCb(pcap, h.header);
+        headerCb = null;
+      }
+    }, (pcapErr, results) => {
+      endCb(pcapErr, fields);
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  static #sessionsPcapList (req, res, list, pcapWriter, extension) {
     if (list.length > 0 && list[0].fields) {
-      list = list.sort((a, b) => {
-        return a.fields.lastPacket - b.fields.lastPacket;
-      });
-    } else if (list.length > 0 && list[0].fields) {
       list = list.sort((a, b) => {
         return a.fields.lastPacket - b.fields.lastPacket;
       });
@@ -733,20 +836,8 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     const writerOptions = { writeHeader: true };
 
     async.eachLimit(list, 10, (item, nextCb) => {
-      let node;
-      let fields;
-      try
-      {
-        node = item.fields.node;
-        fields = item.fields;
-      }
-      catch (e)
-      {
-        node = item._source.node;
-        fields = item._source;
-      }
-
-      sessionAPIs.isLocalView(fields.node, () => {
+      const fields = item.fields;
+      SessionAPIs.isLocalView(fields.node, () => {
         // Get from our DISK
         pcapWriter(res, Db.session2Sid(item), writerOptions, nextCb);
       }, () => {
@@ -755,7 +846,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
           let buffer = Buffer.alloc(Math.min(16200000, fields['network.packets'] * 20 + fields['network.bytes']));
           let bufpos = 0;
 
-          const sessionPath = Config.basePath(fields.node) + fields.node + '/' + extension + '/' + Db.session2Sid(item) + '.' + extension;
+          const sessionPath = Config.basePath(fields.node) + 'api/session/' + fields.node + '/' + Db.session2Sid(item) + '.' + extension;
           const url = new URL(sessionPath, viewUrl);
           const options = {
             agent: client === http ? internals.httpAgent : internals.httpsAgent
@@ -797,8 +888,9 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   }
 
-  function localGetItemByHash (nodeName, sessionID, hash, cb) {
-    sessionAPIs.processSessionIdAndDecode(sessionID, 10000, (err, session, incoming) => {
+  // --------------------------------------------------------------------------
+  static #localGetItemByHash (nodeName, sessionID, hash, cb) {
+    SessionAPIs.processSessionIdAndDecode(sessionID, 10000, (err, session, incoming) => {
       if (err) {
         return cb(err);
       }
@@ -809,7 +901,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
 
       const options = {
         id: sessionID,
-        nodeName: nodeName,
+        nodeName,
         order: [],
         'ITEM-HTTP': {
           order: []
@@ -818,7 +910,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
           order: ['BODY-UNBASE64']
         },
         'ITEM-HASH': {
-          hash: hash
+          hash
         },
         'ITEM-CB': {
         }
@@ -842,28 +934,31 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   }
 
-  function sendSessionsList (req, res, list) {
+  // --------------------------------------------------------------------------
+  static #sendSessionsList (req, res, list) {
     if (!list) { return res.serverError(200, 'Missing list of sessions'); }
 
     const saveId = Config.nodeName() + '-' + new Date().getTime().toString(36);
 
+    const cluster = req.body.remoteCluster;
+
     async.eachLimit(list, 10, (item, nextCb) => {
       const fields = item.fields;
       const sid = Db.session2Sid(item);
-      sessionAPIs.isLocalView(fields.node, () => {
+      SessionAPIs.isLocalView(fields.node, () => {
         const options = {
           user: req.user,
-          cluster: req.body.cluster,
+          cluster,
           id: sid,
-          saveId: saveId,
+          saveId,
           tags: req.body.tags,
           nodeName: fields.node
         };
         // Get from our DISK
         internals.sendSessionQueue.push(options, nextCb);
       }, () => {
-        let sendPath = `api/session/${fields.node}/${sid}/send?saveId=${saveId}&cluster=${req.body.cluster}`;
-        if (req.body.tags) {
+        let sendPath = `api/session/${fields.node}/${sid}/send?saveId=${saveId}&remoteCluster=${cluster}`;
+        if (ArkimeUtil.isString(req.body.tags)) {
           sendPath += `&tags=${req.body.tags}`;
         }
 
@@ -879,30 +974,32 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   }
 
-  function sessionsPcap (req, res, pcapWriter, extension) {
-    ViewerUtils.noCache(req, res, 'application/vnd.tcpdump.pcap');
+  // --------------------------------------------------------------------------
+  static #sessionsPcap (req, res, pcapWriter, extension) {
+    ArkimeUtil.noCache(req, res, 'application/vnd.tcpdump.pcap');
 
     const fields = ['lastPacket', 'node', 'network.bytes', 'network.packets', 'rootId'];
 
     if (req.query.ids) {
       const ids = ViewerUtils.queryValueToArray(req.query.ids);
-      sessionAPIs.sessionsListFromIds(req, ids, fields, (err, list) => {
-        sessionsPcapList(req, res, list, pcapWriter, extension);
+      SessionAPIs.sessionsListFromIds(req, ids, fields, (err, list) => {
+        SessionAPIs.#sessionsPcapList(req, res, list, pcapWriter, extension);
       });
     } else {
-      sessionsListFromQuery(req, res, fields, (err, list) => {
-        sessionsPcapList(req, res, list, pcapWriter, extension);
+      SessionAPIs.#sessionsListFromQuery(req, res, fields, (err, list) => {
+        SessionAPIs.#sessionsPcapList(req, res, list, pcapWriter, extension);
       });
     }
   }
 
-  function writePcap (res, id, writerOptions, doneCb) {
+  // --------------------------------------------------------------------------
+  static #writePcap (res, id, writerOptions, doneCb) {
     let b = Buffer.alloc(0xfffe);
     let nextPacket = 0;
     let boffset = 0;
     const packets = {};
 
-    sessionAPIs.processSessionId(id, false, (pcap, buffer) => {
+    SessionAPIs.processSessionId(id, false, (pcap, buffer) => {
       if (writerOptions.writeHeader) {
         res.write(buffer);
         writerOptions.writeHeader = false;
@@ -929,7 +1026,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     }, (err, session) => {
       if (err) {
         res.status(500);
-        if (!Config.get('regressionTests', false)) {
+        if (!ArkimeConfig.regressionTests) {
           console.trace('writePcap', err);
         }
         return doneCb(err);
@@ -939,11 +1036,12 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     }, undefined, 10);
   }
 
-  function writePcapNg (res, id, writerOptions, doneCb) {
+  // --------------------------------------------------------------------------
+  static #writePcapNg (res, id, writerOptions, doneCb) {
     let b = Buffer.alloc(0xfffe);
     let boffset = 0;
 
-    sessionAPIs.processSessionId(id, true, (pcap, buffer) => {
+    SessionAPIs.processSessionId(id, true, (pcap, buffer) => {
       if (writerOptions.writeHeader) {
         res.write(pcap.getHeaderNg());
         writerOptions.writeHeader = false;
@@ -1002,14 +1100,16 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   }
 
-  function pcapScrub (req, res, sid, whatToRemove, endCb) {
-    if (pcapScrub.scrubbingBuffers === undefined) {
-      pcapScrub.scrubbingBuffers = [Buffer.alloc(5000), Buffer.alloc(5000), Buffer.alloc(5000)];
-      pcapScrub.scrubbingBuffers[0].fill(0);
-      pcapScrub.scrubbingBuffers[1].fill(1);
+  // --------------------------------------------------------------------------
+  static #scrubbingBuffers;
+  static #pcapScrub (req, res, sid, whatToRemove, endCb) {
+    if (SessionAPIs.#scrubbingBuffers === undefined) {
+      SessionAPIs.#scrubbingBuffers = [Buffer.alloc(5000), Buffer.alloc(5000), Buffer.alloc(5000)];
+      SessionAPIs.#scrubbingBuffers[0].fill(0);
+      SessionAPIs.#scrubbingBuffers[1].fill(1);
       const str = 'Scrubbed! Hoot! ';
       for (let i = 0; i < 5000;) {
-        i += pcapScrub.scrubbingBuffers[2].write(str, i);
+        i += SessionAPIs.#scrubbingBuffers[2].write(str, i);
       }
     }
 
@@ -1022,9 +1122,9 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
             try {
               const obj = {};
               pcap.decode(packet, obj);
-              pcap.scrubPacket(obj, pos, pcapScrub.scrubbingBuffers[0], whatToRemove === 'all');
-              pcap.scrubPacket(obj, pos, pcapScrub.scrubbingBuffers[1], whatToRemove === 'all');
-              pcap.scrubPacket(obj, pos, pcapScrub.scrubbingBuffers[2], whatToRemove === 'all');
+              pcap.scrubPacket(obj, pos, SessionAPIs.#scrubbingBuffers[0], whatToRemove === 'all');
+              pcap.scrubPacket(obj, pos, SessionAPIs.#scrubbingBuffers[1], whatToRemove === 'all');
+              pcap.scrubPacket(obj, pos, SessionAPIs.#scrubbingBuffers[2], whatToRemove === 'all');
             } catch (e) {
               console.log(`ERROR - Couldn't scrub packet at ${pos} -`, util.inspect(e, false, 50));
             }
@@ -1101,15 +1201,16 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   }
 
-  function scrubList (req, res, whatToRemove, list) {
+  // --------------------------------------------------------------------------
+  static #scrubList (req, res, whatToRemove, list) {
     if (!list) { return res.serverError(200, 'Missing list of sessions'); }
 
     async.eachLimit(list, 10, (item, nextCb) => {
       const fields = item.fields;
 
-      sessionAPIs.isLocalView(fields.node, () => {
+      SessionAPIs.isLocalView(fields.node, () => {
         // Get from our DISK
-        pcapScrub(req, res, Db.session2Sid(item), whatToRemove, nextCb);
+        SessionAPIs.#pcapScrub(req, res, Db.session2Sid(item), whatToRemove, nextCb);
       }, () => {
         // Get from remote DISK
         const scrubPath = `${fields.node}/delete/${whatToRemove}/${Db.session2Sid(item)}`;
@@ -1120,109 +1221,100 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     }, (err) => {
       let text;
       if (whatToRemove === 'all') {
-        text = `Deletion PCAP and SPI of ${list.length} sessions complete. Give Elasticsearch 60 seconds to complete SPI deletion.`;
+        text = `Deletion PCAP and SPI of ${list.length} sessions complete. Give OpenSearch/Elasticsearch 60 seconds to complete SPI deletion.`;
       } else if (whatToRemove === 'spi') {
-        text = `Deletion SPI of ${list.length} sessions complete. Give Elasticsearch 60 seconds to complete SPI deletion.`;
+        text = `Deletion SPI of ${list.length} sessions complete. Give OpenSearch/Elasticsearch 60 seconds to complete SPI deletion.`;
       } else {
         text = `Scrubbing PCAP of ${list.length} sessions complete`;
       }
-      return res.end(JSON.stringify({ success: true, text: text }));
+      return res.end(JSON.stringify({ success: true, text }));
     });
   }
 
   // --------------------------------------------------------------------------
   // EXPOSED HELPERS
   // --------------------------------------------------------------------------
-  sessionAPIs.processSessionId = (id, fullSession, headerCb, packetCb, endCb, maxPackets, limit) => {
+  static processSessionId (id, fullSession, headerCb, packetCb, endCb, maxPackets, limit) {
+    let extra;
     let options;
     if (!fullSession) {
       options = { _source: false, fields: 'node,network.packets,packetPos,source.ip,source.port,destination.ip,destination.port,ipProtocol,packetLen'.split(',') };
     }
 
-    Db.getSession(id, options, (err, session) => {
+    Db.getSession(id, options, async (err, session) => {
       if (err || !session.found) {
         console.log('ERROR - session get error in processSessionId', util.inspect(err, false, 50), session);
         return endCb('Session not found', null);
       }
 
-      let packetPos;
-      let fields;
-      try
-      {
-        packetPos = session.fields.packetPos;
-        fields = session.fields;
+      const fields = session.fields;
+
+      if (!fields.packetPos) {
+        return endCb(null);
       }
-      catch (e)
-      {
-        packetPos = session._source.packetPos;
-        fields = session._source;
-      }
-      
+
       if (maxPackets && fields.packetPos.length > maxPackets) {
         fields.packetPos.length = maxPackets;
       }
 
-      /* Go through the list of prefetch the id to file name if we are running in parallel to
-       * reduce the number of elasticsearch queries and problems
-       */
-      let outstanding = 0;
-      let i;
-      let ilen;
-
-      function fileReadyCb (fileInfo) {
-        outstanding--;
-
-        // All of the replies have been received
-        if (i === ilen && outstanding === 0) {
-          readyToProcess();
-        }
-      }
-
-      for (i = 0, ilen = fields.packetPos.length; i < ilen; i++) {
+      /* Go through the list of packets and prefetch the id to file name mapping */
+      let afileInfo;
+      for (let i = 0, ilen = fields.packetPos.length; i < ilen; i++) {
         if (fields.packetPos[i] < 0) {
-          outstanding++;
-          Db.fileIdToFile(fields.node, -1 * fields.packetPos[i], fileReadyCb);
+          afileInfo ??= await Db.fileIdToFile(fields.node, -1 * fields.packetPos[i]);
         }
       }
 
-      function readyToProcess () {
-        const pcapWriteMethod = Config.getFull(fields.node, 'pcapWriteMethod');
-        let psid = processSessionIdDisk;
-        const writer = internals.writers[pcapWriteMethod];
-        if (writer && writer.processSessionId) {
-          psid = writer.processSessionId;
+      /* Figure out which decoder to use */
+      let psid;
+      if (afileInfo?.scheme && internals.schemes.has(afileInfo.scheme)) {
+        const scheme = internals.schemes.get(afileInfo.scheme);
+        if (scheme && scheme.getBlock) {
+          psid ??= SessionAPIs.#processSessionIdBlock;
+          extra = scheme.getBlock;
+        }
+      }
+
+      const pcapWriteMethod = Config.getFull(fields.node, 'pcapWriteMethod');
+      const writer = internals.writers.get(pcapWriteMethod);
+      if (writer && writer.processSessionId) {
+        psid ??= writer.processSessionId;
+      }
+
+      psid ??= SessionAPIs.#processSessionIdDisk;
+
+      /* Decode the packets */
+      psid(session, headerCb, packetCb, (err, psidFields) => {
+        if (!psidFields) {
+          return endCb(err, psidFields);
         }
 
-        psid(session, headerCb, packetCb, (err, psidFields) => {
-          if (!psidFields) {
-            return endCb(err, psidFields);
-          }
+        if (!psidFields.tags) {
+          psidFields.tags = [];
+        }
 
-          if (!psidFields.tags) {
-            psidFields.tags = [];
-          }
-
-          ViewerUtils.fixFields(psidFields, endCb);
-        }, limit);
-      }
+        ViewerUtils.fixFields(psidFields, endCb);
+      }, limit, extra);
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
-   * The query params to build an Elasticsearch sessions query.
+   * Many Arkime Session requests support a standard set of query parameters.
+   * These parameters can be used to filter and sort the returned data.
+   * For large queries, prefer the POST method to avoid URL length limits, which allows you to include parameters in the request body (these override any URL duplicates).
+   * Ensure parameters with special characters are URL encoded when placed in the URL.
    *
-   * For long expressions use POST for client requests to the server.
-   * When using POST the request body and request query are merged. Any duplicate parameters use the request body parameter.
    * @typedef SessionsQuery
    * @type {object}
-   * @param {number} date=1 - The number of hours of data to return (-1 means all data). Defaults to 1
-   * @param {string} expression - The search expression string
-   * @param {number} facets=0 - 1 = include the aggregation information for maps and timeline graphs. Defaults to 0
-   * @param {number} length=100 - The number of items to return. Defaults to 100, Max is 2,000,000
-   * @param {number} start=0 - The entry to start at. Defaults to 0
+   * @param {number} date=1 - Perform the search from a specified number of hours ago until the present moment, where '-1' indicates searching all available data.
+   * @param {string} expression - The search expression string, ensure URL encoded
+   * @param {number} facets=0 - 1 = include the aggregation information for maps and timeline graphs.
+   * @param {number} length=100 - The number of items to return, beginning at start parameter, max is 2,000,000
+   * @param {number} start=0 - The entry to start at for pagination purposes.
    * @param {number} startTime - If the date parameter is not set, this is the start time of data to return. Format is seconds since Unix EPOC.
    * @param {number} stopTime  - If the date parameter is not set, this is the stop time of data to return. Format is seconds since Unix EPOC.
-   * @param {string} view - The view name to apply before the expression.
+   * @param {string} view - The Arkime view name to apply before the expression.
    * @param {string} order - Comma separated list of db field names to sort on. Data is sorted in order of the list supplied. Optionally can be followed by :asc or :desc for ascending or descending sorting.
    * @param {string} fields - Comma separated list of db field names to return.
      Default is ipProtocol, rootId, totDataBytes, client.bytes, server.bytes, firstPacket, lastPacket, source.ip, source.port, destination.ip, destination.port, network.packets, source.packets, destination.packets, network.bytes, source.bytes, destination.bytes, node, http.uri, source.geo.country_iso_code, destination.geo.country_iso_code, email.subject, email.src, email.dst, email.filename, dns.host, cert, irc.channel, http.xffGEO
@@ -1232,9 +1324,10 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
      'both' - Bounded: Both the first and last packet timestamps for the session must be inside the time window.
      'either' - Session Overlaps: The timestamp of the first packet must be before the end of the time window AND the timestamp of the last packet must be after the start of the time window.
      'database' - Database: The timestamp the session was written to the database. This can be up to several minutes AFTER the last packet was received.
-   * @param {boolean} strictly=false - When set the entire session must be inside the date range to be observed, otherwise if it overlaps it is displayed. Overwrites the bounding parameter, sets bonding to 'both'
+   * @param {boolean} strictly=false - When set the entire session must be inside the date range to be observed, otherwise if it overlaps it is displayed. Overwrites the bounding parameter, sets bounding to 'both'
    */
 
+  // --------------------------------------------------------------------------
   /**
    * Builds the session query based on req.query
    * @ignore
@@ -1244,7 +1337,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @param {boolean} queryOverride=null - override the client query with overriding query
    * @returns {function} - the callback to call once the session query is built or an error occurs
    */
-  sessionAPIs.buildSessionQuery = async (req, buildCb, queryOverride = null) => {
+  static async buildSessionQuery (req, buildCb, queryOverride = null) {
     // validate time limit is not exceeded
     let timeLimitExceeded = false;
 
@@ -1388,11 +1481,11 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       }
     }
 
-    addSortToQuery(query, reqQuery, 'firstPacket');
+    SessionAPIs.#addSortToQuery(query, reqQuery, 'firstPacket');
 
     let shortcuts;
     try { // try to fetch shortcuts
-      shortcuts = await Db.getShortcutsCache(req.user.userId);
+      shortcuts = await Db.getShortcutsCache(req.user);
     } catch (err) { // don't need to do anything, there will just be no
       // shortcuts sent to the parser. but still log the error.
       console.log('ERROR - fetching shortcuts cache when building sessions query', util.inspect(err, false, 50));
@@ -1400,7 +1493,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
 
     // always complete building the query regardless of shortcuts
     let err;
-    molochparser.parser.yy = {
+    arkimeparser.parser.yy = {
       views: req.user.views,
       fieldsMap: Config.getFieldsMap(),
       dbFieldsMap: Config.getDBFieldsMap(),
@@ -1411,24 +1504,29 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     };
 
     if (reqQuery.expression) {
-      // reqQuery.expression = reqQuery.expression.replace(/\\/g, "\\\\");
-      try {
-        query.query.bool.filter.push(molochparser.parse(reqQuery.expression));
-      } catch (e) {
-        err = e;
+      if (!ArkimeUtil.isString(reqQuery.expression)) {
+        err = 'Expression need to be a string';
+      } else {
+        // reqQuery.expression = reqQuery.expression.replace(/\\/g, "\\\\");
+        try {
+          query.query.bool.filter.push(arkimeparser.parse(reqQuery.expression));
+        } catch (e) {
+          err = e;
+        }
       }
     }
 
     if (!err && reqQuery.view) {
-      addViewToQuery(req, query, ViewerUtils.continueBuildQuery, buildCb, queryOverride);
+      SessionAPIs.#addViewToQuery(req, query, ViewerUtils.continueBuildQuery, buildCb, queryOverride);
     } else {
       ViewerUtils.continueBuildQuery(req, query, err, buildCb, queryOverride);
     }
   };
 
-  sessionAPIs.sessionsListFromIds = (req, ids, fields, cb) => {
+  // --------------------------------------------------------------------------
+  static sessionsListFromIds (req, ids, fields, cb) {
     let processSegments = false;
-    if (req && ((req.query.segments && req.query.segments.match(/^(time|all)$/)) || (req.query.segments && req.query.segments.match(/^(time|all)$/)))) {
+    if (req?.query && ArkimeUtil.isString(req.query.segments) && req.query.segments.match(/^(time|all)$/)) {
       if (fields.indexOf('rootId') === -1) { fields.push('rootId'); }
       processSegments = true;
     }
@@ -1437,7 +1535,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     const nonArrayFields = ['ipProtocol', 'firstPacket', 'lastPacket', 'source.ip', 'source.port', 'source.geo.country_iso_code', 'destination.ip', 'destination.port', 'destination.geo.country_iso_code', 'network.bytes', 'totDataBytes', 'network.packets', 'node', 'rootId', 'http.xffGEO'];
     const fixFields = nonArrayFields.filter((x) => { return fields.indexOf(x) !== -1; });
 
-    const options = ViewerUtils.addCluster(req ? req.query.cluster : undefined, { _source: false, fields: fields });
+    const options = ViewerUtils.addCluster(req ? req.query.cluster : undefined, { _source: false, fields });
     options.arkime_unflatten = false;
     async.eachLimit(ids, 10, (id, nextCb) => {
       Db.getSession(id, options, (err, session) => {
@@ -1457,10 +1555,10 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       });
     }, (err) => {
       if (processSegments) {
-        sessionAPIs.buildSessionQuery(req, (err, query, indices) => {
+        SessionAPIs.buildSessionQuery(req, (err, query, indices) => {
           query.fields = fields;
           query._source = false;
-          sessionsListAddSegments(req, indices, query, list, (err, addSegmentsList) => {
+          SessionAPIs.#sessionsListAddSegments(req, indices, query, list, (err, addSegmentsList) => {
             cb(err, addSegmentsList);
           });
         });
@@ -1470,7 +1568,8 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
-  sessionAPIs.isLocalView = (node, yesCb, noCb) => {
+  // --------------------------------------------------------------------------
+  static isLocalView (node, yesCb, noCb) {
     if (internals.isLocalViewRegExp && node.match(internals.isLocalViewRegExp)) {
       if (Config.debug > 1) {
         console.log(`DEBUG: node:${node} is local view because matches ${internals.isLocalViewRegExp}`);
@@ -1479,7 +1578,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     }
 
     const pcapWriteMethod = Config.getFull(node, 'pcapWriteMethod');
-    const writer = internals.writers[pcapWriteMethod];
+    const writer = internals.writers.get(pcapWriteMethod);
     if (writer && writer.localNode === false) {
       if (Config.debug > 1) {
         console.log(`DEBUG: node:${node} is local view because of writer`);
@@ -1489,8 +1588,9 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     return Db.isLocalView(node, yesCb, noCb);
   };
 
-  sessionAPIs.proxyRequest = (req, res, errCb) => {
-    ViewerUtils.noCache(req, res);
+  // --------------------------------------------------------------------------
+  static proxyRequest (req, res, errCb) {
+    ArkimeUtil.noCache(req, res);
 
     ViewerUtils.getViewUrl(req.params.nodeName, (err, viewUrl, client) => {
       if (err) {
@@ -1501,13 +1601,19 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         return res.send(`Can't find view url for '${ArkimeUtil.safeStr(req.params.nodeName)}' check viewer logs on '${Config.hostName()}'`);
       }
 
-      const url = new URL(req.url, viewUrl);
+      let url;
+      if (req.url.startsWith('/')) {
+        url = new URL(req.url.substring(1), viewUrl);
+      } else {
+        url = new URL(req.url, viewUrl);
+      }
       const options = {
         timeout: 20 * 60 * 1000,
         agent: client === http ? internals.httpAgent : internals.httpsAgent
       };
 
-      Auth.addS2SAuth(options, req.user, req.params.nodeName, req.url);
+      const urlPath = url.pathname + (url.search ?? '');
+      Auth.addS2SAuth(options, req.user, req.params.nodeName, urlPath);
       ViewerUtils.addCaTrust(options, req.params.nodeName);
 
       const preq = client.request(url, options, (pres) => {
@@ -1536,7 +1642,8 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
-  sessionAPIs.addTagsList = (allTagNames, sessionList, doneCb) => {
+  // --------------------------------------------------------------------------
+  static addTagsList (allTagNames, sessionList, doneCb) {
     if (!sessionList.length) {
       console.log(`No sessions to add tags (${allTagNames}) to`);
       return doneCb(null);
@@ -1559,7 +1666,8 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     }, doneCb);
   };
 
-  sessionAPIs.removeTagsList = (res, allTagNames, sessionList) => {
+  // --------------------------------------------------------------------------
+  static removeTagsList (res, allTagNames, sessionList) {
     if (!sessionList.length) {
       return res.serverError(200, 'No sessions to remove tags from');
     }
@@ -1587,9 +1695,10 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
-  sessionAPIs.processSessionIdAndDecode = (id, numPackets, doneCb) => {
+  // --------------------------------------------------------------------------
+  static processSessionIdAndDecode (id, numPackets, doneCb) {
     let packets = [];
-    sessionAPIs.processSessionId(id, true, null, (pcap, buffer, cb, i) => {
+    SessionAPIs.processSessionId(id, true, null, (pcap, buffer, cb, i) => {
       let obj = {};
       if (buffer.length > 16) {
         pcap.decode(buffer, obj);
@@ -1613,7 +1722,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
           return doneCb(err, session, results);
         });
       } else if (packets[0].ip.p === 6) {
-        const key = session.source.ip;
+        const key = ipaddr.parse(session.source.ip).toString();
         Pcap.reassemble_tcp(packets, numPackets, key + ':' + session.source.port, (err, results) => {
           return doneCb(err, session, results);
         });
@@ -1637,14 +1746,18 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
   /**
    * POST/GET - /api/buildquery
    *
-   * Builds an elasticsearch session query and returns the query and the elasticsearch indices to the client.
+   * This API allows you to build the query that Arkime viewer would use so you can use yourself against OpenSearch/Elasticsearch.
+   *
    * @name /buildquery
-   * @param {SessionsQuery} query - The request query to filter sessions
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    * @returns {object} query - The elasticsearch query
    * @returns {object} indices - The elasticsearch indices that contain sessions in this query
+   * @example
+   *   Returns the OpenSearch/Elasticsearch query for all the sessions with the source IP of 1.2.3.4
+   *   curl -v 'http://localhost:8005/api/buildquery?date=-1&expression=ip.src%3D%3D1.2.3.4'
    */
-  sessionAPIs.getQuery = (req, res) => {
-    sessionAPIs.buildSessionQuery(req, (bsqErr, query, indices) => {
+  static getQuery (req, res) {
+    SessionAPIs.buildSessionQuery(req, (bsqErr, query, indices) => {
       if (bsqErr) {
         return res.send({
           recordsTotal: 0,
@@ -1658,23 +1771,28 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         query.fields = ViewerUtils.queryValueToArray(req.query.fields);
       }
 
-      res.send({ esquery: query, indices: indices });
+      res.send({ esquery: query, indices });
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
-   * POST/GET - /api/sessions
+   * POST/GET - /api/sessions OR /sessions.json
    *
-   * Builds an elasticsearch session query. Gets a list of sessions and returns them to the client.
+   * Return all the JSON formatted session data based on the query parameters.
+   *
    * @name /sessions
-   * @param {SessionsQuery} query - The request query to filter sessions
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    * @returns {object} map - The data to populate the sessions map
    * @returns {object} graph - The data to populate the sessions timeline graph
    * @returns {array} data - The list of sessions with the requested fields
    * @returns {number} recordsTotal - The total number of sessions Arkime knows about
    * @returns {number} recordsFiltered - The number of sessions matching query
+   * @example
+   *   Returns all the sessions with the source IP of 1.2.3.4
+   *   curl -v 'http://localhost:8005/api/sessions?date=-1&expression=ip.src%3D%3D1.2.3.4'
    */
-  sessionAPIs.getSessions = (req, res) => {
+  static getSessions (req, res) {
     let map = {};
     let graph = {};
 
@@ -1693,7 +1811,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       recordsFiltered: 0
     };
 
-    sessionAPIs.buildSessionQuery(req, (bsqErr, query, indices) => {
+    SessionAPIs.buildSessionQuery(req, (bsqErr, query, indices) => {
       if (bsqErr) {
         response.error = bsqErr.toString();
         return res.send(response);
@@ -1731,7 +1849,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
 
       Promise.all([
         Db.searchSessions(indices, query, options),
-        Db.numberOfDocuments(['sessions2-*', 'sessions3-*'], options.cluster ? { cluster: options.cluster } : {})
+        Db.numberOfDocuments(Db.getSessionIndices(), options.cluster ? { cluster: options.cluster } : {})
       ]).then(([sessions, total]) => {
         if (Config.debug) {
           console.log('/api/sessions result', util.inspect(sessions, false, 50));
@@ -1786,7 +1904,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
             res.logCounts(response.data.length, response.recordsFiltered, response.recordsTotal);
             return res.send(response);
           } catch (e) {
-            console.trace(`ERROR - ${req.method} /api/sessions`, e.stack);
+            console.trace(`ERROR - ${req.method} /api/sessions`, ArkimeUtil.sanitizeStr(e.stack));
             response.error = e.toString();
             return res.send(response);
           }
@@ -1799,16 +1917,21 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
-   * POST/GET - /api/sessions/csv OR /api/sessions.csv
+   * POST/GET - /api/sessions/csv OR /sessions.csv
    *
-   * Builds an elasticsearch session query. Gets a list of sessions and returns them as CSV to the client.
+   * Return all the JSON formatted session data based on the query parameters.
    * @name /sessions/csv
-   * @param {SessionsQuery} query - The request query to filter sessions
+   * @param {string} ids - Comma separated list of sessions to retrieve
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    * @returns {csv} csv - The csv with the sessions requested
+   * @example
+   *   Returns all the sessions with the source IP of 1.2.3.4
+   *   curl -v 'http://localhost:8005/api/sessions/csv?date=-1&expression=ip.src%3D%3D1.2.3.4'
    */
-  sessionAPIs.getSessionsCSV = (req, res) => {
-    ViewerUtils.noCache(req, res, 'text/csv');
+  static getSessionsCSV (req, res) {
+    ArkimeUtil.noCache(req, res, 'text/csv');
 
     // default fields to display in csv
     let fields = [
@@ -1826,22 +1949,23 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
 
     if (req.query.ids) {
       const ids = ViewerUtils.queryValueToArray(req.query.ids);
-      sessionAPIs.sessionsListFromIds(req, ids, fields, (err, list) => {
-        csvListWriter(req, res, list, reqFields);
+      SessionAPIs.sessionsListFromIds(req, ids, fields, (err, list) => {
+        SessionAPIs.#csvListWriter(req, res, list, reqFields);
       });
     } else {
-      sessionsListFromQuery(req, res, fields, (err, list) => {
-        csvListWriter(req, res, list, reqFields);
+      SessionAPIs.#sessionsListFromQuery(req, res, fields, (err, list) => {
+        SessionAPIs.#csvListWriter(req, res, list, reqFields);
       });
     }
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST/GET - /api/spiview
    *
    * Builds an elasticsearch session query. Gets a list of field values with counts and returns them to the client.
    * @name /spiview
-   * @param {SessionsQuery} query - The request query to filter sessions
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    * @param {string} spi - Comma separated list of db fields to return. Optionally can be followed by :{count} to specify the number of values returned for the field (defaults to 100).
    * @returns {object} map - The data to populate the sessions map
    * @returns {object} graph - The data to populate the sessions timeline graph
@@ -1849,8 +1973,11 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @returns {object} protocols - The list of protocols with counts
    * @returns {number} recordsTotal - The total number of sessions Arkime knows about
    * @returns {number} recordsFiltered - The number of sessions matching query
+   * @example
+   *   Returns first 100 unique values for the destination.ip field for last 10 hours
+   *   curl -v 'http://localhost:8005/api/spiview?spi=destination.ip:200&date=10
    */
-  sessionAPIs.getSPIView = (req, res) => {
+  static getSPIView (req, res) {
     if (req.query.spi === undefined) {
       return res.send({ spi: {}, recordsTotal: 0, recordsFiltered: 0 });
     }
@@ -1863,7 +1990,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
 
     const response = { spi: {} };
 
-    sessionAPIs.buildSessionQuery(req, (bsqErr, query, indices) => {
+    SessionAPIs.buildSessionQuery(req, (bsqErr, query, indices) => {
       if (bsqErr) {
         response.error = bsqErr.toString();
         return res.send(response);
@@ -1905,7 +2032,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
 
       const indicesa = indices.split(',');
       if (spiDataMaxIndices !== -1 && indicesa.length > spiDataMaxIndices) {
-        bsqErr = 'To save ES from blowing up, reducing number of spi data indices searched from ' + indicesa.length + ' to ' + spiDataMaxIndices + '.  This can be increased by setting spiDataMaxIndices in the config file.  Indices being searched: ';
+        bsqErr = `To save OpenSearch/Elasticsearch from blowing up, Arkime is reducing the number of spi data indices searched from ${indicesa.length} to ${spiDataMaxIndices} for this query.  The Arkime admin can increase the number of searched indices for future queries by setting spiDataMaxIndices to a larger value in the config file.  Indices being searched: `;
         indices = indicesa.slice(-spiDataMaxIndices).join(',');
         bsqErr += indices;
       }
@@ -1915,7 +2042,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       const options = ViewerUtils.addCluster(req.query.cluster);
 
       Promise.all([Db.searchSessions(indices, query, options),
-        Db.numberOfDocuments(['sessions2-*', 'sessions3-*'], options.cluster ? { cluster: options.cluster } : {})
+        Db.numberOfDocuments(Db.getSessionIndices(), options.cluster ? { cluster: options.cluster } : {})
       ]).then(([sessions, total]) => {
         if (Config.debug) {
           console.log('/api/spiview result', util.inspect(sessions, false, 50));
@@ -1971,7 +2098,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
             res.logCounts(response.spi.count, response.recordsFiltered, response.total);
             return res.send(response);
           } catch (e) {
-            console.trace('fetch spiview error', e.stack);
+            console.trace('fetch spiview error', ArkimeUtil.sanitizeStr(e.stack));
             response.error = e.toString();
             return res.send(response);
           }
@@ -2009,23 +2136,31 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST/GET - /api/spigraph
    *
    * Builds an elasticsearch session query. Gets a list of values for a field with counts and graph data and returns them to the client.
    * @name /spigraph
-   * @param {SessionsQuery} query - The request query to filter sessions
-   * @param {string} field=node - The database field to get data for. Defaults to "node".
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
+   * @param {string} exp - The expression field to return data for. Either exp or field is required, field is given priority if both are present.
+   * @param {string} field=node - The database field to return data for. Either exp or field is required, field is given priority if both are present.
    * @returns {object} map - The data to populate the main/aggregate spigraph sessions map
    * @returns {object} graph - The data to populate the main/aggregate spigraph sessions timeline graph
    * @returns {array} items - The list of field values with their corresponding timeline graph and map data
    * @returns {number} recordsTotal - The total number of sessions Arkime knows about
    * @returns {number} recordsFiltered - The number of sessions matching query
    */
-  sessionAPIs.getSPIGraph = (req, res) => {
+  static getSPIGraph (req, res) {
     req.query.facets = 1;
 
-    sessionAPIs.buildSessionQuery(req, (bsqErr, query, indices) => {
+    // req.query.exp -> req.query.field by viewer.js:expToField
+
+    if (req.query.field !== undefined && !ArkimeUtil.isString(req.query.field, 0)) {
+      return res.serverError(403, 'Bad \'field\' parameter');
+    }
+
+    SessionAPIs.buildSessionQuery(req, (bsqErr, query, indices) => {
       const results = { items: [], graph: {}, map: {} };
       if (bsqErr) {
         return res.serverError(403, bsqErr.toString());
@@ -2046,15 +2181,15 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       if (req.query.exp === 'ip.dst:port') { field = 'ip.dst:port'; }
 
       if (field === 'ip.dst:port') {
-        query.aggregations.field = { terms: { field: 'destination.ip', size: size }, aggregations: { sub: { terms: { field: 'destination.port', size: size } } } };
+        query.aggregations.field = { terms: { field: 'destination.ip', size }, aggregations: { sub: { terms: { field: 'destination.port', size } } } };
       } else if (field === 'fileand') {
-        query.aggregations.field = { terms: { field: 'node', size: 1000 }, aggregations: { sub: { terms: { field: 'fileId', size: size } } } };
+        query.aggregations.field = { terms: { field: 'node', size: 1000 }, aggregations: { sub: { terms: { field: 'fileId', size } } } };
       } else {
-        query.aggregations.field = { terms: { field: field, size: size * 2 } };
+        query.aggregations.field = { terms: { field, size: size * 2 } };
       }
 
       Promise.all([
-        Db.numberOfDocuments(['sessions2-*', 'sessions3-*'], options.cluster ? { cluster: options.cluster } : {}),
+        Db.numberOfDocuments(Db.getSessionIndices(), options.cluster ? { cluster: options.cluster } : {}),
         Db.searchSessions(indices, query, options)
       ]).then(([total, result]) => {
         if (result.error) { throw result.error; }
@@ -2204,18 +2339,19 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST/GET - /api/spigraphhierarchy
    *
    * Builds an elasticsearch session query. Gets a list of values for each field with counts and returns them to the client.
    * @name /spigraphhierarchy
-   * @param {SessionsQuery} query - The request query to filter sessions
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    * @param {string} exp - Comma separated list of db fields to populate the graph/table.
    * @param {boolean} strictly=false - When set the entire session must be inside the date range to be observed, otherwise if it overlaps it is displayed. Overwrites the bounding parameter, sets bonding to 'both'
    * @returns {object} hierarchicalResults - The nested data to populate the treemap or pie
    * @returns {array} tableResults - The list data to populate the table
    */
-  sessionAPIs.getSPIGraphHierarchy = (req, res) => {
+  static getSPIGraphHierarchy (req, res) {
     if (req.query.exp === undefined) {
       return res.serverError(403, 'Missing exp parameter');
     }
@@ -2234,7 +2370,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       fields.push(field);
     }
 
-    sessionAPIs.buildSessionQuery(req, (err, query, indices) => {
+    SessionAPIs.buildSessionQuery(req, (err, query, indices) => {
       query.size = 0; // Don't need any real results, just aggregations
       delete query.sort;
       delete query.aggregations;
@@ -2250,9 +2386,9 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         query.query.bool.filter.push({ exists: { field: fields[i].dbField } });
 
         if (fields[i].script) {
-          lastQ.aggregations = { field: { terms: { script: { lang: 'painless', source: fields[i].script }, size: size } } };
+          lastQ.aggregations = { field: { terms: { script: { lang: 'painless', source: fields[i].script }, size } } };
         } else {
-          lastQ.aggregations = { field: { terms: { field: fields[i].dbField, size: size } } };
+          lastQ.aggregations = { field: { terms: { field: fields[i].dbField, size } } };
         }
         lastQ = lastQ.aggregations.field;
       }
@@ -2311,7 +2447,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
               tableResults.push({
                 name: bucket.key,
                 size: bucket.doc_count,
-                parents: parents
+                parents
               });
             }
           }
@@ -2322,27 +2458,31 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
 
         return res.send({
           success: true,
-          tableResults: tableResults,
-          hierarchicalResults: hierarchicalResults
+          tableResults,
+          hierarchicalResults
         });
       });
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST/GET - /api/unique
    *
    * Builds an elasticsearch session query. Gets a list of unique field values (with or without counts) and sends them to the client.
    * @name /unique
-   * @param {SessionsQuery} query - The request query to filter sessions
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    * @param {number} counts=0 - Whether to return counts with he list of unique field values. Defaults to 0. 0 = no counts, 1 - counts.
-   * @param {string} exp - Comma separated list of expression field names to return.
+   * @param {string} exp - The expression field to return unique data for. Either exp or field is required, field is given priority if both are present.
+   * @param {string} field - The database field to return unique data for. Either exp or field is required, field is given priority if both are present.
    * @returns {string} The list of unique fields (with counts if requested)
    */
-  sessionAPIs.getUnique = (req, res) => {
-    ViewerUtils.noCache(req, res, 'text/plain; charset=utf-8');
+  static getUnique (req, res) {
+    ArkimeUtil.noCache(req, res, 'text/plain; charset=utf-8');
 
-    if (req.query.field === undefined && req.query.exp === undefined) {
+    // req.query.exp -> req.query.field by viewer.js:expToField
+
+    if (!ArkimeUtil.isString(req.query.field)) {
       return res.send('Missing field or exp parameter');
     }
 
@@ -2371,6 +2511,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       doneCb = () => {
         res.send(items);
       };
+
       writeCb = (item) => {
         items.push(item.key);
       };
@@ -2397,7 +2538,24 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       };
     }
 
-    sessionAPIs.buildSessionQuery(req, (err, query, indices) => {
+    SessionAPIs.buildSessionQuery(req, (err, query, indices) => {
+      if (err) {
+        res.status(403);
+
+        return res.send(err.toString());
+      }
+
+      const fieldDef = Config.getFieldsMap()[req.query.field];
+      if (req.query.autocomplete !== undefined && fieldDef && fieldDef.type === 'integer') {
+        query.query.bool.filter.push({
+          script: {
+            script: {
+              source: `doc["${req.query.field}"].size() > 0 && doc["${req.query.field}"].value.toString().startsWith("${req.query.autocomplete}")`
+            }
+          }
+        });
+      }
+
       delete query.sort;
       delete query.aggregations;
 
@@ -2465,21 +2623,21 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST/GET - /api/multiunique
    *
    * Builds an elasticsearch session query. Gets an intersection of unique field values (with or without counts) and sends them to the client.
    * @name /multiunique
-   * @param {SessionsQuery} query - The request query to filter sessions
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    * @param {number} counts=0 - Whether to return counts with he list of unique field values. Defaults to 0. 0 = no counts, 1 - counts.
-   * @param {string} exp - The expression field to return unique data for. Either exp or field is required, field is given priority if both are present.
-   * @param {string} field - The database field to return unique data for. Either exp or field is required, field is given priority if both are present.
+   * @param {string} exp - Comma separated list of expression fields to return unique data for.
    * @returns {string} The list of an intersection of unique fields (with counts if requested)
    */
-  sessionAPIs.getMultiunique = (req, res) => {
-    ViewerUtils.noCache(req, res, 'text/plain; charset=utf-8');
+  static getMultiunique (req, res) {
+    ArkimeUtil.noCache(req, res, 'text/plain; charset=utf-8');
 
-    if (req.query.exp === undefined) {
+    if (!ArkimeUtil.isString(req.query.exp)) {
       return res.send('Missing exp parameter');
     }
 
@@ -2507,7 +2665,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       }
     }
 
-    sessionAPIs.buildSessionQuery(req, (err, query, indices) => {
+    SessionAPIs.buildSessionQuery(req, (err, query, indices) => {
       delete query.sort;
       delete query.aggregations;
       query.size = 0;
@@ -2558,6 +2716,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/session/:nodeName/:id/detail
    *
@@ -2565,13 +2724,13 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @name /session/:nodeName/:id/detail
    * @returns {html} The html to display as session detail
    */
-  sessionAPIs.getDetail = (req, res) => {
+  static getDetail (req, res) {
     const options = ViewerUtils.addCluster(req.query.cluster);
-    options._source = 'cert';
+    options._source = ['cert', 'dns'];
     options.fields = ['*'];
     Db.getSession(req.params.id, options, (err, session) => {
       if (err || !session.found) {
-        console.log("Couldn't look up detail data, error for session " + ArkimeUtil.safeStr(req.params.id) + ' Error: ', err);
+        console.log("Couldn't look up detail data, error for session %s Error: ", ArkimeUtil.safeStr(req.params.id), err);
         return res.serverError(500, "Couldn't look up detail data, error for session " + ArkimeUtil.safeStr(req.params.id) + ' Error: ' + err);
       }
 
@@ -2579,7 +2738,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
 
       session.id = req.params.id;
 
-      sortFields(session);
+      SessionAPIs.#sortFields(session);
 
       const hidePackets = (session.fileId === undefined || session.fileId.length === 0) ? 'true' : 'false';
       ViewerUtils.fixFields(session, () => {
@@ -2588,22 +2747,22 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
           cache: internals.isProduction,
           compileDebug: !internals.isProduction,
           user: req.user,
-          session: session,
+          session,
           sep: session.source.ip?.includes(':') ? '.' : ':',
-          Db: Db,
+          Db,
           query: req.query,
           basedir: '/',
-          hidePackets: hidePackets,
+          hidePackets,
           reqFields: Config.headers('headers-http-request'),
           resFields: Config.headers('headers-http-response'),
           emailFields: Config.headers('headers-email')
         }, (err, data) => {
           if (err) {
-            console.trace(`ERROR - ${req.method} /api/session/${req.params.nodeName}/${req.params.id}/detail`, util.inspect(err, false, 50));
+            console.trace(`ERROR - ${req.method} /api/session/%s/%s/detail`, ArkimeUtil.sanitizeStr(req.params.nodeName), ArkimeUtil.sanitizeStr(req.params.id), util.inspect(err, false, 50));
             return req.next(err);
           }
           if (Config.debug > 1) {
-            console.log(`/api/session/${req.params.nodeName}/${req.params.id}/detail rendering`, data.replace(/>/g, '>\n'));
+            console.log('/api/session/%s/%s/detail rendering', ArkimeUtil.sanitizeStr(req.params.nodeName), ArkimeUtil.sanitizeStr(req.params.id), data.replace(/>/g, '>\n'));
           }
           res.send(data);
         });
@@ -2611,6 +2770,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/session/:nodeName/:id/packets
    *
@@ -2618,24 +2778,25 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @name /session/:nodeName/:id/packets
    * @returns {html} The html to display as session packets
    */
-  sessionAPIs.getPackets = (req, res) => {
-    sessionAPIs.isLocalView(req.params.nodeName, () => {
-      ViewerUtils.noCache(req, res);
+  static getPackets (req, res) {
+    SessionAPIs.isLocalView(req.params.nodeName, () => {
+      ArkimeUtil.noCache(req, res);
       req.packetsOnly = true;
-      localSessionDetail(req, res);
+      SessionAPIs.#localSessionDetail(req, res);
     }, () => {
-      return sessionAPIs.proxyRequest(req, res);
+      return SessionAPIs.proxyRequest(req, res);
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST - /api/sessions/addtags
    *
    * Add tag(s) to individual session(s) by id or by query.
    * @name /sessions/addtags
-   * @param {SessionsQuery} query - The request query to filter sessions
    * @param {string} tags - Comma separated list of tags to add to session(s)
    * @param {string} ids - Comma separated list of sessions to add tag(s) to
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    * @param {string} segments=no - Whether to add tags to linked session segments. Default is no. Options include:
      no - Don't add tags to linked segments
      all - Add tags to all linked segments
@@ -2643,9 +2804,9 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @returns {boolean} success - Whether the add tags operation was successful
    * @returns {string} text - The success/error message to (optionally) display to the user
    */
-  sessionAPIs.addTags = (req, res) => {
+  static addTags (req, res) {
     let tags = [];
-    if (req.body.tags) {
+    if (ArkimeUtil.isString(req.body.tags)) {
       tags = req.body.tags.replace(/[^-a-zA-Z0-9_:,]/g, '').split(',');
     }
 
@@ -2656,11 +2817,11 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     if (req.body.ids) {
       const ids = ViewerUtils.queryValueToArray(req.body.ids);
 
-      sessionAPIs.sessionsListFromIds(req, ids, ['tags', 'node'], (err, list) => {
+      SessionAPIs.sessionsListFromIds(req, ids, ['tags', 'node'], (err, list) => {
         if (!list.length) {
           return res.serverError(200, 'No sessions to add tags to');
         }
-        sessionAPIs.addTagsList(tags, list, async () => {
+        SessionAPIs.addTagsList(tags, list, async () => {
           await Db.refresh('sessions*');
           return res.send(JSON.stringify({
             success: true,
@@ -2669,11 +2830,11 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         });
       });
     } else {
-      sessionsListFromQuery(req, res, ['tags', 'node'], (err, list) => {
+      SessionAPIs.#sessionsListFromQuery(req, res, ['tags', 'node'], (err, list) => {
         if (!list.length) {
           return res.serverError(200, 'No sessions to add tags to');
         }
-        sessionAPIs.addTagsList(tags, list, async () => {
+        SessionAPIs.addTagsList(tags, list, async () => {
           await Db.refresh('sessions*');
           return res.send(JSON.stringify({
             success: true,
@@ -2684,14 +2845,15 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     }
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST - /api/sessions/removetags
    *
    * Removes tag(s) from individual session(s) by id or by query.
    * @name /sessions/removetags
-   * @param {SessionsQuery} query - The request query to filter sessions
    * @param {string} tags - Comma separated list of tags to remove from session(s)
    * @param {string} ids - Comma separated list of sessions to remove tag(s) from
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    * @param {string} segments=no - Whether to remove tags from linked session segments. Default is no. Options include:
      no - Don't remove tags from linked segments
      all - Remove tags from all linked segments
@@ -2699,9 +2861,9 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @returns {boolean} success - Whether the remove tags operation was successful
    * @returns {string} text - The success/error message to (optionally) display to the user
    */
-  sessionAPIs.removeTags = (req, res) => {
+  static removeTags (req, res) {
     let tags = [];
-    if (req.body.tags) {
+    if (ArkimeUtil.isString(req.body.tags)) {
       tags = req.body.tags.replace(/[^-a-zA-Z0-9_:,]/g, '').split(',');
     }
 
@@ -2712,16 +2874,17 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     if (req.body.ids) {
       const ids = ViewerUtils.queryValueToArray(req.body.ids);
 
-      sessionAPIs.sessionsListFromIds(req, ids, ['tags'], (err, list) => {
-        sessionAPIs.removeTagsList(res, tags, list);
+      SessionAPIs.sessionsListFromIds(req, ids, ['tags'], (err, list) => {
+        SessionAPIs.removeTagsList(res, tags, list);
       });
     } else {
-      sessionsListFromQuery(req, res, ['tags'], (err, list) => {
-        sessionAPIs.removeTagsList(res, tags, list);
+      SessionAPIs.#sessionsListFromQuery(req, res, ['tags'], (err, list) => {
+        SessionAPIs.removeTagsList(res, tags, list);
       });
     }
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/session/:nodeName/:id/body/:bodyType/:bodyNum/:bodyName
    *
@@ -2729,8 +2892,8 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @name /session/:nodeName/:id/body/:bodyType/:bodyNum/:bodyName
    * @returns {file} file - The file in the session
    */
-  sessionAPIs.getRawBody = (req, res) => {
-    reqGetRawBody(req, (err, data) => {
+  static getRawBody (req, res) {
+    SessionAPIs.#reqGetRawBody(req, (err, data) => {
       if (err) {
         console.trace(err);
         return res.end('Error');
@@ -2743,6 +2906,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/session/:nodeName/:id/bodypng/:bodyType/:bodyNum/:bodyName
    *
@@ -2750,8 +2914,8 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @name /session/:nodeName/:id/bodypng/:bodyType/:bodyNum/:bodyName
    * @returns {image/png} image - The bitmap image.
    */
-  sessionAPIs.getFilePNG = (req, res) => {
-    reqGetRawBody(req, (err, data) => {
+  static getFilePNG (req, res) {
+    SessionAPIs.#reqGetRawBody(req, (err, data) => {
       if (err || data === null || data.length === 0) {
         return res.send(internals.emptyPNG);
       }
@@ -2769,73 +2933,83 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/sessions/pcap OR /api/sessions.pcap
    *
    * Retrieve the raw session data in pcap format.
    * @name /sessions/pcap
-   * @param {SessionsQuery} query - The request query to filter sessions
-   * @param {string} ids - The list of ids to return
+   * @param {string} ids - The list of ids to return sessions for
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    * @param {boolean} segments=false - When set return linked segments
    * @returns {pcap} A PCAP file with the sessions requested
+   * @example
+   *   Returns pcap for sessions with the source IP of 1.2.3.4
+   *   curl -v 'http://localhost:8005/api/sessions/pcap/anyfilename.pcap?date=-1&expression=ip.src%3D%3D1.2.3.4'
    */
-  sessionAPIs.getPCAP = (req, res) => {
-    return sessionsPcap(req, res, writePcap, 'pcap');
+  static getPCAP (req, res) {
+    return SessionAPIs.#sessionsPcap(req, res, SessionAPIs.#writePcap, 'pcap');
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/sessions/pcapng OR /api/sessions.pcapng
    *
    * Retrieve the raw session data in pcapng format.
    * @name /sessions/pcapng
-   * @param {SessionsQuery} query - The request query to filter sessions
-   * @param {string} ids - The list of ids to return
+   * @param {string} ids - The list of ids to return sessions for
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    * @param {boolean} segments=false - When set return linked segments
    * @returns {pcap} A PCAPNG file with the sessions requested
    */
-  sessionAPIs.getPCAPNG = (req, res) => {
-    return sessionsPcap(req, res, writePcapNg, 'pcapng');
+  static getPCAPNG (req, res) {
+    return SessionAPIs.#sessionsPcap(req, res, SessionAPIs.#writePcapNg, 'pcapng');
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/session/:nodeName/:id/pcap OR /api/session/:nodeName/:id.pcap
    *
    * Retrieve the raw session data in pcap format from a specific node.
+   * @ignore
    * @name /session/:nodeName/:id/pcap
    * @returns {pcap} A PCAP file with the session requested
    */
-  sessionAPIs.getPCAPFromNode = (req, res) => {
-    ViewerUtils.noCache(req, res, 'application/vnd.tcpdump.pcap');
+  static getPCAPFromNode (req, res) {
+    ArkimeUtil.noCache(req, res, 'application/vnd.tcpdump.pcap');
     const writeHeader = !req.query || !req.query.noHeader || req.query.noHeader !== 'true';
-    writePcap(res, req.params.id, { writeHeader: writeHeader }, () => {
+    SessionAPIs.#writePcap(res, req.params.id, { writeHeader }, () => {
       res.end();
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/session/:nodeName/:id/pcapng OR /api/session/:nodeName/:id.pcapng
    *
    * Retrieve the raw session data in pcapng format from a specific node.
+   * @ignore
    * @name /session/:nodeName/:id/pcapng
    * @returns {pcap} A PCAPNG file with the session requested
    */
-  sessionAPIs.getPCAPNGFromNode = (req, res) => {
-    ViewerUtils.noCache(req, res, 'application/vnd.tcpdump.pcap');
+  static getPCAPNGFromNode (req, res) {
+    ArkimeUtil.noCache(req, res, 'application/vnd.tcpdump.pcap');
     const writeHeader = !req.query || !req.query.noHeader || req.query.noHeader !== 'true';
-    writePcapNg(res, req.params.id, { writeHeader: writeHeader }, () => {
+    SessionAPIs.#writePcapNg(res, req.params.id, { writeHeader }, () => {
       res.end();
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/session/entire/:nodeName/:id/pcap OR /api/session/entire/:nodeName/:id.pcap
    *
-   * Retrieve the entire pcap for a session.
+   * Retrieve the pcap for a session given the session id and node name.
    * @name /session/entire/:nodeName/:id/pcap
    * @returns {pcap} A PCAP file with the session requested
    */
-  sessionAPIs.getEntirePCAP = (req, res) => {
-    ViewerUtils.noCache(req, res, 'application/vnd.tcpdump.pcap');
+  static getEntirePCAP (req, res) {
+    ArkimeUtil.noCache(req, res, 'application/vnd.tcpdump.pcap');
 
     const writerOptions = { writeHeader: true };
 
@@ -2847,30 +3021,31 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     };
 
     if (Config.debug) {
-      console.log(`/api/session/entire/${req.params.nodeName}/${req.params.id}/pcap query`, JSON.stringify(query, false, 2));
+      console.log('/api/session/entire/%s/%s/pcap query', ArkimeUtil.sanitizeStr(req.params.nodeName), ArkimeUtil.sanitizeStr(req.params.id), JSON.stringify(query, false, 2));
     }
 
-    Db.searchSessions(['sessions2-*', 'sessions3-*'], query, null, (err, data) => {
+    Db.searchSessions(Db.getSessionIndices(true), query, null, (err, data) => {
       async.forEachSeries(data.hits.hits, (item, nextCb) => {
-        writePcap(res, Db.session2Sid(item), writerOptions, nextCb);
+        SessionAPIs.#writePcap(res, Db.session2Sid(item), writerOptions, nextCb);
       }, (err) => {
         res.end();
       });
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/session/raw/:nodeName/:id/png OR /api/session/raw/:nodeName/:id.png
    *
-   * Retrieve a bitmap image representation of packets in a session.
+   * Retrieve a bitmap image representation of packets in a session given the session id and node name.
    * @name /session/raw/:nodeName/:id/png
    * @param {string} type=src - Whether to retrieve the src (source) or dst (desintation) packets bitmap image. Defaults to src.
    * @returns {image/png} image - The bitmap image.
    */
-  sessionAPIs.getPacketPNG = (req, res) => {
-    ViewerUtils.noCache(req, res, 'image/png');
+  static getPacketPNG (req, res) {
+    ArkimeUtil.noCache(req, res, 'image/png');
 
-    sessionAPIs.processSessionIdAndDecode(req.params.id, 1000, (err, session, results) => {
+    SessionAPIs.processSessionIdAndDecode(req.params.id, 1000, (err, session, results) => {
       if (err) {
         return res.send(internals.emptyPNG);
       }
@@ -2909,18 +3084,19 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/session/raw/:nodeName/:id
    *
-   * Retrieve raw packets for a session.
+   * Retrieve raw packets for a session given the session id and node name.
    * @name /session/raw/:nodeName/:id
    * @param {string} type=src - Whether to retrieve the src (source) or dst (desintation) raw packets. Defaults to src.
    * @returns {string} The source or destination packet text.
    */
-  sessionAPIs.getRawPackets = (req, res) => {
-    ViewerUtils.noCache(req, res, 'application/vnd.tcpdump.pcap');
+  static getRawPackets (req, res) {
+    ArkimeUtil.noCache(req, res, 'application/vnd.tcpdump.pcap');
 
-    sessionAPIs.processSessionIdAndDecode(req.params.id, 10000, (err, session, results) => {
+    SessionAPIs.processSessionIdAndDecode(req.params.id, 10000, (err, session, results) => {
       if (err) {
         return res.send('Error');
       }
@@ -2933,23 +3109,25 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/sessions/bodyhash/:hash
    *
    * Retrieve a file given a hash of that file.
    * @name /sessions/bodyhash/:hash
-   * @param {SessionsQuery} query - The request query to filter sessions
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    * @returns {file} file - The file that matches the hash
    */
-  sessionAPIs.getBodyHash = (req, res) => {
+  static getBodyHash (req, res) {
     let hash = null;
     let nodeName = null;
     let sessionID = null;
 
-    sessionAPIs.buildSessionQuery(req, (bsqErr, query, indices) => {
+    SessionAPIs.buildSessionQuery(req, (bsqErr, query, indices) => {
       if (bsqErr) {
         res.status(400);
-        return res.end(bsqErr);
+        console.log('ERROR - Build session query: ', ArkimeUtil.sanitizeStr(bsqErr));
+        return res.end('Session Query Error');
       }
 
       query.size = 1;
@@ -2958,21 +3136,21 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       query.fields = ['node'];
 
       if (Config.debug) {
-        console.log(`/api/sessions/bodyhash/${req.params.hash} ${indices} query`, JSON.stringify(query, null, 2));
+        console.log(`/api/sessions/bodyhash/%s ${indices} query`, ArkimeUtil.sanitizeStr(req.params.hash), JSON.stringify(query, null, 2));
       }
 
       Db.searchSessions(indices, query, {}, (err, sessions) => {
         if (err) {
-          console.log(`ERROR - ${req.method} /api/sessions/bodyhash/${req.params.hash}`, util.inspect(err, false, 50));
+          console.log(`ERROR - ${req.method} /api/sessions/bodyhash/%s`, ArkimeUtil.sanitizeStr(req.params.hash), util.inspect(err, false, 50));
           res.status(400);
           res.end(err);
         } else if (sessions.error) {
-          console.log(`ERROR - ${req.method} /api/sessions/bodyhash/${req.params.hash}`, util.inspect(sessions.error, false, 50));
+          console.log(`ERROR - ${req.method} /api/sessions/bodyhash/%s`, ArkimeUtil.sanitizeStr(req.params.hash), util.inspect(sessions.error, false, 50));
           res.status(400);
           res.end(sessions.error);
         } else {
           if (Config.debug) {
-            console.log(`/api/sessions/bodyhash/${req.params.hash} result`, util.inspect(sessions, false, 50));
+            console.log('/api/sessions/bodyhash/%s result', ArkimeUtil.sanitizeStr(req.params.hash), util.inspect(sessions, false, 50));
           }
 
           if (sessions.hits.hits.length > 0) {
@@ -2980,13 +3158,13 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
             sessionID = Db.session2Sid(sessions.hits.hits[0]);
             hash = req.params.hash;
 
-            sessionAPIs.isLocalView(nodeName, () => { // get file from the local disk
-              localGetItemByHash(nodeName, sessionID, hash, (err, item) => {
+            SessionAPIs.isLocalView(nodeName, () => { // get file from the local disk
+              SessionAPIs.#localGetItemByHash(nodeName, sessionID, hash, (err, item) => {
                 if (err) {
                   res.status(400);
                   return res.end(err);
                 } else if (item) {
-                  ViewerUtils.noCache(req, res, 'application/force-download');
+                  ArkimeUtil.noCache(req, res, 'application/force-download');
                   res.setHeader('content-disposition', contentDisposition(item.bodyName + '.pellet'));
                   return res.end(item.data);
                 } else {
@@ -3000,7 +3178,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
               preq.params.id = sessionID;
               preq.params.hash = hash;
               preq.url = `api/session/${Config.basePath(nodeName) + nodeName}/${sessionID}/bodyhash/${hash}`;
-              return sessionAPIs.proxyRequest(preq, res);
+              return SessionAPIs.proxyRequest(preq, res);
             });
           } else {
             res.status(400);
@@ -3011,6 +3189,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * @ignore
    * POST - /api/sessions/decodings
@@ -3018,25 +3197,26 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * Retrieve decodings.
    * @name /sessions/decodings
    */
-  sessionAPIs.getDecodings = (req, res) => {
+  static getDecodings (req, res) {
     res.send(JSON.stringify(decode.settings()));
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/session/:nodeName/:id/bodyhash/:hash
    *
    * Retrieve a file from a specific node given a hash of that file.
    * @name /session/:nodeName/:id/bodyhash/:hash
-   * @param {SessionsQuery} query - The request query to filter sessions
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    * @returns {file} file - The file that matches the hash
    */
-  sessionAPIs.getBodyHashFromNode = (req, res) => {
-    localGetItemByHash(req.params.nodeName, req.params.id, req.params.hash, (err, item) => {
+  static getBodyHashFromNode (req, res) {
+    SessionAPIs.#localGetItemByHash(req.params.nodeName, req.params.id, req.params.hash, (err, item) => {
       if (err) {
         res.status(400);
         return res.end(err);
       } else if (item) {
-        ViewerUtils.noCache(req, res, 'application/force-download');
+        ArkimeUtil.noCache(req, res, 'application/force-download');
         res.setHeader('content-disposition', contentDisposition(item.bodyName + '.pellet'));
         return res.end(item.data);
       } else {
@@ -3046,17 +3226,20 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/delete
    *
    * Delete SPI and/or scrub PCAP data (remove persmission required).
    * @name /delete
+   * @param {string} ids - Comma separated list of sessions to delete
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    * @param {string} removeSpi=false - Whether to remove the SPI data.
    * @param {string} removePcap=true - Whether to remove the PCAP data.
    * @returns {boolean} success - Whether the operation was successful
    * @returns {string} text - The success/error message to (optionally) display to the user
    */
-  sessionAPIs.deleteData = (req, res) => {
+  static deleteData (req, res) {
     if (req.query.removeSpi !== 'true' && req.query.removePcap !== 'true') {
       return res.serverError(403, 'You can\'t delete nothing');
     }
@@ -3072,18 +3255,19 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
 
     if (req.body.ids) {
       const ids = ViewerUtils.queryValueToArray(req.body.ids);
-      sessionAPIs.sessionsListFromIds(req, ids, ['node'], (err, list) => {
-        scrubList(req, res, whatToRemove, list);
+      SessionAPIs.sessionsListFromIds(req, ids, ['node'], (err, list) => {
+        SessionAPIs.#scrubList(req, res, whatToRemove, list);
       });
     } else if (req.query.expression) {
-      sessionsListFromQuery(req, res, ['node'], (err, list) => {
-        scrubList(req, res, whatToRemove, list);
+      SessionAPIs.#sessionsListFromQuery(req, res, ['node'], (err, list) => {
+        SessionAPIs.#scrubList(req, res, whatToRemove, list);
       });
     } else {
       return res.serverError(403, 'Error: Missing expression. An expression is required so you don\'t delete everything.');
     }
   };
 
+  // --------------------------------------------------------------------------
   /**
    * @ignore
    * GET - /api/session/:nodeName/:id/send
@@ -3091,13 +3275,19 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * Sends a session to a node.
    * @name /session/:nodeName/:id/send
    */
-  sessionAPIs.sendSessionToNode = (req, res) => {
-    ViewerUtils.noCache(req, res);
+  static sendSessionToNode (req, res) {
+    ArkimeUtil.noCache(req, res);
     res.statusCode = 200;
+
+    const cluster = req.query.remoteCluster;
+
+    if (!ArkimeUtil.isString(req.query.saveId)) { return res.serverError(200, 'Missing saveId'); }
+    if (!ArkimeUtil.isString(cluster)) { return res.serverError(200, 'Missing cluster'); }
+    if (!internals.remoteClusters || !internals.remoteClusters[cluster]) { return res.serverError(200, 'Unknown cluster'); }
 
     const options = {
       user: req.user,
-      cluster: req.query.cluster,
+      cluster,
       id: req.params.id,
       saveId: req.query.saveId,
       tags: req.query.tags,
@@ -3109,35 +3299,38 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * @ignore
    * POST - /api/sessions/:nodeName/send
    *
    * Sends sessions to a node.
    * @name /sessions/:nodeName/send
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    * @param {string} ids - Comma separated list of session ids.
    * @param {string} tags - Commas separated list of tags to tag the sent sessions with.
    * @param {string} cluster - The name of the Arkime cluster to send the sessions.
    * @param {saveId} saveId - The sessionId to use on the remote side.
    */
-  sessionAPIs.sendSessionsToNode = (req, res) => {
-    ViewerUtils.noCache(req, res);
+  static sendSessionsToNode (req, res) {
+    ArkimeUtil.noCache(req, res);
     res.statusCode = 200;
 
-    if (req.body.ids === undefined ||
-      req.query.cluster === undefined ||
-      req.query.saveId === undefined ||
-      req.body.tags === undefined) {
-      return res.end();
-    }
+    const cluster = req.query.remoteCluster;
+
+    if (!ArkimeUtil.isString(req.query.saveId)) { return res.serverError(200, 'Missing saveId'); }
+    if (!ArkimeUtil.isString(cluster)) { return res.serverError(200, 'Missing cluster'); }
+    if (!internals.remoteClusters || !internals.remoteClusters[cluster]) { return res.serverError(200, 'Unknown cluster'); }
+    if (req.body.tags !== undefined && !ArkimeUtil.isString(req.body.tags, 0)) { return res.serverError(200, 'When present tags must be a string'); }
+    if (req.body.ids === undefined) { return res.serverError(200, 'Missing ids'); }
 
     let count = 0;
     const ids = ViewerUtils.queryValueToArray(req.body.ids);
     ids.forEach((id) => {
       const options = {
         user: req.user,
-        cluster: req.query.cluster,
-        id: id,
+        cluster,
+        id,
         saveId: req.query.saveId,
         tags: req.body.tags,
         nodeName: req.params.nodeName
@@ -3153,6 +3346,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * @ignore
    * POST - /api/sessions/send
@@ -3160,21 +3354,29 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * Sends sessions.
    * @name /sessions/send
    * @param {string} ids - Comma separated list of session ids.
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    */
-  sessionAPIs.sendSessions = (req, res) => {
+  static sendSessions (req, res) {
+    const cluster = req.body.remoteCluster;
+
+    if (!ArkimeUtil.isString(cluster)) { return res.serverError(200, 'Missing cluster'); }
+    if (!internals.remoteClusters || !internals.remoteClusters[cluster]) { return res.serverError(200, 'Unknown cluster'); }
+    if (req.body.tags !== undefined && !ArkimeUtil.isString(req.body.tags, 0)) { return res.serverError(200, 'When present tags must be a string'); }
+
     if (req.body.ids) {
       const ids = ViewerUtils.queryValueToArray(req.body.ids);
 
-      sessionAPIs.sessionsListFromIds(req, ids, ['node'], (err, list) => {
-        sendSessionsList(req, res, list);
+      SessionAPIs.sessionsListFromIds(req, ids, ['node'], (err, list) => {
+        SessionAPIs.#sendSessionsList(req, res, list);
       });
     } else {
-      sessionsListFromQuery(req, res, ['node'], (err, list) => {
-        sendSessionsList(req, res, list);
+      SessionAPIs.#sessionsListFromQuery(req, res, ['node'], (err, list) => {
+        SessionAPIs.#sendSessionsList(req, res, list);
       });
     }
   };
 
+  // --------------------------------------------------------------------------
   /**
    * @ignore
    * POST - /api/sessions/receive
@@ -3183,17 +3385,17 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @name /sessions/receive
    * @param {saveId} saveId - The sessionId to save the session.
    */
-  sessionAPIs.receiveSession = (req, res) => {
-    if (!req.query.saveId) { return res.serverError(200, 'Missing saveId'); }
+  static #saveIds = {};
+  static receiveSession (req, res) {
+    if (!ArkimeUtil.isString(req.query.saveId)) { return res.serverError(200, 'Missing saveId'); }
 
     req.query.saveId = req.query.saveId.replace(/[^-a-zA-Z0-9_]/g, '');
 
-    // JS Static Variable :)
-    this.saveIds = this.saveIds || {};
+    if (req.query.saveId.length === 0 || req.query.saveId === '__proto__') { return res.serverError(200, 'Bad saveId'); }
 
-    let saveId = this.saveIds[req.query.saveId];
+    let saveId = SessionAPIs.#saveIds[req.query.saveId];
     if (!saveId) {
-      saveId = this.saveIds[req.query.saveId] = { start: 0 };
+      saveId = SessionAPIs.#saveIds[req.query.saveId] = { start: 0 };
     }
 
     let sessionlen = -1;
@@ -3323,6 +3525,6 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       return res.send({ success: true });
     });
   };
-
-  return sessionAPIs;
 };
+
+module.exports = SessionAPIs;

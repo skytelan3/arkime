@@ -1,13 +1,17 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
 
   <div class="connections-page">
-    <MolochCollapsible>
+    <ArkimeCollapsible>
       <span class="fixed-header">
         <!-- search navbar -->
-        <moloch-search
+        <arkime-search
           :start="query.start"
           @changeSearch="cancelAndLoad(true)">
-        </moloch-search> <!-- /search navbar -->
+        </arkime-search> <!-- /search navbar -->
 
         <!-- connections sub navbar -->
         <form class="connections-form">
@@ -44,14 +48,14 @@
                     Src:
                   </span>
                 </span>
-                <moloch-field-typeahead
+                <arkime-field-typeahead
                   :fields="fields"
                   query-param="srcField"
                   :initial-value="srcFieldTypeahead"
                   @fieldSelected="changeSrcField"
                   :history="fieldHistoryConnectionsSrc"
                   page="ConnectionsSrc">
-                </moloch-field-typeahead>
+                </arkime-field-typeahead>
               </div>
             </div> <!-- /src select -->
 
@@ -65,14 +69,14 @@
                     Dst:
                   </span>
                 </span>
-                <moloch-field-typeahead
+                <arkime-field-typeahead
                   :fields="fields"
                   query-param="dstField"
                   :initial-value="dstFieldTypeahead"
                   @fieldSelected="changeDstField"
                   :history="fieldHistoryConnectionsDst"
                   page="ConnectionsDst">
-                </moloch-field-typeahead>
+                </arkime-field-typeahead>
               </div>
             </div> <!-- /dst select -->
 
@@ -290,30 +294,30 @@
           </div>
         </form> <!-- /connections sub navbar -->
       </span>
-    </MolochCollapsible>
+    </ArkimeCollapsible>
 
     <div class="connections-content">
 
       <!-- loading overlay -->
-      <moloch-loading
+      <arkime-loading
         :can-cancel="true"
         v-if="loading && !error"
         @cancel="cancelAndLoad">
-      </moloch-loading> <!-- /loading overlay -->
+      </arkime-loading> <!-- /loading overlay -->
 
       <!-- page error -->
-      <moloch-error
+      <arkime-error
         v-if="error"
         :message="error"
         class="mt-5">
-      </moloch-error> <!-- /page error -->
+      </arkime-error> <!-- /page error -->
 
       <!-- no results -->
-      <moloch-no-results
+      <arkime-no-results
         v-if="!error && !loading && recordsFiltered === 0"
         class="mt-5"
         :view="query.view">
-      </moloch-no-results> <!-- /no results -->
+      </arkime-no-results> <!-- /no results -->
 
       <!-- connections graph container -->
       <svg class="connections-graph"></svg>
@@ -430,13 +434,13 @@
 
 <script>
 // import components
-import MolochSearch from '../search/Search';
-import MolochError from '../utils/Error';
-import MolochLoading from '../utils/Loading';
-import MolochNoResults from '../utils/NoResults';
-import MolochCollapsible from '../utils/CollapsibleWrapper';
+import ArkimeSearch from '../search/Search';
+import ArkimeError from '../utils/Error';
+import ArkimeLoading from '../utils/Loading';
+import ArkimeNoResults from '../utils/NoResults';
+import ArkimeCollapsible from '../utils/CollapsibleWrapper';
 // import services
-import MolochFieldTypeahead from '../utils/FieldTypeahead';
+import ArkimeFieldTypeahead from '../utils/FieldTypeahead';
 import FieldService from '../search/FieldService';
 import UserService from '../users/UserService';
 import ConnectionsService from './ConnectionsService';
@@ -467,22 +471,22 @@ const idRegex = /[\[\]:. ]/g;
 let pendingPromise; // save a pending promise to be able to cancel it
 
 // drag helpers
-function dragstarted (d) {
-  d3.event.sourceEvent.stopPropagation();
-  if (!d3.event.active) { simulation.alphaTarget(0.1).restart(); }
+function dragstarted (e, d) {
+  e.sourceEvent.stopPropagation();
+  if (!e.active) { simulation.alphaTarget(0.1).restart(); }
   draggingNode = d;
   d.fx = d.x;
   d.fy = d.y;
   itemFocus(d);
 }
 
-function dragged (d) {
-  d.fx = d3.event.x;
-  d.fy = d3.event.y;
+function dragged (e, d) {
+  d.fx = e.x;
+  d.fy = e.y;
 }
 
-function dragended (d) {
-  if (!d3.event.active) { simulation.alphaTarget(0).stop(); }
+function dragended (e, d) {
+  if (!e.active) { simulation.alphaTarget(0).stop(); }
   draggingNode = undefined;
   // keep the node where it was dragged
   d.fx = d.x;
@@ -553,12 +557,12 @@ export default {
   name: 'Connections',
   mixins: [clickaway],
   components: {
-    MolochSearch,
-    MolochError,
-    MolochLoading,
-    MolochNoResults,
-    MolochCollapsible,
-    MolochFieldTypeahead
+    ArkimeSearch,
+    ArkimeError,
+    ArkimeLoading,
+    ArkimeNoResults,
+    ArkimeCollapsible,
+    ArkimeFieldTypeahead
   },
   data: function () {
     return {
@@ -578,11 +582,10 @@ export default {
       highlightPrimaryColor: undefined,
       highlightSecondaryColor: undefined,
       highlightTertiaryColor: undefined,
-      closePopups: closePopups,
+      closePopups,
       fontSize: 0.4,
       zoomLevel: 1,
       weight: 'sessions',
-      multiviewer: this.$constants.MOLOCH_MULTIVIEWER,
       fieldHistoryConnectionsSrc: undefined,
       fieldHistoryConnectionsDst: undefined
     };
@@ -917,21 +920,15 @@ export default {
     },
     /* helper functions ---------------------------------------------------- */
     loadData: function () {
+      if (!Utils.checkClusterSelection(this.query.cluster, this.$store.state.esCluster.availableCluster.active, this).valid) {
+        this.drawGraphWrapper({ nodes: [], links: [] }); // draw empty graph
+        this.recordsFiltered = 0;
+        pendingPromise = null;
+        return;
+      }
+
       this.error = '';
       this.loading = true;
-
-      if (this.multiviewer) {
-        const availableCluster = this.$store.state.esCluster.availableCluster.active;
-        const selection = Utils.checkClusterSelection(this.query.cluster, availableCluster);
-        if (!selection.valid) { // invlaid selection
-          this.drawGraphWrapper({ nodes: [], links: [] }); // draw empty graph
-          this.recordsFiltered = 0;
-          pendingPromise = null;
-          this.error = selection.error;
-          this.loading = false;
-          return;
-        }
-      }
 
       if (!this.$route.query.srcField) {
         this.query.srcField = FieldService.getFieldProperty(this.user.settings.connSrcField, 'dbField');
@@ -1103,8 +1100,8 @@ export default {
       svg.call(
         zoom = d3.zoom()
           .scaleExtent([0.1, 4])
-          .on('zoom', () => {
-            container.attr('transform', d3.event.transform);
+          .on('zoom', (e) => {
+            container.attr('transform', e.transform);
           })
       );
 
@@ -1120,13 +1117,13 @@ export default {
         .attr('visibility', this.calculateLinkBaselineVisibility);
 
       // add link mouse listeners for showing popups
-      link.on('mouseover', (l) => {
+      link.on('mouseover', (e, l) => {
         if (draggingNode) { return; }
         if (popupTimer) { clearTimeout(popupTimer); }
         popupTimer = setTimeout(() => {
           this.showLinkPopup(l);
         }, 600);
-      }).on('mouseout', (l) => {
+      }).on('mouseout', () => {
         if (popupTimer) { clearTimeout(popupTimer); }
       });
 
@@ -1154,14 +1151,14 @@ export default {
         );
 
       // add node mouse listeners for showing focus and popups
-      node.on('mouseover', (d) => {
+      node.on('mouseover', (e, d) => {
         if (draggingNode) { return; }
         if (popupTimer) { clearTimeout(popupTimer); }
         popupTimer = setTimeout(() => {
           this.showNodePopup(d);
         }, 600);
         itemFocus(d);
-      }).on('mouseout', (d) => {
+      }).on('mouseout', (e, d) => {
         if (popupTimer) { clearTimeout(popupTimer); }
         unfocus(d);
       });
@@ -1348,13 +1345,13 @@ export default {
             <div class="connections-popup">
               <div class="mb-2 mt-2">
                 <strong>
-                  <moloch-session-field
+                  <arkime-session-field
                     :value="dataNode.id"
                     :session="dataNode"
                     :expr="dataNode.exp"
                     :field="fields[dataNode.dbField]"
                     :pull-left="true">
-                  </moloch-session-field>
+                  </arkime-session-field>
                 </strong>
                 <a class="pull-right cursor-pointer no-decoration"
                   @click="closePopup">
@@ -1378,23 +1375,23 @@ export default {
                     </dt>
                     <dd>
                       <span v-if="!Array.isArray(dataNode[field])">
-                        <moloch-session-field
+                        <arkime-session-field
                           :value="dataNode[field]"
                           :session="dataNode"
                           :expr="fields[field].exp"
                           :field="fields[field]"
                           :pull-left="true">
-                        </moloch-session-field>
+                        </arkime-session-field>
                       </span>
                       <span v-else
                         v-for="value in dataNode[field]">
-                        <moloch-session-field
+                        <arkime-session-field
                           :value="value"
                           :session="dataNode"
                           :expr="fields[field].exp"
                           :field="fields[field]"
                           :pull-left="true">
-                        </moloch-session-field>
+                        </arkime-session-field>
                       </span>&nbsp;
                     </dd>
                     </template>
@@ -1417,7 +1414,7 @@ export default {
           `,
           parent: this,
           data: {
-            dataNode: dataNode,
+            dataNode,
             nodeFields: this.nodeFields,
             fields: this.fieldsMap,
             baselineDate: this.query.baselineDate
@@ -1436,7 +1433,7 @@ export default {
             },
             addExpression: function (op) {
               const fullExpression = `${this.dataNode.exp} == ${this.dataNode.id}`;
-              this.$store.commit('addToExpression', { expression: fullExpression, op: op });
+              this.$store.commit('addToExpression', { expression: fullExpression, op });
             },
             closePopup: function () {
               this.$parent.closePopups();
@@ -1468,22 +1465,22 @@ export default {
                 </a>
               </div>
               <div>
-                <moloch-session-field
+                <arkime-session-field
                   :value="linkData.source.id"
                   :session="linkData"
                   :expr="linkData.srcExp"
                   :field="fields[linkData.srcDbField]"
                   :pull-left="true">
-                </moloch-session-field>
+                </arkime-session-field>
               </div>
               <div class="mb-2">
-                <moloch-session-field
+                <arkime-session-field
                   :value="linkData.target.id"
                   :session="linkData"
                   :expr="linkData.dstExp"
                   :field="fields[linkData.dstDbField]"
                   :pull-left="true">
-                </moloch-session-field>
+                </arkime-session-field>
               </div>
 
               <dl class="dl-horizontal">
@@ -1498,23 +1495,23 @@ export default {
                     </dt>
                     <dd>
                       <span v-if="!Array.isArray(linkData[field])">
-                        <moloch-session-field
+                        <arkime-session-field
                           :value="linkData[field]"
                           :session="linkData"
                           :expr="fields[field].exp"
                           :field="fields[field]"
                           :pull-left="true">
-                        </moloch-session-field>
+                        </arkime-session-field>
                       </span>
                       <span v-else
                         v-for="value in linkData[field]">
-                        <moloch-session-field
+                        <arkime-session-field
                           :value="value"
                           :session="linkData"
                           :expr="fields[field].exp"
                           :field="fields[field]"
                           :pull-left="true">
-                        </moloch-session-field>
+                        </arkime-session-field>
                       </span>&nbsp;
                     </dd>
                   </template>
@@ -1532,7 +1529,7 @@ export default {
           `,
           parent: this,
           data: {
-            linkData: linkData,
+            linkData,
             linkFields: this.linkFields,
             fields: this.fieldsMap
           },
@@ -1547,7 +1544,7 @@ export default {
             },
             addExpression: function (op) {
               const fullExpression = `(${linkData.srcExp} == ${linkData.source.id} && ${linkData.dstExp} == ${linkData.target.id})`;
-              this.$store.commit('addToExpression', { expression: fullExpression, op: op });
+              this.$store.commit('addToExpression', { expression: fullExpression, op });
             },
             closePopup: function () {
               this.$parent.closePopups();

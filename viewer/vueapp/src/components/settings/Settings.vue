@@ -1,7 +1,21 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
 
   <!-- settings content -->
   <div class="settings-page">
+
+    <!-- messages (success/error) displayed at bottom of page -->
+    <b-alert
+      dismissible
+      :variant="msgType"
+      v-model="showMessage"
+      style="z-index: 2000;"
+      class="position-fixed fixed-bottom m-0 rounded-0">
+      {{ msg }}
+    </b-alert> <!-- /messages -->
 
     <!-- sub navbar -->
     <div class="sub-navbar">
@@ -17,27 +31,19 @@
           </span>
         </span>
       </span>
-      <div class="pull-right small toast-container">
-        <moloch-toast
-          class="mr-1"
-          :message="msg"
-          :type="msgType"
-          :done="messageDone">
-        </moloch-toast>
-      </div>
     </div> <!-- /sub navbar -->
 
     <!-- loading overlay -->
-    <moloch-loading
+    <arkime-loading
       v-if="loading">
-    </moloch-loading> <!-- /loading overlay -->
+    </arkime-loading> <!-- /loading overlay -->
 
     <!-- page error -->
-    <moloch-error
+    <arkime-error
       v-if="error"
       :message-html="error"
       class="settings-error">
-    </moloch-error> <!-- /page error -->
+    </arkime-error> <!-- /page error -->
 
     <!-- content -->
     <div class="settings-content row"
@@ -56,11 +62,56 @@
             General
           </a>
           <a class="nav-link cursor-pointer"
+            @click="openView('col')"
+            :class="{'active':visibleTab === 'col'}">
+            <span class="fa fa-fw fa-columns">
+            </span>&nbsp;
+            Column Layout
+          </a>
+          <a class="nav-link cursor-pointer"
+            @click="openView('info')"
+            :class="{'active':visibleTab === 'info'}">
+            <span class="fa fa-fw fa-info">
+            </span>&nbsp;
+            Info Field Layout
+          </a>
+          <a class="nav-link cursor-pointer"
+            @click="openView('spiview')"
+            :class="{'active':visibleTab === 'spiview'}">
+            <span class="fa fa-fw fa-eyedropper">
+            </span>&nbsp;
+            SPI View Layout
+          </a>
+          <a class="nav-link cursor-pointer"
+            @click="openView('theme')"
+            :class="{'active':visibleTab === 'theme'}">
+            <span class="fa fa-fw fa-paint-brush">
+            </span>&nbsp;
+            Themes
+          </a>
+          <a v-if="!multiviewer && !disablePassword"
+            class="nav-link cursor-pointer"
+            @click="openView('password')"
+            :class="{'active':visibleTab === 'password'}">
+            <span class="fa fa-fw fa-lock">
+            </span>&nbsp;
+            Password
+          </a>
+          <hr class="hr-small nav-separator" />
+          <a class="nav-link cursor-pointer"
             @click="openView('views')"
             :class="{'active':visibleTab === 'views'}">
             <span class="fa fa-fw fa-eye">
             </span>&nbsp;
             Views
+          </a>
+          <a v-if="!multiviewer || (multiviewer && hasUsersES)"
+            class="nav-link cursor-pointer"
+            @click="openView('shortcuts')"
+            :class="{'active':visibleTab === 'shortcuts'}">
+            <span class="fa fa-fw fa-list">
+            </span>&nbsp;
+            Shortcuts
           </a>
           <a v-if="!multiviewer"
             class="nav-link cursor-pointer"
@@ -71,49 +122,12 @@
             Periodic Queries
           </a>
           <a class="nav-link cursor-pointer"
-            @click="openView('col')"
-            :class="{'active':visibleTab === 'col'}">
-            <span class="fa fa-fw fa-columns">
-            </span>&nbsp;
-            Column Configs
-          </a>
-          <a class="nav-link cursor-pointer"
-            @click="openView('spiview')"
-            :class="{'active':visibleTab === 'spiview'}">
-            <span class="fa fa-fw fa-eyedropper">
-            </span>&nbsp;
-            SPI View Configs
-          </a>
-          <a class="nav-link cursor-pointer"
-            @click="openView('theme')"
-            :class="{'active':visibleTab === 'theme'}">
-            <span class="fa fa-fw fa-paint-brush">
-            </span>&nbsp;
-            Themes
-          </a>
-          <a v-if="!multiviewer"
-            class="nav-link cursor-pointer"
-            @click="openView('password')"
-            :class="{'active':visibleTab === 'password'}">
-            <span class="fa fa-fw fa-lock">
-            </span>&nbsp;
-            Password
-          </a>
-          <a class="nav-link cursor-pointer"
-            v-has-permission="'createEnabled'"
+            v-has-role="{user:user,roles:'arkimeAdmin'}"
             @click="openView('notifiers')"
             :class="{'active':visibleTab === 'notifiers'}">
             <span class="fa fa-fw fa-bell">
             </span>&nbsp;
             Notifiers
-          </a>
-          <a v-if="!multiviewer || (multiviewer && hasUsersES)"
-            class="nav-link cursor-pointer"
-            @click="openView('shortcuts')"
-            :class="{'active':visibleTab === 'shortcuts'}">
-            <span class="fa fa-fw fa-list">
-            </span>&nbsp;
-            Shortcuts
           </a>
         </div>
       </div> <!-- /navigation -->
@@ -390,13 +404,13 @@
               Default SPI Graph
             </label>
             <div class="col-sm-6">
-              <moloch-field-typeahead
+              <arkime-field-typeahead
                 :dropup="true"
                 :fields="fields"
                 query-param="field"
                 :initial-value="spiGraphTypeahead"
                 @fieldSelected="spiGraphFieldSelected">
-              </moloch-field-typeahead>
+              </arkime-field-typeahead>
             </div>
             <div class="col-sm-3">
               <h4 v-if="spiGraphField">
@@ -416,13 +430,13 @@
               Connections Src
             </label>
             <div class="col-sm-6">
-              <moloch-field-typeahead
+              <arkime-field-typeahead
                 :dropup="true"
                 :fields="fields"
                 query-param="field"
                 :initial-value="connSrcFieldTypeahead"
                 @fieldSelected="connSrcFieldSelected">
-              </moloch-field-typeahead>
+              </arkime-field-typeahead>
             </div>
             <div class="col-sm-3">
               <h4 v-if="connSrcField">
@@ -442,13 +456,13 @@
               Connections Dst
             </label>
             <div class="col-sm-6">
-              <moloch-field-typeahead
+              <arkime-field-typeahead
                 :dropup="true"
                 :fields="fields"
                 query-param="field"
                 :initial-value="connDstFieldTypeahead"
                 @fieldSelected="connDstFieldSelected">
-              </moloch-field-typeahead>
+              </arkime-field-typeahead>
             </div>
             <div class="col-sm-3">
               <h4 v-if="connDstField">
@@ -468,13 +482,13 @@
             </label>
 
             <div class="col-sm-6">
-              <moloch-field-typeahead
+              <arkime-field-typeahead
                 :dropup="true"
                 :fields="integerFields"
                 :initial-value="filtersTypeahead"
                 query-param="field"
                 @fieldSelected="timelineFilterSelected">
-              </moloch-field-typeahead>
+              </arkime-field-typeahead>
             </div>
             <div class="col-sm-3">
               <h4 v-if="timelineDataFilters.length > 0">
@@ -497,564 +511,15 @@
           </div>
         </form>
 
-        <!-- view settings -->
-        <form v-if="visibleTab === 'views'"
-          id="views"
-          class="form-horizontal">
-
-          <h3>Views</h3>
-
-          <p>
-             Saved views provide an easier method to specify common base queries
-             and can be activated in the search bar.
-          </p>
-
-          <table class="table table-striped table-sm">
-            <thead>
-              <tr>
-                <th>Share</th>
-                <th>Name</th>
-                <th>Expression</th>
-                <th width="30%">Sessions Columns</th>
-                <th>Sessions Sort</th>
-                <th>&nbsp;</th>
-              </tr>
-            </thead>
-            <tbody>
-              <!-- views -->
-              <tr v-for="(item, key) in views"
-                @keyup.enter="updateView(key)"
-                @keyup.esc="cancelViewChange(key)"
-                :key="key">
-                <td>
-                  <input type="checkbox"
-                    v-model="item.shared"
-                    @change="toggleShared(item)"
-                    class="form-check mt-2"
-                    :disabled="!user.createEnabled && item.user && item.user !== user.userId"
-                  />
-                </td>
-                <td>
-                  <input type="text"
-                    maxlength="20"
-                    v-model="item.name"
-                    @input="viewChanged(key)"
-                    class="form-control form-control-sm"
-                    :disabled="!user.createEnabled && item.user && item.user !== user.userId"
-                  />
-                </td>
-                <td>
-                  <input type="text"
-                    v-model="item.expression"
-                    @input="viewChanged(key)"
-                    class="form-control form-control-sm"
-                    :disabled="!user.createEnabled && item.user && item.user !== user.userId"
-                  />
-                </td>
-                <td>
-                  <span v-if="item.sessionsColConfig">
-                    <template v-for="col in item.sessionsColConfig.visibleHeaders">
-                      <label class="badge badge-secondary mr-1 mb-0 help-cursor"
-                        v-if="fieldsMap[col]"
-                        v-b-tooltip.hover
-                        :title="fieldsMap[col].help"
-                        :key="col">
-                        {{ fieldsMap[col].friendlyName }}
-                      </label>
-                    </template>
-                  </span>
-                </td>
-                <td>
-                  <span v-if="item.sessionsColConfig">
-                    <template v-for="order in item.sessionsColConfig.order">
-                      <label class="badge badge-secondary mr-1 help-cursor"
-                        :title="fieldsMap[order[0]].help"
-                        v-if="fieldsMap[order[0]]"
-                        v-b-tooltip.hover
-                        :key="order[0]">
-                        {{ fieldsMap[order[0]].friendlyName }}&nbsp;
-                        ({{ order[1] }})
-                      </label>
-                    </template>
-                  </span>
-                </td>
-                <td>
-                  <span class="pull-right">
-                    <button type="button"
-                      v-b-tooltip.hover
-                      title="Copy this views's expression"
-                      class="btn btn-sm btn-theme-secondary"
-                      @click="copyValue(item.expression)">
-                      <span class="fa fa-clipboard fa-fw">
-                      </span>
-                    </button>
-                    <span v-if="user.createEnabled || item.user === user.userId || !item.user">
-                      <span v-if="item.changed">
-                        <button type="button"
-                          v-b-tooltip.hover
-                          @click="updateView(key)"
-                          title="Save changes to this view"
-                          class="btn btn-sm btn-theme-tertiary">
-                          <span class="fa fa-save fa-fw">
-                          </span>
-                        </button>
-                        <button type="button"
-                          v-b-tooltip.hover
-                          class="btn btn-sm btn-warning"
-                          @click="cancelViewChange(key)"
-                          title="Undo changes to this view">
-                          <span class="fa fa-ban fa-fw">
-                          </span>
-                        </button>
-                      </span>
-                      <button v-else
-                        type="button"
-                        v-b-tooltip.hover
-                        title="Delete this view"
-                        class="btn btn-sm btn-danger"
-                        @click="deleteView(item, key)">
-                        <span class="fa fa-trash-o fa-fw">
-                        </span>
-                      </button>
-                    </span>
-                  </span>
-                </td>
-              </tr> <!-- /views -->
-              <!-- view list error -->
-              <tr v-if="viewListError">
-                <td colspan="6">
-                  <p class="text-danger mb-0">
-                    <span class="fa fa-exclamation-triangle">
-                    </span>&nbsp;
-                    {{ viewListError }}
-                  </p>
-                </td>
-              </tr> <!-- /view list error -->
-              <!-- new view form -->
-              <tr @keyup.enter="createView">
-                <td>
-                  <input type="checkbox"
-                    v-model="newViewShared"
-                    class="form-check mt-2"
-                  />
-                </td>
-                <td>
-                  <input type="text"
-                    maxlength="20"
-                    v-model="newViewName"
-                    class="form-control form-control-sm"
-                    placeholder="Enter a new view name (20 chars or less)"
-                  />
-                </td>
-                <td colspan="2">
-                  <input type="text"
-                    v-model="newViewExpression"
-                    class="form-control form-control-sm"
-                    placeholder="Enter a new view expression"
-                  />
-                </td>
-                <td>&nbsp;</td>
-                <td>
-                  <button
-                    type="button"
-                    @click="createView"
-                    title="Create new view"
-                    class="btn btn-theme-tertiary btn-sm pull-right">
-                    <span class="fa fa-plus-circle">
-                    </span>&nbsp;
-                    Create
-                  </button>
-                </td>
-              </tr> <!-- /new view form -->
-              <!-- view form error -->
-              <tr v-if="viewFormError">
-                <td colspan="6">
-                  <p class="text-danger mb-0">
-                    <span class="fa fa-exclamation-triangle">
-                    </span>&nbsp;
-                    {{ viewFormError }}
-                  </p>
-                </td>
-              </tr> <!-- /view form error -->
-            </tbody>
-          </table>
-
-        </form> <!-- /view settings -->
-
-        <!-- cron query settings -->
-        <form v-if="visibleTab === 'cron' && !multiviewer"
-          class="form-horizontal"
-          id="cron">
-
-          <h3>Periodic Queries</h3>
-
-          <p>
-            Allow queries to be run periodically that can perform actions on
-            sessions that match the queries. The query runs against sessions
-            delayed by 90 seconds to make sure all updates have been completed
-            for that session.
-          </p>
-
-          <table class="table table-striped table-sm">
-            <thead>
-              <tr>
-                <th>&nbsp;</th>
-                <th>Enabled</th>
-                <th>Matches</th>
-                <th>Name</th>
-                <th>Expression</th>
-                <th>Action</th>
-                <th>Tags</th>
-                <th v-b-tooltip.hover="'Admins can configure Notifiers on the Notifiers tab to the left.'">
-                  Notify
-                </th>
-                <th>&nbsp;</th>
-              </tr>
-            </thead>
-            <transition-group tag="tbody" name="list">
-              <!-- cron queries -->
-              <template v-for="(item, index) in cronQueries">
-                <tr :key="item.key"
-                  @keyup.enter="updateCronQuery(item, index)"
-                  @keyup.esc="cancelCronQueryChange">
-                  <td>
-                    <toggle-btn
-                      :opened="item.expanded"
-                      @toggle="toggleCronQueryDetail(item)">
-                    </toggle-btn>
-                  </td>
-                  <td>
-                    <input type="checkbox"
-                      v-model="item.enabled"
-                      @input="toggleCronQueryEnabled(item, index)"
-                    />
-                  </td>
-                  <td>{{ item.count }}</td>
-                  <td>
-                    <input type="text"
-                      maxlength="20"
-                      v-model="item.name"
-                      class="form-control form-control-sm"
-                      @input="cronQueryChanged(item)"
-                    />
-                  </td>
-                  <td>
-                    <input type="text"
-                      v-model="item.query"
-                      class="form-control form-control-sm"
-                      @input="cronQueryChanged(item)"
-                    />
-                  </td>
-                  <td>
-                    <select class="form-control form-control-sm"
-                      v-model="item.action"
-                      @change="cronQueryChanged(item)">
-                      <option value="tag">Tag</option>
-                      <option v-for="(item, key) in molochClusters"
-                        :value="`forward:${key}`"
-                        :key="key">
-                        Tag & Export to {{ item.name }}
-                      </option>
-                    </select>
-                  </td>
-                  <td>
-                    <input type="text"
-                      v-model="item.tags"
-                      class="form-control form-control-sm"
-                      @input="cronQueryChanged(item)"
-                    />
-                  </td>
-                  <td>
-                    <select v-model="item.notifier"
-                      class="form-control form-control-sm"
-                      @change="cronQueryChanged(item)">
-                      <option value=undefined>none</option>
-                      <option v-for="notifier in notifiers"
-                        :key="notifier.name"
-                        :value="notifier.name">
-                        {{ notifier.name }} ({{ notifier.type }})
-                      </option>
-                    </select>
-                  </td>
-                  <td>
-                    <div v-if="item.changed"
-                      class="btn-group btn-group-sm pull-right">
-                      <button type="button"
-                        class="btn btn-theme-tertiary"
-                        v-b-tooltip.hover
-                        title="Save changes to this query"
-                        @click="updateCronQuery(item, index)">
-                        <span class="fa fa-save fa-fw">
-                        </span>
-                      </button>
-                      <button type="button"
-                        class="btn btn-warning"
-                        v-b-tooltip.hover
-                        title="Undo changes to this query"
-                        @click="cancelCronQueryChange">
-                        <span class="fa fa-ban fa-fw">
-                        </span>
-                      </button>
-                    </div>
-                    <div v-else class="btn-group btn-group-sm pull-right">
-                      <button type="button"
-                        class="btn btn-info"
-                        v-if="!item.changed"
-                        @click="openCronSessions(item)"
-                        v-b-tooltip.hover="'Open sessions that this query tagged in the last hour.'">
-                        <span class="fa fa-folder-open fa-fw">
-                        </span>
-                      </button>
-                      <button type="button"
-                        v-if="!item.changed"
-                        class="btn btn-danger"
-                        title="Delete this periodic query"
-                        @click="deleteCronQuery(item, index)">
-                        <span class="fa fa-trash-o fa-fw">
-                        </span>
-                      </button>
-                    </div>
-                  </td>
-                </tr> <!-- /cron queries -->
-                <tr v-if="item.expanded"
-                  :key="item.key + 'detail'"
-                  class="mt-3">
-                  <td colspan="9">
-                    <div class="row"
-                      v-if="item.creator">
-                      <div class="col">
-                        <strong>Created by</strong>:
-                        {{ item.creator }}
-                      </div>
-                    </div>
-                    <div class="row"
-                      v-if="item.created">
-                      <div class="col">
-                        <strong>Created at</strong>:
-                        {{ item.created * 1000 | timezoneDateString(user.settings.timezone, false) }}
-                      </div>
-                    </div>
-                    <div class="row"
-                      v-if="item.lastRun">
-                      <div class="col">
-                        <strong>Last run at</strong>:
-                        {{ item.lastRun * 1000 | timezoneDateString(user.settings.timezone, false) }}
-                        and matched {{ item.lastCount || 0 }} new sessions
-                      </div>
-                    </div>
-                    <div class="row"
-                      v-if="item.lastToggled">
-                      <div class="col">
-                        <strong>{{ item.enabled ? 'Enabled' : 'Disabled'}} at</strong>:
-                        {{ item.lastToggled * 1000 | timezoneDateString(user.settings.timezone, false) }}
-                        by {{ item.lastToggledBy }}
-                      </div>
-                    </div>
-                    <div class="row">
-                      <div class="col">
-                        <strong>Query Description</strong>:
-                        <textarea
-                          v-model="item.description"
-                          class="form-control form-control-sm"
-                          @input="cronQueryChanged(item)"
-                        />
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              </template>
-              <tr v-if="!cronQueries || !cronQueries.length"
-                key="no-results"
-                class="text-center">
-                <td colspan="9"
-                  class="pt-2">
-                  <h6>
-                    <span class="fa fa-folder-open mr-2" />
-                    No periodic queries have been created. Use the form below to create one!
-                  </h6>
-                </td>
-              </tr>
-              <!-- cron query list error -->
-              <tr v-if="cronQueryListError"
-                key="list-error">
-                <td colspan="8">
-                  <p class="text-danger mb-0">
-                    <span class="fa fa-exclamation-triangle">
-                    </span>&nbsp;
-                    {{ cronQueryListError }}
-                  </p>
-                </td>
-              </tr> <!-- /cron query list error -->
-            </transition-group>
-          </table>
-
-          <!-- new cron query form -->
-          <div @keyup.enter="createCronQuery"
-            class="well well-lg mb-2">
-            <h3 class="mt-3">
-              New Periodic Query
-              <button type="button"
-                :disabled="cronLoading"
-                :class="{'disabled':cronLoading}"
-                title="Create new periodic query"
-                class="btn btn-theme-tertiary btn-sm pull-right"
-                @click="createCronQuery">
-                <template v-if="!cronLoading">
-                  <span class="fa fa-plus-circle">
-                  </span>&nbsp;
-                  Create
-                </template>
-                <template v-else>
-                  <span class="fa fa-spinner fa-spin">
-                  </span>&nbsp;
-                  Creating
-                </template>
-              </button>
-              <!-- cron query form error -->
-              <div v-if="cronQueryFormError"
-                class="xsmall text-danger pull-right mr-2 mt-2">
-                <span class="fa fa-exclamation-triangle">
-                </span>&nbsp;
-                {{ cronQueryFormError }}
-              </div> <!-- /cron query form error -->
-            </h3>
-            <hr>
-            <div class="form-row">
-              <div class="form-group col-md-6">
-                <label for="process">
-                  Process Query Since<sup>*</sup>
-                </label>
-                <b-form-select
-                  size="sm"
-                  id="process"
-                  v-b-tooltip.hover
-                  class="form-control"
-                  v-model="newCronQueryProcess"
-                  title="Start processing query since"
-                  :options="[
-                    { value: 0, text: 'Now' },
-                    { value: 1, text: '1 hour ago' },
-                    { value: 6, text: '6 hours ago' },
-                    { value: 24, text: '24 hours ago' },
-                    { value: 48, text: '48 hours ago' },
-                    { value: 72, text: '72 hours ago' },
-                    { value: 168, text: '1 week ago' },
-                    { value: 336, text: '2 weeks ago' },
-                    { value: 720, text: '1 month ago' },
-                    { value: 1440, text: '2 months ago' },
-                    { value: 4380, text: '6 months ago' },
-                    { value: 8760, text: '1 year ago' },
-                    { value: -1, text: 'All (careful)' }
-                  ]"
-                />
-              </div>
-              <div class="form-group col-md-6">
-                <label for="notify">
-                  Notify
-                </label>
-                <select id="notify"
-                  v-model="newCronQueryNotifier"
-                  class="form-control form-control-sm">
-                  <option value=undefined>none</option>
-                  <option v-for="notifier in notifiers"
-                    :key="notifier.name"
-                    :value="notifier.name">
-                    {{ notifier.name }} ({{ notifier.type }})
-                  </option>
-                </select>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group col-md-12">
-                <label for="name">
-                  Query Name<sup>*</sup>
-                </label>
-                <input
-                  id="name"
-                  type="text"
-                  maxlength="20"
-                  v-b-tooltip.hover
-                  v-model="newCronQueryName"
-                  placeholder="Periodic query name"
-                  class="form-control form-control-sm"
-                  title="Enter a query name (20 chars or less)"
-                />
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group col-md-12">
-                <label for="name">
-                  Query Description
-                </label>
-                <textarea
-                  id="description"
-                  v-b-tooltip.hover
-                  v-model="newCronQueryDescription"
-                  class="form-control form-control-sm"
-                  title="Enter an optional description"
-                  placeholder="Periodic query description"
-                />
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group col-md-12">
-                <label for="expression">
-                  Search Expression<sup>*</sup>
-                </label>
-                <input
-                  type="text"
-                  id="expression"
-                  v-b-tooltip.hover
-                  v-model="newCronQueryExpression"
-                  class="form-control form-control-sm"
-                  placeholder="Periodic query expression"
-                  title="Enter a new periodic query expression"
-                />
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group col-md-6">
-                <label for="action">
-                  Query Action<sup>*</sup>
-                </label>
-                <select id="action"
-                  v-model="newCronQueryAction"
-                  class="form-control form-control-sm">
-                  <option value="tag">Tag</option>
-                  <option v-for="(item, key) in molochClusters"
-                    :key="key"
-                    :value="`forward:${key}`">
-                    Tag & Export to {{ item.name }}
-                  </option>
-                </select>
-              </div>
-              <div class="form-group col-md-6">
-                <label for="notify">
-                  Tags<sup>*</sup>
-                </label>
-                <input
-                  id="tags"
-                  type="text"
-                  v-b-tooltip.hover
-                  v-model="newCronQueryTags"
-                  class="form-control form-control-sm"
-                  placeholder="Comma separated list of tags"
-                  title="Enter a comma separated list of tags"
-                />
-              </div>
-            </div>
-          </div> <!-- /new cron query form -->
-        </form> <!-- /cron query settings -->
-
         <!-- col configs settings -->
         <form v-if="visibleTab === 'col'"
           class="form-horizontal"
           id="col">
 
-          <h3>Custom Column Configurations</h3>
+          <h3>Custom Column Layouts</h3>
 
           <p>
-            Custom column configurations allow the user to save their session
+            Custom column layouts allow the user to save their session
             table's column layout for future use.
           </p>
 
@@ -1131,8 +596,8 @@
                   <td>
                     <button type="button"
                       class="btn btn-sm btn-danger pull-right"
-                      @click="deleteColConfig(config.name, index)"
-                      title="Delete this custom column configuration">
+                      @click="deleteLayout('sessionstable', config.name, 'colConfigs', index)"
+                      title="Delete this custom column layout">
                       <span class="fa fa-trash-o">
                       </span>&nbsp;
                       Delete
@@ -1158,29 +623,130 @@
             <span class="fa fa-info-circle fa-lg">
             </span>
             <strong>
-              You have no custom column configurations.
+              You have no custom column layouts.
             </strong>
             <br>
             <br>
             To create one, go to the sessions page, rearrange the columns into
-            your preferred configuration, and click the column configuration
+            your preferred layout, and click the column layout
             button ( <span class="fa fa-columns"></span> ) at the top left of the
-            table. Name your new custom column configuration then click the save
-            button. You can now switch to this column configuration anytime you
+            table. Name your new custom column layout then click the save
+            button. You can now switch to this column layout anytime you
             want by clicking on its name in the dropdown!
           </div>
 
         </form> <!-- /col configs settings -->
+
+        <!-- info field configs settings -->
+        <form v-if="visibleTab === 'info'"
+          class="form-horizontal"
+          id="col">
+
+          <h3>Custom Info Field Column Layouts</h3>
+
+          <p>
+            Custom info field layouts allow the user to save their info
+            fields within the session table for future use.
+          </p>
+
+          <table class="table table-striped table-sm">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Fields</th>
+                <th>&nbsp;</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- default info field config -->
+              <tr v-if="defaultInfoFieldLayout && fieldsMap">
+                <td>
+                  Arkime Default
+                </td>
+                <td>
+                  <template v-for="field in defaultInfoFieldLayout">
+                    <label class="badge badge-secondary mr-1 help-cursor"
+                      v-b-tooltip.hover
+                      :title="fieldsMap[field].help"
+                      v-if="fieldsMap[field]"
+                      :key="field">
+                      {{ fieldsMap[field].friendlyName }}
+                    </label>
+                  </template>
+                </td>
+                <td>&nbsp;</td>
+              </tr> <!-- /default info field configs -->
+              <!-- info field configs -->
+              <template v-if="fieldsMap">
+                <tr v-for="(config, index) in infoFieldLayouts"
+                  :key="config.name">
+                  <td>
+                    {{ config.name }}
+                  </td>
+                  <td>
+                    <template v-for="field in config.fields">
+                      <label class="badge badge-secondary mr-1 help-cursor"
+                        :title="fieldsMap[field].help"
+                        v-b-tooltip.hover
+                        v-if="fieldsMap[field]"
+                        :key="field">
+                        {{ fieldsMap[field].friendlyName }}
+                      </label>
+                    </template>
+                  </td>
+                  <td>
+                    <button type="button"
+                      class="btn btn-sm btn-danger pull-right"
+                      @click="deleteLayout('sessionsinfofields', config.name, 'infoFieldLayouts', index)"
+                      title="Delete this custom info field column layout">
+                      <span class="fa fa-trash-o">
+                      </span>&nbsp;
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              </template> <!-- /info field configs -->
+              <!-- info field config list error -->
+              <tr v-if="infoFieldLayoutError">
+                <td colspan="3">
+                  <p class="text-danger mb-0">
+                    <span class="fa fa-exclamation-triangle">
+                    </span>&nbsp;
+                    {{ infoFieldLayoutError }}
+                  </p>
+                </td>
+              </tr> <!-- /info field config list error -->
+            </tbody>
+          </table>
+
+          <div v-if="!colConfigs || !colConfigs.length"
+            class="alert alert-info">
+            <span class="fa fa-info-circle fa-lg">
+            </span>
+            <strong>
+              You have no custom column layouts.
+            </strong>
+            <br>
+            <br>
+            To create one, go to the sessions page, rearrange the columns into
+            your preferred layout, and click the column layout
+            button ( <span class="fa fa-columns"></span> ) at the top left of the
+            table. Name your new custom column layout then click the save
+            button. You can now switch to this column layout anytime you
+            want by clicking on its name in the dropdown!
+          </div>
+
+        </form> <!-- /info field configs settings -->
 
         <!-- spiview field configs settings -->
         <form v-if="visibleTab === 'spiview'"
           class="form-horizontal"
           id="spiview">
 
-          <h3>Custom SPI View Configurations</h3>
+          <h3>Custom SPI View Layouts</h3>
 
           <p>
-            Custom visible field configurations allow the user to save their
+            Custom visible field layouts allow the user to save their
             visible fields on the SPI View page for future use.
           </p>
 
@@ -1232,8 +798,8 @@
                   <td>
                     <button type="button"
                       class="btn btn-sm btn-danger pull-right"
-                      @click="deleteSpiviewConfig(config.name, index)"
-                      title="Delete this custom spiview field configuration">
+                      @click="deleteLayout('spiview', config.name, 'spiviewConfigs', index)"
+                      title="Delete this custom spiview field layout">
                       <span class="fa fa-trash-o">
                       </span>&nbsp;
                       Delete
@@ -1250,7 +816,7 @@
                     {{ spiviewConfigError }}
                   </p>
                 </td>
-              </tr> <!-- /spview field config list error -->
+              </tr> <!-- /spiview field config list error -->
             </tbody>
           </table>
 
@@ -1259,15 +825,15 @@
             <span class="fa fa-info-circle fa-lg">
             </span>
             <strong>
-              You have no custom SPI View field configurations.
+              You have no custom SPI View field layouts.
             </strong>
             <br>
             <br>
             To create one, go to the SPI View page, toggle fields to
-            your preferred configuration, and click the field configuration
+            your preferred layout, and click the field layout
             button ( <span class="fa fa-columns"></span> ) at the top left of the
-            page. Name your new custom field configuration then click the save
-            button. You can now switch to this field configuration anytime you
+            page. Name your new custom field layout then click the save
+            button. You can now switch to this field layout anytime you
             want by clicking on its name in the dropdown!
           </div>
 
@@ -1572,11 +1138,11 @@
                       </div>
                     </div>
                     <div class="display-sub-sub-navbar">
-                      <moloch-paging
+                      <arkime-paging
                         class="mt-1 ml-1"
                         :records-total="200"
                         :records-filtered="100">
-                      </moloch-paging>
+                      </arkime-paging>
                     </div>
                     <div>
                       <div class="ml-1 mr-1 mt-2 pb-2">
@@ -1822,7 +1388,7 @@
         </form> <!-- /theme settings -->
 
         <!-- password settings -->
-        <form v-if="visibleTab === 'password' && !multiviewer"
+        <form v-if="visibleTab === 'password' && !multiviewer && !disablePassword"
           class="form-horizontal"
           @keyup.enter="changePassword"
           id="password">
@@ -1895,633 +1461,40 @@
         </form> <!-- /password settings -->
 
         <!-- notifiers settings -->
-        <form class="form-horizontal"
+        <Notifiers
+          id="notifiers"
+          parent-app="arkime"
+          @display-message="displayMessage"
           v-if="visibleTab === 'notifiers'"
-          v-has-permission="'createEnabled'"
-          id="notifiers">
-
-          <h3>
-            Notifiers
-            <template v-if="notifierTypes">
-              <button v-for="notifier of notifierTypes"
-                :key="notifier.name"
-                class="btn btn-theme-tertiary btn-sm pull-right ml-1"
-                type="button"
-                @click="createNewNotifier(notifier)">
-                <span class="fa fa-plus-circle">
-                </span>&nbsp;
-                Create {{ notifier.name }} Notifier
-              </button>
-            </template>
-          </h3>
-
-          <p>
-            Configure notifiers that can be added to cron queries and hunt jobs.
-          </p>
-
-          <hr>
-
-          <div v-if="!notifiers || !Object.keys(notifiers).length"
-            class="alert alert-info">
-            <span class="fa fa-info-circle fa-lg">
-            </span>
-            <strong>
-              You have no notifiers configured.
-            </strong>
-            <br>
-            <br>
-            Create one by clicking one of the create buttons above.
-            Then use it by adding it to your cron queries or hunt jobs!
-          </div>
-
-          <!-- new notifier -->
-          <div class="row"
-            v-if="newNotifier">
-            <div class="col">
-              <div class="card mb-3">
-                <div class="card-body">
-                  <!-- newNotifier title -->
-                  <h4 class="mb-3">
-                    Create new {{ newNotifier.type }} notifier
-                    <span v-if="newNotifierError"
-                      class="alert alert-sm alert-danger pull-right pr-2">
-                      {{ newNotifierError }}
-                      <span class="fa fa-close cursor-pointer"
-                        @click="newNotifierError = ''">
-                      </span>
-                    </span>
-                  </h4> <!-- /new notifier title -->
-                  <!-- new notifier name -->
-                  <div class="input-group">
-                    <span class="input-group-prepend cursor-help"
-                      :title="`Give your ${newNotifier.type} notifier a unique name`"
-                      v-b-tooltip.hover.bottom-left>
-                      <span class="input-group-text">
-                        Name
-                        <sup>*</sup>
-                      </span>
-                    </span>
-                    <input class="form-control"
-                      v-model="newNotifier.name"
-                      type="text"
-                    />
-                  </div>
-                  <small class="form-text text-muted mb-2 mt-0">
-                    Be specific! There can be multiple {{ newNotifier.type }}
-                    notifiers.
-                  </small> <!-- /new notifier name -->
-                  <!-- new notifier fields -->
-                  <div v-for="field of newNotifier.fields"
-                    :key="field.name">
-                    <span class="mb-2"
-                      :class="{'input-group':field.type !== 'checkbox'}">
-                      <span class="input-group-prepend cursor-help"
-                        v-if="field.type !== 'checkbox'"
-                        :title="field.description"
-                        v-b-tooltip.hover.bottom-left>
-                        <span class="input-group-text">
-                          {{ field.name }}
-                          <sup v-if="field.required">*</sup>
-                        </span>
-                      </span>
-                      <input :class="{'form-control':field.type !== 'checkbox'}"
-                        v-model="field.value"
-                        :type="getFieldInputType(field)"
-                      />
-                      <span v-if="field.type === 'secret'"
-                        class="input-group-append cursor-pointer"
-                        @click="toggleVisibleSecretField(field)">
-                        <span class="input-group-text">
-                          <span class="fa"
-                            :class="{'fa-eye':field.type === 'secret' && !field.showValue, 'fa-eye-slash':field.type === 'secret' && field.showValue}">
-                          </span>
-                        </span>
-                      </span>
-                    </span>
-                    <label v-if="field.type === 'checkbox'">
-                      &nbsp;{{ field.name }}
-                    </label>
-                  </div> <!-- /new notifier fields -->
-                  <!-- new notifier actions -->
-                  <div class="row mt-3">
-                    <div class="col-12">
-                      <button type="button"
-                        class="btn btn-sm btn-outline-warning cursor-pointer"
-                        @click="clearNotifierFields">
-                        Clear fields
-                      </button>
-                      <button type="button"
-                        class="btn btn-sm btn-success cursor-pointer pull-right ml-1"
-                        @click="createNotifier">
-                        <span class="fa fa-plus">
-                        </span>&nbsp;
-                        Create {{ newNotifier.type }} Notifier
-                      </button>
-                      <button type="button"
-                        class="btn btn-sm btn-warning cursor-pointer pull-right"
-                        @click="newNotifier = undefined">
-                        <span class="fa fa-ban">
-                        </span>&nbsp;
-                        Cancel
-                      </button>
-                    </div>
-                  </div> <!-- /new notifier actions -->
-                </div>
-              </div>
-            </div>
-          </div> <!-- new notifier -->
-
-          <!-- notifiers -->
-          <div class="row"
-            v-if="notifiers">
-            <div class="col-12 col-xl-6"
-              v-for="(notifier, index) of notifiers"
-              :key="notifier.key">
-              <div class="card mb-3">
-                <div class="card-body">
-                  <!-- notifier title -->
-                  <h4 class="mb-3">
-                    {{ notifier.type }} Notifier
-                  </h4> <!-- /notifier title -->
-                  <!-- notifier name -->
-                  <div class="input-group mb-2">
-                    <span class="input-group-prepend cursor-help"
-                      :title="`Give your notifier a unique name`"
-                      v-b-tooltip.hover.bottom-left>
-                      <span class="input-group-text">
-                        Name
-                        <sup>*</sup>
-                      </span>
-                    </span>
-                    <input class="form-control"
-                      v-model="notifier.name"
-                      type="text"
-                    />
-                  </div> <!-- /notifier name -->
-                  <!-- notifier fields -->
-                  <div v-for="field of notifier.fields"
-                    :key="field.name">
-                    <span class="mb-2"
-                      :class="{'input-group':field.type !== 'checkbox'}">
-                      <span class="input-group-prepend cursor-help"
-                        v-if="field.type !== 'checkbox'"
-                        :title="field.description"
-                        v-b-tooltip.hover.bottom-left>
-                        <span class="input-group-text">
-                          {{ field.name }}
-                          <sup v-if="field.required">*</sup>
-                        </span>
-                      </span>
-                      <input :class="{'form-control':field.type !== 'checkbox'}"
-                        v-model="field.value"
-                        :type="getFieldInputType(field)"
-                      />
-                      <span v-if="field.type === 'secret'"
-                        class="input-group-append cursor-pointer"
-                        @click="toggleVisibleSecretField(field)">
-                        <span class="input-group-text">
-                          <span class="fa"
-                            :class="{'fa-eye':field.type === 'secret' && !field.showValue, 'fa-eye-slash':field.type === 'secret' && field.showValue}">
-                          </span>
-                        </span>
-                      </span>
-                    </span>
-                    <label v-if="field.type === 'checkbox'">
-                      &nbsp;{{ field.name }}
-                    </label>
-                  </div> <!-- /notifier fields -->
-                  <!-- notifier info -->
-                  <div class="row">
-                    <div class="col-12 small">
-                      <span v-if="notifier.created || notifier.user">
-                        Created by {{ notifier.user }} at
-                        {{ notifier.created * 1000 | timezoneDateString(user.settings.timezone, false) }}
-                      </span>
-                      <span v-if="notifier.updated"
-                        class="pull-right">
-                        Last updated at {{ notifier.updated * 1000 | timezoneDateString(user.settings.timezone, false) }}
-                      </span>
-                    </div>
-                  </div> <!-- /notifier info -->
-                  <!-- notifier actions -->
-                  <div class="row mt-3">
-                    <div class="col-12">
-                      <button type="button"
-                        :disabled="notifier.loading"
-                        class="btn btn-sm btn-outline-warning cursor-pointer"
-                        @click="testNotifier(notifier.name, index)">
-                        <span v-if="notifier.loading"
-                          class="fa fa-spinner fa-spin">
-                        </span>
-                        <span v-else class="fa fa-bell">
-                        </span>&nbsp;
-                        Test
-                      </button>
-                      <button type="button"
-                        class="btn btn-sm btn-success cursor-pointer pull-right ml-1"
-                        @click="updateNotifier(notifier.key, index, notifier)">
-                        <span class="fa fa-save">
-                        </span>&nbsp;
-                        Save
-                      </button>
-                      <button type="button"
-                        class="btn btn-sm btn-danger cursor-pointer pull-right"
-                        @click="removeNotifier(notifier.name, index)">
-                        <span class="fa fa-trash-o">
-                        </span>&nbsp;
-                        Delete
-                      </button>
-                    </div>
-                  </div> <!-- /notifier actions -->
-                </div>
-              </div>
-            </div>
-          </div> <!-- notifiers -->
-
-        </form>
-        <!-- /notifiers settings -->
+          v-has-role="{user:user,roles:'arkimeAdmin'}"
+          help-text="Configure notifiers that can be added to periodic queries and hunt jobs."
+        />
 
         <!-- shortcut settings -->
-        <form class="form-horizontal"
+        <Shortcuts
+          id="shortcuts"
+          @copy-value="copyValue"
           v-if="visibleTab === 'shortcuts'"
-          id="shortcuts">
+          @display-message="displayMessage"
+        />
 
-          <h3>Shortcuts</h3>
+        <!-- view settings -->
+        <Views
+          id="views"
+          :userId="userId"
+          :fields-map="fieldsMap"
+          @copy-value="copyValue"
+          v-if="visibleTab === 'views'"
+          @display-message="displayMessage"
+        />
 
-          <p>
-            Create a list of values that can be used in queries as shortcuts.
-            For example, create a list of IPs and use them in a query
-            expression <code>ip.src == $MY_IPS</code>.
-          </p>
-          <p>
-            <strong>Tip:</strong>
-            Use <code>$</code> to autocomplete shortcuts in search expressions.
-          </p>
-          <p>
-            <strong>Note:</strong>
-            <template v-if="hasUsersES">
-              These shortcuts will be synced across clusters.
-              It can take up to one minute to sync to all clusters.
-              But you can use the shortcut on this cluster immediately.
-            </template>
-            <template v-else>
-              These shortcuts are local to this cluster only.
-            </template>
-          </p>
-
-          <div class="row">
-            <div class="col-5">
-              <div class="input-group input-group-sm">
-                <div class="input-group-prepend">
-                  <div class="input-group-text">
-                    <span class="fa fa-search"></span>
-                  </div>
-                </div>
-                <input type="text"
-                  class="form-control"
-                  v-model="shortcutsQuery.search"
-                  @input="getShortcutsTimeout"
-                />
-              </div>
-            </div>
-            <div class="col-7">
-              <moloch-paging v-if="shortcuts.data"
-                class="pull-right"
-                @changePaging="changeShortcutsPaging"
-                :length-default="shortcutsSize"
-                :records-total="shortcuts.recordsTotal"
-                :records-filtered="shortcuts.recordsFiltered">
-              </moloch-paging>
-            </div>
-          </div>
-
-          <table v-if="shortcuts.data"
-            class="table table-striped table-sm">
-            <thead>
-              <tr>
-                <th>Shared</th>
-                <th class="cursor-pointer"
-                  @click.self="sortShortcuts('name')">
-                  Name
-                  <span v-show="shortcutsQuery.sortField === 'name' && !shortcutsQuery.desc" class="fa fa-sort-asc"></span>
-                  <span v-show="shortcutsQuery.sortField === 'name' && shortcutsQuery.desc" class="fa fa-sort-desc"></span>
-                  <span v-show="shortcutsQuery.sortField !== 'name'" class="fa fa-sort"></span>
-                </th>
-                <th class="cursor-pointer"
-                  @click.self="sortShortcuts('description')">
-                  Description
-                  <span v-show="shortcutsQuery.sortField === 'description' && !shortcutsQuery.desc" class="fa fa-sort-asc"></span>
-                  <span v-show="shortcutsQuery.sortField === 'description' && shortcutsQuery.desc" class="fa fa-sort-desc"></span>
-                  <span v-show="shortcutsQuery.sortField !== 'description'" class="fa fa-sort"></span>
-                </th>
-                <th>Value(s)</th>
-                <th>Type</th>
-                <th>Creator</th>
-                <th>&nbsp;</th>
-              </tr>
-            </thead>
-            <tbody>
-              <!-- shortcuts -->
-              <template v-for="(item, index) in shortcuts.data">
-                <tr :key="`${item.id}-content`">
-                  <td>
-                    <input type="checkbox"
-                      :disabled="(!user.createEnabled && item.userId !== user.userId) || item.locked"
-                      v-model="item.shared"
-                      @input="toggleShortcutShared(item, index)"
-                    />
-                  </td>
-                  <td class="shortcut-value narrow cursor-help"
-                    v-b-tooltip.hover="item.name">
-                    {{ item.name }}
-                  </td>
-                  <td class="shortcut-value cursor-help"
-                    v-b-tooltip.hover="item.description">
-                    {{ item.description }}
-                  </td>
-                  <td class="shortcut-value"
-                    :class="{'show-all':item.showAll}">
-                    <span
-                      v-if="item.value.length > 50"
-                      @click="toggleDisplayAllShortcut(item)"
-                      class="fa pull-right cursor-pointer mt-1"
-                      :class="{'fa-chevron-down':!item.showAll,'fa-chevron-up':item.showAll}"
-                    />
-                    <span v-if="!item.showAll">
-                      {{ item.value.substring(0, 50) }}
-                      <span v-if="item.value.length > 50">...</span>
-                    </span>
-                    <span v-else>{{ item.value }}</span>
-                  </td>
-                  <td>
-                    {{ item.type }}
-                  </td>
-                  <td>
-                    {{ item.userId }}
-                  </td>
-                  <td class="shortcut-btns">
-                    <span class="pull-right">
-                      <button type="button"
-                        v-b-tooltip.hover
-                        title="Copy this shortcut's value"
-                        class="btn btn-sm btn-theme-secondary"
-                        @click="copyValue(item.value)">
-                        <span class="fa fa-clipboard fa-fw">
-                        </span>
-                      </button>
-                      <span v-if="user.createEnabled || item.userId === user.userId">
-                        <button type="button"
-                          v-b-tooltip.hover
-                          title="Delete this shortcut"
-                          class="btn btn-sm btn-danger"
-                          @click="deleteShortcut(item, index)">
-                          <span class="fa fa-trash-o fa-fw" v-if="!item.loading">
-                          </span>
-                          <span class="fa fa-spinner fa-spin fa-fw" v-else>
-                          </span>
-                        </button>
-                        <span v-if="!item.editing">
-                          <div v-if="item.locked"
-                            v-b-tooltip.hover
-                            style="display:inline-block"
-                            title="Locked shortcut. Ask your admin to use db.pl to update this shortcut.">
-                            <button :disabled="true"
-                              type="button"
-                              class="btn btn-sm btn-warning disabled cursor-help">
-                              <span class="fa fa-lock fa-fw">
-                              </span>
-                            </button>
-                          </div>
-                          <button type="button"
-                            v-b-tooltip.hover
-                            v-else
-                            @click="toggleEditShortcut(item)"
-                            title="Make changes to this shortcut's value"
-                            class="btn btn-sm btn-theme-tertiary">
-                            <span class="fa fa-pencil fa-fw" v-if="!item.loading">
-                            </span>
-                            <span class="fa fa-spinner fa-spin fa-fw" v-else>
-                            </span>
-                          </button>
-                        </span>
-                        <span v-else>
-                          <button type="button"
-                            v-b-tooltip.hover
-                            title="Cancel changes to this shortcut's value"
-                            class="btn btn-sm btn-warning"
-                            @click="toggleEditShortcut(item)">
-                            <span class="fa fa-ban fa-fw" v-if="!item.loading">
-                            </span>
-                            <span class="fa fa-spinner fa-spin fa-fw" v-else>
-                            </span>
-                          </button>
-                          <button type="button"
-                            v-b-tooltip.hover
-                            @click="updateShortcut(item, index)"
-                            title="Save changes to this shortcut's value"
-                            class="btn btn-sm btn-theme-tertiary">
-                            <span class="fa fa-save fa-fw" v-if="!item.loading">
-                            </span>
-                            <span class="fa fa-spinner fa-spin fa-fw" v-else>
-                            </span>
-                          </button>
-                        </span>
-                      </span>
-                    </span>
-                  </td>
-                </tr>
-                <!-- edit shortcut -->
-                <tr :key="`${item.id}-edit`"
-                  v-if="item.editing">
-                  <td colspan="6">
-                    <div class="form-group row mt-2">
-                      <label for="updateShortcutName"
-                        class="col-2 col-form-label text-right">
-                        Name<sup>*</sup>
-                      </label>
-                      <div class="col-10">
-                        <input id="updateShortcutName"
-                          type="text"
-                          class="form-control form-control-sm"
-                          v-model="item.newName"
-                        />
-                      </div>
-                    </div>
-                    <div class="form-group row">
-                      <label for="updateShortcutDescription"
-                        class="col-2 col-form-label text-right">
-                        Description
-                      </label>
-                      <div class="col-10">
-                        <input id="updateShortcutDescription"
-                          type="text"
-                          class="form-control form-control-sm"
-                          v-model="item.newDescription"
-                        />
-                      </div>
-                    </div>
-                    <div class="form-group row">
-                      <label for="updateShortcutValue"
-                        class="col-2 col-form-label text-right">
-                        Value(s)<sup>*</sup>
-                      </label>
-                      <div class="col-10">
-                        <textarea id="updateShortcutValue"
-                          type="text"
-                          rows="5"
-                          class="form-control form-control-sm"
-                          v-model="item.newValue">
-                        </textarea>
-                      </div>
-                    </div>
-                    <div class="form-group row">
-                      <label for="updateShortcutType"
-                        class="col-2 col-form-label text-right">
-                        Type<sup>*</sup>
-                      </label>
-                      <div class="col-10">
-                        <select id="updateShortcutType"
-                          v-model="item.newType"
-                          class="form-control form-control-sm">
-                          <option value="ip">IP(s)</option>
-                          <option value="string">String(s)</option>
-                          <option value="number">Number(s)</option>
-                        </select>
-                      </div>
-                    </div>
-                  </td>
-                </tr> <!-- /edit shortcut -->
-              </template> <!-- /shortcuts -->
-              <!-- no shortcuts -->
-              <tr v-if="shortcuts.data && shortcuts.data.length === 0">
-                <td colspan="6">
-                  <p class="text-center mb-0">
-                    <span class="fa fa-folder-open">
-                    </span>&nbsp;
-                    No shortcuts or none that match your search
-                  </p>
-                </td>
-              </tr> <!-- /no shortcuts -->
-              <!-- shortcuts list error -->
-              <tr v-if="shortcutsListError">
-                <td colspan="6">
-                  <p class="text-danger mb-0">
-                    <span class="fa fa-exclamation-triangle">
-                    </span>&nbsp;
-                    {{ shortcutsListError }}
-                  </p>
-                </td>
-              </tr> <!-- /shortcuts list error -->
-            </tbody>
-          </table>
-          <!-- new shortcut form -->
-          <div class="row var-form mr-1 ml-1 mt-2">
-            <div class="col">
-              <div class="row mb-3 mt-4">
-                <div class="col-10 offset-2">
-                  <h3 class="mt-3">
-                    New Shortcut
-                  </h3>
-                </div>
-              </div>
-              <div class="form-group row">
-                <label for="newShortcutName"
-                  class="col-2 col-form-label text-right">
-                  Name<sup>*</sup>
-                </label>
-                <div class="col-10">
-                  <input id="newShortcutName"
-                    type="text"
-                    class="form-control form-control-sm"
-                    v-model="newShortcutName"
-                    placeholder="MY_MOLOCH_VAR"
-                  />
-                </div>
-              </div>
-              <div class="form-group row">
-                <label for="newShortcutDescription"
-                  class="col-2 col-form-label text-right">
-                  Description
-                </label>
-                <div class="col-10">
-                  <input id="newShortcutDescription"
-                    type="text"
-                    class="form-control form-control-sm"
-                    v-model="newShortcutDescription"
-                  />
-                </div>
-              </div>
-              <div class="form-group row">
-                <label for="newShortcutValue"
-                  class="col-2 col-form-label text-right">
-                  Value(s)<sup>*</sup>
-                </label>
-                <div class="col-10">
-                  <textarea id="newShortcutValue"
-                    type="text"
-                    rows="5"
-                    class="form-control form-control-sm"
-                    v-model="newShortcutValue"
-                    placeholder="Enter a comma or newline separated list of values">
-                  </textarea>
-                </div>
-              </div>
-              <div class="form-group row">
-                <label for="newShortcutType"
-                  class="col-2 col-form-label text-right">
-                  Type<sup>*</sup>
-                </label>
-                <div class="col-10">
-                  <select id="newShortcutType"
-                    v-model="newShortcutType"
-                    class="form-control form-control-sm">
-                    <option value="ip">IP(s)</option>
-                    <option value="string">String(s)</option>
-                    <option value="number">Number(s)</option>
-                  </select>
-                </div>
-              </div>
-              <div class="form-group row">
-                <label for="newShortcutShared"
-                  class="col-2 col-form-label text-right">
-                  Shared
-                </label>
-                <div class="col-10">
-                  <input id="newShortcutShared"
-                    type="checkbox"
-                    v-model="newShortcutShared"
-                  />
-                  <button class="btn btn-theme-tertiary btn-sm pull-right"
-                    type="button"
-                    @click="createShortcut">
-                    <template v-if="!createShortcutLoading">
-                      <span class="fa fa-plus-circle">
-                      </span>&nbsp;
-                      Create
-                    </template>
-                    <template v-else>
-                      <span class="fa fa-spinner fa-spin">
-                      </span>&nbsp;
-                      Creating
-                    </template>
-                  </button>
-                </div>
-              </div>
-              <!-- shortcut form error -->
-              <div class="row mb-4 text-right">
-                <div class="col-12">
-                  <p v-if="shortcutFormError"
-                    class="small text-danger mb-0">
-                    <span class="fa fa-exclamation-triangle">
-                    </span>&nbsp;
-                    {{ shortcutFormError }}
-                  </p>
-                </div>
-              </div> <!-- /shortcut form error -->
-            </div>
-          </div> <!-- /new shortcut form -->
-
-        </form> <!-- / shortcut settings -->
+        <!-- cron query settings -->
+        <PeriodicQueries
+          id="cron"
+          :userId="userId"
+          @display-message="displayMessage"
+          v-if="visibleTab === 'cron' && !multiviewer"
+        />
 
       </div>
 
@@ -2532,37 +1505,42 @@
 </template>
 
 <script>
+import CommonUserService from '../../../../../common/vueapp/UserService';
+import Notifiers from '../../../../../common/vueapp/Notifiers';
 import UserService from '../users/UserService';
 import FieldService from '../search/FieldService';
 import SettingsService from './SettingsService';
 import customCols from '../sessions/customCols.json';
-import MolochToast from '../utils/Toast';
-import MolochError from '../utils/Error';
-import MolochLoading from '../utils/Loading';
-import MolochFieldTypeahead from '../utils/FieldTypeahead';
+import ArkimeError from '../utils/Error';
+import ArkimeLoading from '../utils/Loading';
+import ArkimeFieldTypeahead from '../utils/FieldTypeahead';
 import ColorPicker from '../utils/ColorPicker';
-import MolochPaging from '../utils/Pagination';
-import ToggleBtn from '../utils/ToggleBtn';
+import ArkimePaging from '../utils/Pagination';
 import Utils from '../utils/utils';
+import PeriodicQueries from './PeriodicQueries';
+import Shortcuts from './Shortcuts';
+import Views from './Views';
 
 let clockInterval;
 
-let shortcutsInputTimeout;
-
 const defaultSpiviewConfig = { fields: ['destination.ip', 'protocol', 'source.ip'] };
+const defaultInfoFields = JSON.parse(JSON.stringify(customCols.info.children));
+
 const secretMatch = [38, 38, 40, 40, 37, 39, 37, 39, 66, 65];
 let secrets = [];
 
 export default {
   name: 'Settings',
   components: {
-    MolochError,
-    MolochLoading,
-    MolochToast,
-    MolochFieldTypeahead,
+    ArkimeError,
+    ArkimeLoading,
+    ArkimeFieldTypeahead,
     ColorPicker,
-    MolochPaging,
-    ToggleBtn
+    ArkimePaging,
+    PeriodicQueries,
+    Shortcuts,
+    Notifiers,
+    Views
   },
   data: function () {
     return {
@@ -2571,6 +1549,7 @@ export default {
       error: '',
       loading: true,
       msg: '',
+      showMessage: false,
       msgType: undefined,
       displayName: undefined,
       visibleTab: 'general', // default tab
@@ -2587,32 +1566,18 @@ export default {
       connDstFieldTypeahead: undefined,
       timelineDataFilters: [],
       filtersTypeahead: '',
-      // view settings vars
-      viewListError: '',
-      viewFormError: '',
-      newViewName: '',
-      newViewExpression: '',
-      newViewShared: false,
-      // cron settings vars
-      cronLoading: false,
-      cronQueries: undefined,
-      cronQueryListError: '',
-      cronQueryFormError: '',
-      newCronQueryName: '',
-      newCronQueryDescription: '',
-      newCronQueryExpression: '',
-      newCronQueryTags: '',
-      newCronQueryNotifier: undefined,
-      newCronQueryProcess: '0',
-      newCronQueryAction: 'tag',
       // column config settings vars
       colConfigs: undefined,
       colConfigError: '',
       defaultColConfig: Utils.getDefaultTableState(),
+      // info field config settings vars
+      infoFieldLayouts: undefined,
+      infoFieldLayoutError: '',
+      defaultInfoFieldLayout: defaultInfoFields,
       // spiview field config settings vars
       spiviewConfigs: undefined,
       spiviewConfigError: '',
-      defaultSpiviewConfig: defaultSpiviewConfig,
+      defaultSpiviewConfig,
       // theme settings vars
       themeDisplays: [
         { name: 'Arkime Light', class: 'arkime-light-theme' },
@@ -2641,44 +1606,13 @@ export default {
       newPassword: '',
       confirmNewPassword: '',
       changePasswordError: '',
-      multiviewer: this.$constants.MOLOCH_MULTIVIEWER,
-      hasUsersES: this.$constants.MOLOCH_HASUSERSES,
-      // notifiers settings vars
-      notifiers: undefined,
-      notifierTypes: [],
-      notifiersError: '',
-      newNotifier: undefined,
-      newNotifierError: '',
-      // shortcut settings vars
-      shortcuts: {},
-      shortcutsListError: '',
-      newShortcutShared: false,
-      newShortcutName: '',
-      newShortcutDescription: '',
-      newShortcutValue: '',
-      newShortcutType: 'string',
-      shortcutFormError: '',
-      shortcutsStart: 0,
-      shortcutsSize: 50,
-      shortcutsQuery: {
-        desc: false,
-        sortField: 'name',
-        search: ''
-      },
-      createShortcutLoading: false
+      multiviewer: this.$constants.MULTIVIEWER,
+      hasUsersES: this.$constants.HASUSERSES
     };
   },
   computed: {
     user: function () {
       return this.$store.state.user;
-    },
-    views: {
-      get: function () {
-        return this.$store.state.views;
-      },
-      set: function (newValue) {
-        this.$store.commit('setViews', newValue);
-      }
     },
     sortableColumns: function () {
       return this.columns.filter(column => !column.unsortable);
@@ -2693,8 +1627,11 @@ export default {
       }
       return FieldService.addIpDstPortField(this.$store.state.fieldsMap);
     },
-    molochClusters: function () {
-      return this.$store.state.remoteclusters;
+    notifiers () {
+      return this.$store.state.notifiers;
+    },
+    disablePassword () {
+      return !!this.$constants.DISABLE_USER_PASSWORD_UI && !!this.user.headerAuthEnabled;
     }
   },
   created: function () {
@@ -2703,7 +1640,7 @@ export default {
     if (tab) { // if there is a tab specified and it's a valid tab
       tab = tab.replace(/^#/, '');
       if (tab === 'general' || tab === 'views' || tab === 'cron' ||
-        tab === 'col' || tab === 'theme' || tab === 'password' ||
+        tab === 'col' || tab === 'info' || tab === 'theme' || tab === 'password' ||
         tab === 'spiview' || tab === 'notifiers' || tab === 'shortcuts') {
         this.visibleTab = tab;
       }
@@ -2714,25 +1651,12 @@ export default {
       }
     }
 
-    if (this.$route.query.expression) {
-      this.newCronQueryExpression = this.$route.query.expression;
-    }
-    if (this.$route.query.process) {
-      this.newCronQueryProcess = this.$route.query.process;
-      this.$router.replace({ // remove process query param as nothing else uses it
-        query: {
-          ...this.$route.query,
-          process: undefined
-        }
-      });
-    }
-
     this.getThemeColors();
 
     UserService.getCurrent().then((response) => {
       this.displayName = response.userId;
       // only admins can edit other users' settings
-      if (response.createEnabled && this.$route.query.userId) {
+      if (response.roles.includes('arkimeAdmin') && this.$route.query.userId) {
         if (response.userId === this.$route.query.userId) {
           // admin editing their own user so the routeParam is unnecessary
           this.$router.push({
@@ -2780,10 +1704,11 @@ export default {
         hash: tabName
       });
     },
-    /* remove the message when user is done with it or duration ends */
-    messageDone: function () {
-      this.msg = '';
-      this.msgType = undefined;
+    /* displays a message in the navbar */
+    displayMessage ({ msg, type }) {
+      this.msg = msg;
+      this.showMessage = true;
+      this.msgType = type || 'success';
     },
     /* GENERAL ------------------------------- */
     /**
@@ -2793,8 +1718,7 @@ export default {
     update: function (updateTheme) {
       UserService.saveSettings(this.settings, this.userId).then((response) => {
         // display success message to user
-        this.msg = response.text;
-        this.msgType = 'success';
+        this.displayMessage({ msg: response.text });
 
         if (updateTheme) {
           const now = Date.now();
@@ -2807,21 +1731,18 @@ export default {
         }
       }).catch((error) => {
         // display error message to user
-        this.msg = error.text;
-        this.msgType = 'danger';
+        this.displayMessage({ msg: error.text, type: 'danger' });
       });
     },
     resetSettings: function () {
       // Choosing to skip reset of theme. UserService will save state to store
       UserService.resetSettings(this.userId, this.settings.theme).then((response) => {
         // display success message to user
-        this.msg = response.text;
-        this.msgType = 'success';
+        this.displayMessage({ msg: response.text });
         this.getSettings(false);
       }).catch((error) => {
         // display error message to user
-        this.msg = error.text;
-        this.msgType = 'danger';
+        this.displayMessage({ msg: error.text, type: 'danger' });
       });
     },
     // attach the full field object to the component's timelineDataFilters from array of dbField
@@ -2848,7 +1769,7 @@ export default {
       this.settings.ms = newMs;
       this.updateTime();
     },
-    /* updates the displayed date for the timzeone setting
+    /* updates the displayed date for the timezone setting
      * triggered by the user changing the timezone/ms settings */
     updateTime: function () {
       this.tick();
@@ -2941,326 +1862,22 @@ export default {
         }
       }
     },
-    /* VIEWS ------------------------------------------- */
-    /* creates a view given the view name and expression */
-    createView: function () {
-      if (!this.newViewName || this.newViewName === '') {
-        this.viewFormError = 'No view name specified.';
-        return;
-      }
-
-      if (!this.newViewExpression || this.newViewExpression === '') {
-        this.viewFormError = 'No view expression specified.';
-        return;
-      }
-
-      const data = {
-        shared: this.newViewShared,
-        name: this.newViewName,
-        expression: this.newViewExpression
-      };
-
-      UserService.createView(data, this.userId).then((response) => {
+    /* LAYOUTS ------------------------------------------ */
+    /**
+      * Saves a custom layout to the user's settings
+      * @param {string} layoutType  The type of layout to save
+      * @param {string} layoutName  The name of the layout to save
+      * @param {array} layoutArray  The array to save the layout to
+      * @param {int} index          The index in the array of the layout to save
+      */
+    deleteLayout (layoutType, layoutName, layoutArray, index) {
+      UserService.deleteLayout(layoutType, layoutName, this.userId).then((response) => {
+        this[layoutArray].splice(index, 1);
         // display success message to user
-        this.msg = response.text;
-        this.msgType = 'success';
-        // clear the inputs and any error
-        this.viewFormError = false;
-        this.newViewName = null;
-        this.newViewExpression = null;
-        this.newViewShared = false;
-        // add the view to the view list
-        if (response.view && response.viewName) {
-          if (this.views[response.viewName]) {
-            // a shared view with this name already exists
-            // so just get the list of views again
-            this.getViews();
-          } else {
-            response.view.name = response.viewName;
-            this.$set(this.views, response.viewName, response.view);
-          }
-        }
+        this.displayMessage({ msg: response.text });
       }).catch((error) => {
         // display error message to user
-        this.msg = error.text;
-        this.msgType = 'danger';
-      });
-    },
-    /**
-     * Deletes a view given its name
-     * @param {Object} view The view to delete
-     * @param {string} viewName The name of the view to delete
-     */
-    deleteView: function (view, viewName) {
-      UserService.deleteView(view, this.userId).then((response) => {
-        // remove the view from the view list
-        this.views[viewName] = null;
-        delete this.views[viewName];
-        // display success message to user
-        this.msg = response.text;
-        this.msgType = 'success';
-      }).catch((error) => {
-        // display error message to user
-        this.msg = error.text;
-        this.msgType = 'danger';
-      });
-    },
-    /**
-     * Sets a view as having been changed
-     * @param {string} key The unique id of the changed view
-     */
-    viewChanged: function (key) {
-      this.views[key].changed = true;
-    },
-    /**
-     * Cancels a view change by retrieving the view
-     * @param {string} key The unique id of the view
-     */
-    cancelViewChange: function (key) {
-      UserService.getViews(this.userId).then((response) => {
-        this.views[key] = response[key];
-      }).catch((error) => {
-        this.viewListError = error.text;
-      });
-    },
-    /**
-     * Updates a view
-     * @param {string} key The unique id of the view to update
-     */
-    updateView: function (key) {
-      const data = this.views[key];
-
-      if (!data) {
-        this.msg = 'Could not find corresponding view';
-        this.msgType = 'danger';
-        return;
-      }
-
-      if (!data.changed) {
-        this.msg = 'This view has not changed';
-        this.msgType = 'warning';
-        return;
-      }
-
-      data.key = key;
-
-      UserService.updateView(data, this.userId).then((response) => {
-        // display success message to user
-        this.msg = response.text;
-        this.msgType = 'success';
-        // set the view as unchanged
-        data.changed = false;
-      }).catch((error) => {
-        // display error message to user
-        this.msg = error.text;
-        this.msgType = 'danger';
-      });
-    },
-    /**
-     * Shares or unshares a view given its name
-     * @param {Object} view The view to share/unshare
-     */
-    toggleShared: function (view) {
-      UserService.toggleShareView(view, view.user).then((response) => {
-        // display success message to user
-        this.msg = response.text;
-        this.msgType = 'success';
-      }).catch((error) => {
-        // display error message to user
-        this.msg = error.text;
-        this.msgType = 'danger';
-      });
-    },
-    /* CRON QUERIES ------------------------------------ */
-    /* creates a cron query given the name, expression, process, and tags */
-    createCronQuery: function () {
-      if (!this.newCronQueryName || this.newCronQueryName === '') {
-        this.cronQueryFormError = 'No query name specified.';
-        return;
-      }
-
-      if (!this.newCronQueryExpression || this.newCronQueryExpression === '') {
-        this.cronQueryFormError = 'No query expression specified.';
-        return;
-      }
-
-      if (!this.newCronQueryTags || this.newCronQueryTags === '') {
-        this.cronQueryFormError = 'No query tags specified.';
-        return;
-      }
-
-      this.cronLoading = true;
-
-      const data = {
-        enabled: true,
-        name: this.newCronQueryName,
-        query: this.newCronQueryExpression,
-        action: this.newCronQueryAction,
-        tags: this.newCronQueryTags,
-        since: this.newCronQueryProcess,
-        description: this.newCronQueryDescription
-      };
-
-      if (this.newCronQueryNotifier) {
-        data.notifier = this.newCronQueryNotifier;
-      }
-
-      UserService.createCronQuery(data, this.userId).then((response) => {
-        // add the cron query to the view
-        this.cronQueryFormError = false;
-        this.cronQueries.push(response.query);
-        // reset fields
-        this.newCronQueryName = '';
-        this.newCronQueryTags = '';
-        this.newCronQueryExpression = '';
-        this.newCronQueryNotifier = undefined;
-        this.newCronQueryDescription = '';
-        // display success message to user
-        this.msg = response.text;
-        this.msgType = 'success';
-        this.cronLoading = false;
-      }).catch((error) => {
-        // display error message to user
-        this.msg = error.text;
-        this.msgType = 'danger';
-        this.cronLoading = false;
-      });
-    },
-    /**
-     * Toggles a query's detail display
-     * @param {object} query The query object to toggle
-     */
-    toggleCronQueryDetail: function (query) {
-      this.$set(query, 'expanded', !query.expanded);
-    },
-    /**
-     * Opens the matching sessions in a new tab
-     * @param {object} query The query object to open sessions for
-     */
-    openCronSessions: function (query) {
-      if (query.tags) {
-        const tags = query.tags.split(',');
-        let url = 'sessions?expression=';
-        for (let t = 0, tlen = tags.length; t < tlen; t++) {
-          const tag = tags[t];
-          url += `tags%20%3D%3D%20${tag}`; // encoded ' == '
-          if (t !== tlen - 1) { url += '%20%26%26%20'; } // encoded ' && '
-        }
-        window.open(url, '_blank'); // open in new tab
-      } else {
-        this.msg = 'This query has not tagged any sessions';
-        this.msgType = 'danger';
-      }
-    },
-    /**
-     * Deletes a query
-     * @param {object} query The query object to delete
-     * @param {number} index The index of the query in the list
-     */
-    deleteCronQuery: function (query, index) {
-      UserService.deleteCronQuery(query.key, this.userId).then((response) => {
-        // remove the query from the list
-        this.cronQueries.splice(index, 1);
-        // display success message to user
-        this.msg = response.text;
-        this.msgType = 'success';
-      }).catch((error) => {
-        // display error message to user
-        this.msg = error.text;
-        this.msgType = 'danger';
-      });
-    },
-    /**
-     * Enables/Disables a query given its key and updates the query
-     * @param {object} query The query object to toggle
-     * @param {number} index The index of the query in the list
-     */
-    toggleCronQueryEnabled: function (query, index) {
-      this.cronQueryChanged(query);
-      this.$set(query, 'enabled', !query.enabled);
-      this.updateCronQuery(query, index);
-    },
-    cronQueryNotifierChanged: function (query) {
-      console.log('cron query notifier changed', query);
-      this.cronQueryChanged(query);
-    },
-    /**
-     * Sets a cron query as having been changed
-     * @param {object} query The query object that changed
-     */
-    cronQueryChanged: function (query) {
-      this.$set(query, 'changed', true);
-    },
-    /**
-     * Cancels a query change by retrieving the list of queries
-     */
-    cancelCronQueryChange: function () {
-      UserService.getCronQueries(this.userId).then((response) => {
-        this.cronQueries = response;
-      }).catch((error) => {
-        this.cronQueryListError = error.text;
-      });
-    },
-    /**
-     * Updates a cron query
-     * @param {object} query The query to update
-     * @param {number} index The index of the query in the list
-     */
-    updateCronQuery: function (query, index) {
-      if (!query.changed) {
-        this.msg = 'This query has not changed';
-        this.msgType = 'warning';
-        return;
-      }
-
-      UserService.updateCronQuery(query, this.userId).then((response) => {
-        // display success message to user
-        this.msg = response.text;
-        this.msgType = 'success';
-        // set the cron query as unchanged
-        this.$set(query, 'changed', false);
-        response.query.expanded = query.expanded;
-        this.$set(this.cronQueries, index, response.query);
-      }).catch((error) => {
-        // display error message to user
-        this.msg = error.text;
-        this.msgType = 'danger';
-      });
-    },
-    /* COLUMN CONFIGURATIONS --------------------------- */
-    /**
-     * Deletes a previously saved custom column configuration
-     * @param {string} colName  The name of the column config to remove
-     * @param {int} index       The index in the array of the column config to remove
-     */
-    deleteColConfig: function (colName, index) {
-      UserService.deleteColumnConfig(colName, this.userId).then((response) => {
-        this.colConfigs.splice(index, 1);
-        // display success message to user
-        this.msg = response.text;
-        this.msgType = 'success';
-      }).catch((error) => {
-        // display error message to user
-        this.msg = error.text;
-        this.msgType = 'danger';
-      });
-    },
-    /* SPIVIEW FIELD CONFIGURATIONS -------------------- */
-    /**
-     * Deletes a previously saved custom spiview field configuration
-     * @param {string} spiName  The name of the field config to remove
-     * @param {int} index       The index in the array of the field config to remove
-     */
-    deleteSpiviewConfig: function (spiName, index) {
-      UserService.deleteSpiviewFieldConfig(spiName, this.userId).then((response) => {
-        this.spiviewConfigs.splice(index, 1);
-        // display success message to user
-        this.msg = response.text;
-        this.msgType = 'success';
-      }).catch((error) => {
-        // display error message to user
-        this.msg = error.text;
-        this.msgType = 'danger';
+        this.displayMessage({ msg: error.text, type: 'danger' });
       });
     },
     /* THEMES ------------------------------------------ */
@@ -3343,12 +1960,10 @@ export default {
       this.settings.shiftyEyes = !this.settings.shiftyEyes;
       UserService.saveSettings(this.settings, this.userId).then((response) => {
         // display success message to user
-        this.msg = 'SUPER SECRET THING HAPPENED!';
-        this.msgType = 'success';
+        this.displayMessage({ msg: 'SUPER SECRET THING HAPPENED!' });
       }).catch((error) => {
         // display error message to user
-        this.msg = error.text;
-        this.msgType = 'danger';
+        this.displayMessage({ msg: error.text, type: 'danger' });
       });
     },
     /* PASSWORD ---------------------------------------- */
@@ -3380,262 +1995,21 @@ export default {
         currentPassword: this.currentPassword
       };
 
-      UserService.changePassword(data, this.userId).then((response) => {
+      CommonUserService.changePassword(data, this.userId).then((response) => {
         this.changePasswordError = false;
         this.currentPassword = null;
         this.newPassword = null;
         this.confirmNewPassword = null;
         // display success message to user
-        this.msg = response.text;
-        this.msgType = 'success';
+        this.displayMessage({ msg: response.text });
       }).catch((error) => {
         // display error message to user
-        this.msg = error.text;
-        this.msgType = 'danger';
-      });
-    },
-    /* NOTIFIERS --------------------------------------- */
-    /* opens the form to create a new notifier */
-    createNewNotifier: function (notifier) {
-      this.newNotifier = JSON.parse(JSON.stringify(notifier));
-    },
-    /* gets the type of input associated with a field */
-    getFieldInputType: function (field) {
-      if (field.type === 'checkbox') {
-        return 'checkbox';
-      } else if (field.type === 'secret' && !field.showValue) {
-        return 'password';
-      } else {
-        return 'text';
-      }
-    },
-    /* clears the fields of the new notifier form */
-    clearNotifierFields: function () {
-      this.newNotifier.name = '';
-      for (const field of this.newNotifier.fields) {
-        field.value = '';
-      }
-    },
-    /* creates a new notifier */
-    createNotifier: function () {
-      if (!this.newNotifier) {
-        this.newNotifierError = 'No notifier chosen';
-        return;
-      }
-
-      if (!this.newNotifier.name) {
-        this.newNotifierError = 'Your new notifier must have a unique name';
-        return;
-      }
-
-      // make sure required fields are filled
-      for (const field of this.newNotifier.fields) {
-        if (!field.value && field.required) {
-          this.newNotifierError = `${field.name} is required`;
-          return;
-        }
-      }
-
-      SettingsService.createNotifier(this.newNotifier).then((response) => {
-        // display success message to user
-        this.msg = response.text || 'Successfully created new notifier.';
-        this.msgType = 'success';
-        this.notifiersError = '';
-        // add notifier to the list
-        this.notifiers.push(response.notifier);
-        this.newNotifier = undefined;
-      }).catch((error) => {
-        this.msg = error.text || 'Error creating new notifier.';
-        this.msgType = 'danger';
-      });
-    },
-    /* toggles the visibility of the value of secret fields */
-    toggleVisibleSecretField: function (field) {
-      this.$set(field, 'showValue', !field.showValue);
-    },
-    /* deletes a notifier */
-    removeNotifier: function (notifierName, index) {
-      SettingsService.deleteNotifier(notifierName).then((response) => {
-        // display success message to user
-        this.msg = response.text || 'Successfully deleted notifier.';
-        this.msgType = 'success';
-        this.notifiers.splice(index, 1);
-        this.notifiersError = '';
-      }).catch((error) => {
-        this.msg = error.text || 'Error deleting notifier.';
-        this.msgType = 'danger';
-      });
-    },
-    /* updates a notifier */
-    updateNotifier: function (key, index, notifier) {
-      SettingsService.updateNotifier(key, notifier).then((response) => {
-        // display success message to user
-        this.msg = response.text || 'Successfully updated notifier.';
-        this.msgType = 'success';
-        this.notifiers.splice(index, 1, response.notifier);
-        this.notifiersError = '';
-      }).catch((error) => {
-        this.msg = error.text || 'Error updating notifier.';
-        this.msgType = 'danger';
-      });
-    },
-    /* tests a notifier */
-    testNotifier: function (notifierName, index) {
-      if (this.notifiers[index].loading) {
-        return;
-      }
-
-      this.$set(this.notifiers[index], 'loading', true);
-
-      SettingsService.testNotifier(notifierName).then((response) => {
-        // display success message to user
-        this.msg = response.text || 'Successfully issued alert.';
-        this.msgType = 'success';
-        this.$set(this.notifiers[index], 'loading', false);
-      }).catch((error) => {
-        this.msg = error.text || 'Error issuing alert.';
-        this.msgType = 'danger';
-        this.$set(this.notifiers[index], 'loading', false);
-      });
-    },
-    /* SHORTCUTS --------------------------------------- */
-    /**
-     * triggered when shortcuts paging is changed
-     * @param {object} newParams Object containing length & start
-     */
-    changeShortcutsPaging: function (newParams) {
-      this.shortcutsSize = newParams.length;
-      this.shortcutsStart = newParams.start;
-      this.getShortcuts();
-    },
-    /* triggered when shortcuts search input is changed
-     * debounces the input so it only issues a request after keyups cease for 400ms */
-    getShortcutsTimeout: function () {
-      if (shortcutsInputTimeout) { clearTimeout(shortcutsInputTimeout); }
-      shortcutsInputTimeout = setTimeout(() => {
-        shortcutsInputTimeout = null;
-        this.getShortcuts();
-      }, 400);
-    },
-    /**
-     * triggered when a sortable shortcuts column is clicked
-     * if the sort field is the same as the current sort field, toggle the desc
-     * flag, otherwise set it to default (false)
-     * @param {string} sort The field to sort on
-     */
-    sortShortcuts: function (sort) {
-      this.shortcutsQuery.desc = this.shortcutsQuery.sortField === sort ? !this.shortcutsQuery.desc : false;
-      this.shortcutsQuery.sortField = sort;
-      this.getShortcuts();
-    },
-    /* toggles shared var on a shortcut and saves the shortcut */
-    toggleShortcutShared: function (shortcut, index) {
-      this.$set(shortcut, 'shared', !shortcut.shared);
-      this.updateShortcut(shortcut, index);
-    },
-    /* opens up text area to edit shortcut value */
-    toggleEditShortcut: function (shortcut) {
-      const editingShortcut = !shortcut.editing;
-      this.$set(shortcut, 'editing', editingShortcut);
-      this.$set(shortcut, 'newValue', shortcut.value);
-      this.$set(shortcut, 'newName', shortcut.name);
-      this.$set(shortcut, 'newType', shortcut.type);
-      this.$set(shortcut, 'newDescription', shortcut.description);
-    },
-    /* show/hide the entire shortcut value */
-    toggleDisplayAllShortcut: function (shortcut) {
-      this.$set(shortcut, 'showAll', !shortcut.showAll);
-    },
-    /* creates a new shortcut */
-    createShortcut: function () {
-      if (!this.newShortcutName) {
-        this.shortcutFormError = 'Enter a unique shortcut name';
-        return;
-      }
-
-      if (!this.newShortcutValue) {
-        this.shortcutFormError = 'Enter a value for your new shortcut';
-        return;
-      }
-
-      this.createShortcutLoading = true;
-
-      const data = {
-        name: this.newShortcutName,
-        type: this.newShortcutType,
-        value: this.newShortcutValue,
-        shared: this.newShortcutShared,
-        description: this.newShortcutDescription
-      };
-
-      SettingsService.createShortcut(data).then((response) => {
-        this.getShortcuts();
-        // clear the inputs and any error
-        this.shortcutFormError = false;
-        this.newShortcutName = '';
-        this.newShortcutValue = '';
-        this.newShortcutShared = false;
-        this.newShortcutDescription = '';
-        // display success message to user
-        this.msg = response.text;
-        this.msgType = 'success';
-        this.createShortcutLoading = false;
-      }).catch((error) => {
-        this.msg = error.text;
-        this.msgType = 'danger';
-        this.createShortcutLoading = false;
-      });
-    },
-    /* updates a specified shortcut (only shared and value are editable) */
-    updateShortcut: function (shortcut, index) {
-      this.$set(shortcut, 'loading', true);
-
-      const data = {
-        shared: shortcut.shared,
-        userId: shortcut.userId,
-        name: shortcut.newName || shortcut.name,
-        type: shortcut.newType || shortcut.type,
-        value: shortcut.newValue || shortcut.value,
-        description: shortcut.newDescription || shortcut.description
-      };
-
-      SettingsService.updateShortcut(shortcut.id, data).then((response) => {
-        response.shortcut.id = shortcut.id;
-        response.shortcut.type = shortcut.newType || shortcut.type;
-        this.$set(this.shortcuts.data, index, response.shortcut);
-        // display success message to user
-        this.msg = response.text;
-        this.msgType = 'success';
-        this.$set(shortcut, 'loading', false);
-      }).catch((error) => {
-        this.msg = error.text;
-        this.msgType = 'danger';
-        this.$set(shortcut, 'loading', false);
-      });
-    },
-    /* deletes a shortcut and removes it from the shortcuts array */
-    deleteShortcut: function (shortcut, index) {
-      this.$set(shortcut, 'loading', true);
-
-      SettingsService.deleteShortcut(shortcut.id).then((response) => {
-        // remove it from the array
-        this.shortcuts.data.splice(index, 1);
-        this.shortcuts.recordsTotal--;
-        this.shortcuts.recordsFiltered--;
-        // display success message to user
-        this.msg = response.text;
-        this.msgType = 'success';
-        this.$set(shortcut, 'loading', false);
-      }).catch((error) => {
-        // display error message to user
-        this.msg = error.text;
-        this.msgType = 'danger';
-        this.$set(shortcut, 'loading', false);
+        this.displayMessage({ msg: error.text, type: 'danger' });
       });
     },
 
     /* helper functions ---------------------------------------------------- */
-    /* retrievs the theme colors from the document body's property values */
+    /* retrieves the theme colors from the document body's property values */
     getThemeColors: function () {
       const styles = window.getComputedStyle(document.body);
 
@@ -3697,19 +2071,16 @@ export default {
 
           if (initLoad) {
             // get all the other things!
-            this.getViews();
-            this.getCronQueries();
             this.getColConfigs();
             this.getSpiviewConfigs();
-            this.getNotifierTypes();
-            this.getNotifiers();
-            this.getShortcuts();
+            this.getInfoFieldLayout();
+            SettingsService.getNotifiers(); // sets notifiers in the store
           }
 
           this.setTheme();
           this.startClock();
         }).catch((error) => {
-          console.log('ERROR getting fields to populdate page', error);
+          console.log('ERROR getting fields to populate page', error);
         });
       }).catch((error) => {
         this.loading = false;
@@ -3724,7 +2095,7 @@ export default {
         this.displayName = '';
       });
     },
-    /* retrieves moloch fields and visible column headers for sessions table
+    /* retrieves arkime fields and visible column headers for sessions table
      * adds custom columns to fields
      * sets user settings for spigraph field & connections src/dst fields
      * creates fields map for quick lookups
@@ -3755,7 +2126,7 @@ export default {
 
         this.$set(this, 'filtersTypeahead', '');
 
-        // get the visible headers for the sessions table configuration
+        // get the visible headers for the sessions table layout
         UserService.getState('sessionsNew').then((sessionsTableRes) => {
           const headers = sessionsTableRes.data.visibleHeaders || this.defaultColConfig.visibleHeaders;
           this.setupColumns(headers);
@@ -3771,34 +2142,26 @@ export default {
         });
       });
     },
-    /* retrieves the specified user's views */
-    getViews: function () {
-      UserService.getViews(this.userId).then((response) => {
-        this.views = response;
-      }).catch((error) => {
-        this.viewListError = error.text;
-      });
-    },
-    /* retrieves the specified user's cron queries */
-    getCronQueries: function () {
-      UserService.getCronQueries(this.userId).then((response) => {
-        this.cronQueries = response;
-      }).catch((error) => {
-        this.cronQueryListError = error.text;
-      });
-    },
-    /* retrieves the specified user's custom column configurations */
+    /* retrieves the specified user's custom column layouts */
     getColConfigs: function () {
-      UserService.getColumnConfigs(this.userId).then((response) => {
+      UserService.getLayout('sessionstable', this.userId).then((response) => {
         this.colConfigs = response;
       }).catch((error) => {
         this.colConfigError = error.text;
       });
     },
-    /* retrieves the specified user's custom spiview fields configurations.
+    /* retrieves the specified user's custom info field layouts */
+    getInfoFieldLayout: function () {
+      UserService.getLayout('sessionsinfofields', this.userId).then((response) => {
+        this.infoFieldLayouts = response;
+      }).catch((error) => {
+        this.infoFieldError = error.text;
+      });
+    },
+    /* retrieves the specified user's custom spiview fields layouts.
      * dissects the visible spiview fields for view consumption */
     getSpiviewConfigs: function () {
-      UserService.getSpiviewFields(this.userId).then((response) => {
+      UserService.getLayout('spiview', this.userId).then((response) => {
         this.spiviewConfigs = response;
 
         for (let x = 0, xlen = this.spiviewConfigs.length; x < xlen; ++x) {
@@ -3827,40 +2190,6 @@ export default {
         this.spiviewConfigError = error.text;
       });
     },
-    /* retrieves the types of notifiers that can be configured */
-    getNotifierTypes: function () {
-      SettingsService.getNotifierTypes().then((response) => {
-        this.notifierTypes = response;
-      }).catch((error) => {
-        this.notifiersError = error.text || error;
-      });
-    },
-    /* retrieves the notifiers that have been configured */
-    getNotifiers: function () {
-      SettingsService.getNotifiers().then((response) => {
-        this.notifiers = response;
-      }).catch((error) => {
-        this.notifiersError = error.text || error;
-      });
-    },
-    getShortcuts: function () {
-      const queryParams = {
-        length: this.shortcutsSize,
-        start: this.shortcutsStart,
-        desc: this.shortcutsQuery.desc,
-        sort: this.shortcutsQuery.sortField
-      };
-
-      if (this.shortcutsQuery.search) { queryParams.searchTerm = this.shortcutsQuery.search; }
-      if (this.userId) { queryParams.userId = this.userId; }
-
-      SettingsService.getShortcuts().then((response) => {
-        this.shortcuts = response;
-        this.shortcutsListError = '';
-      }).catch((error) => {
-        this.shortcutsListError = error.text || error;
-      });
-    },
     /**
      * Setup this.columns with a list of field objects
      * @param {array} colIdArray The array of column ids
@@ -3877,7 +2206,6 @@ export default {
   },
   beforeDestroy: function () {
     if (clockInterval) { clearInterval(clockInterval); }
-    if (shortcutsInputTimeout) { clearTimeout(shortcutsInputTimeout); }
 
     // remove userId route query parameter so that when a user
     // comes back to this page, they are on their own settings
@@ -3922,8 +2250,13 @@ export default {
   position: fixed;
 }
 
+.settings-page .nav-separator {
+  width: 100%;
+  border-top: 1px solid var(--color-gray);
+}
+
 /* make sure the form is taller than the nav pills */
-.settings-page form {
+.settings-page form:not(.b-dropdown-form) {
   min-height: 280px;
 }
 
@@ -3937,36 +2270,6 @@ export default {
   box-shadow: inset 0 1px 1px rgba(0, 0, 0, .05);
   background-color: var(--color-gray-lighter);
   border: 1px solid var(--color-gray-light);
-}
-
-/* shortcuts form */
-.settings-page .var-form {
-  box-shadow: inset 0 1px 1px rgba(0, 0, 0, .05);
-  background-color: var(--color-gray-lighter);
-  border: 1px solid var(--color-gray-light);
-  border-radius: 3px;
-}
-.settings-page .var-form input[type='checkbox'] {
-  margin-top: 0.75rem;
-}
-
-/* shortcuts table */
-.settings-page .shortcut-value {
-  max-width: 340px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.settings-page .shortcut-value.show-all {
-  overflow: visible;
-  white-space: normal;
-}
-.settings-page .shortcut-value.narrow {
-  max-width: 160px;
-}
-.settings-page .shortcut-btns {
-  min-width: 140px;
-  white-space: nowrap;
 }
 
 /* theme displays ----------------- */

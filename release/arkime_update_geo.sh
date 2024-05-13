@@ -20,16 +20,21 @@ fi
 
 # Try and download manuf, only copy if it works
 FILENAME=$(mktemp)
-wget -nv --timeout=${TIMEOUT} -O "$FILENAME" https://raw.githubusercontent.com/wireshark/wireshark/master/manuf
+wget -nv --timeout=${TIMEOUT} -O "$FILENAME" https://www.wireshark.org/download/automated/data/manuf
 if (( $? == 0 )) ; then
   chmod a+r "$FILENAME"
   mv "$FILENAME" "${DEST_DIR}/oui.txt"
 fi
 
-# Call the maxind geoipupdate program if available. See
+# Run the maxind geoipupdate program if available. See
 # https://blog.maxmind.com/2019/12/18/significant-changes-to-accessing-and-using-geolite2-databases/
 # https://dev.maxmind.com/geoip/geoipupdate/#For_Free_GeoLite2_Databases
 if [ -x "/usr/bin/geoipupdate" ]; then
     /usr/bin/geoipupdate
-    chmod a+r /usr/share/GeoIP/*.mmdb
+    if [ -d /usr/share/GeoIP ]; then
+      chmod a+r /usr/share/GeoIP/*.mmdb
+    fi
+    if [ -d /var/lib/GeoIP ]; then
+      chmod a+r /var/lib/GeoIP/*.mmdb
+    fi
 fi

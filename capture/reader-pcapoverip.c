@@ -10,47 +10,40 @@
  *
  * Copyright 2020 AOL Inc. All rights reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this Software except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
  */
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include "gio/gio.h"
 #include "glib-object.h"
 #include "pcap.h"
-#include "moloch.h"
-extern MolochPcapFileHdr_t   pcapFileHeader;
-extern MolochConfig_t        config;
+#include "arkime.h"
+extern ArkimePcapFileHdr_t   pcapFileHeader;
+extern ArkimeConfig_t        config;
 
-LOCAL MolochPacketBatch_t   batch;
+LOCAL ArkimePacketBatch_t   batch;
 LOCAL uint64_t              packets;
 
 LOCAL int                   port;
 
-struct bpf_program          bpfp;
-pcap_t                     *deadPcap;
+LOCAL struct bpf_program    bpfp;
+LOCAL pcap_t               *deadPcap;
 
 typedef struct {
     GSocket                *socket;
-    char                    data[MOLOCH_PACKET_MAX_LEN + 24];
+    char                    data[ARKIME_PACKET_MAX_LEN + 24];
     uint32_t                len;
     int                     readWatch;
     int                     interface;
-    uint16_t                state:1;
-    uint16_t                bigEndian:1;
-    uint16_t                isClient:1;
+    uint16_t                state: 1;
+    uint16_t                needSwap: 1;
+    uint16_t                isClient: 1;
 } POIClient_t;
 
 LOCAL int                   isConnected[MAX_INTERFACES];
+
+#define SWAP32(x) ((((x)&0xff000000) >> 24) | (((x)&0x00ff0000) >> 8) | (((x)&0x0000ff00) << 8) | (((x)&0x000000ff) << 24))
+#define SWAP16(x) ((((x)&0xff00) >> 8) | (((x)&0x00ff) << 8))
 
 /******************************************************************************/
 void pcapoverip_client_free (POIClient_t *poic)
@@ -61,14 +54,17 @@ void pcapoverip_client_free (POIClient_t *poic)
     g_source_remove(poic->readWatch);
     g_object_unref (poic->socket);
 
-    MOLOCH_TYPE_FREE(POIClient_t, poic);
+    ARKIME_TYPE_FREE(POIClient_t, poic);
 }
 /******************************************************************************/
-gboolean pcapoverip_client_read_cb(gint UNUSED(fd), GIOCondition cond, gpointer data) {
+SUPPRESS_ALIGNMENT
+gboolean pcapoverip_client_read_cb(gint UNUSED(fd), GIOCondition cond, gpointer data)
+{
     POIClient_t *poic = (POIClient_t *)data;
 
     //LOG("fd: %d cond: %x data: %p", fd, cond, data);
     GError              *error = 0;
+    static int           first = 1;
 
     int len = g_socket_receive(poic->socket, poic->data + poic->len, sizeof(poic->data) - poic->len, NULL, &error);
 
@@ -86,15 +82,32 @@ gboolean pcapoverip_client_read_cb(gint UNUSED(fd), GIOCondition cond, gpointer 
         if (poic->state == 0) {
             if (poic->len - pos < 24) // Not enough for pcap file header
                 break;
-            if (memcmp(poic->data + pos, "\xa1\xb2\xc3\xd4", 4) == 0)
-                poic->bigEndian = 1;
-            else if (memcmp(poic->data + pos, "\xd4\xc3\xb2\xa1", 4) == 0)
-                poic->bigEndian = 0;
-            else {
-                pcapoverip_client_free(poic);
+
+            ArkimePcapFileHdr_t *h = (ArkimePcapFileHdr_t *)(poic->data + pos);
+
+            if (h->magic != 0xa1b2c3d4 && h->magic != 0xd4c3b2a1 &&
+                h->magic != 0xa1b23c4d && h->magic != 0x4d3cb2a1) {
+                LOG("ERROR - Unknown magic %xs", h->magic);
                 return FALSE;
             }
+
+            poic->needSwap = (h->magic == 0xd4c3b2a1 || h->magic == 0x4d3cb2a1);
+
             // TODO: Really we should save the header per connection and do stuff
+            if (first) {
+                if (poic->needSwap) {
+                    h->dlt = SWAP32(h->dlt);
+                }
+                arkime_packet_set_dltsnap(h->dlt, config.snapLen);
+
+                if (config.bpf && !deadPcap) {
+                    deadPcap = pcap_open_dead(h->dlt, config.snapLen);
+                    if (pcap_compile(deadPcap, &bpfp, config.bpf, 1, PCAP_NETMASK_UNKNOWN) == -1) {
+                        CONFIGEXIT("Couldn't compile bpf filter '%s' with %s", config.bpf, pcap_geterr(deadPcap));
+                    }
+                }
+                first = 0;
+            }
             poic->state = 1;
             pos += 24;
             continue;
@@ -103,38 +116,34 @@ gboolean pcapoverip_client_read_cb(gint UNUSED(fd), GIOCondition cond, gpointer 
         if (poic->len - pos < 16) // Not enough for packet header
             break;
 
-        BSB bsb;
-        BSB_INIT(bsb, poic->data + pos , poic->len - pos);
+        struct arkime_pcap_sf_pkthdr *ph = (struct arkime_pcap_sf_pkthdr *)(poic->data + pos);
 
-        MolochPacket_t *packet = MOLOCH_TYPE_ALLOC0(MolochPacket_t);
-
-        uint32_t caplen = 0;
+        ArkimePacket_t *packet = ARKIME_TYPE_ALLOC0(ArkimePacket_t);
         uint32_t origlen = 0;
-        if (poic->bigEndian) {
-            BSB_IMPORT_u32(bsb, packet->ts.tv_sec);
-            BSB_IMPORT_u32(bsb, packet->ts.tv_usec);
-            BSB_IMPORT_u32(bsb, caplen);
-            BSB_IMPORT_u32(bsb, origlen);
+        uint32_t caplen = 0;
+        if (poic->needSwap) {
+            caplen = SWAP32(ph->caplen);
+            origlen = SWAP32(ph->pktlen);
+            packet->ts.tv_sec = SWAP32(ph->ts.tv_sec);
+            packet->ts.tv_usec = SWAP32(ph->ts.tv_usec);
         } else {
-            BSB_LIMPORT_u32(bsb, packet->ts.tv_sec);
-            BSB_LIMPORT_u32(bsb, packet->ts.tv_usec);
-            BSB_LIMPORT_u32(bsb, caplen);
-            BSB_LIMPORT_u32(bsb, origlen);
+            caplen = ph->caplen;
+            origlen = ph->pktlen;
+            packet->ts.tv_sec = ph->ts.tv_sec;
+            packet->ts.tv_usec = ph->ts.tv_usec;
         }
 
-        if (unlikely(caplen != origlen)) {
-            if (!config.readTruncatedPackets && !config.ignoreErrors) {
-                LOGEXIT("ERROR - Arkime requires full packet captures caplen: %u pktlen: %u. "
-                    "If using tcpdump use the \"-s0\" option, or set readTruncatedPackets in ini file",
+        if (unlikely(caplen != origlen) && config.readTruncatedPackets && !config.ignoreErrors) {
+            LOGEXIT("ERROR - Arkime requires full packet captures caplen: %u pktlen: %u\n"
+                    "See https://arkime.com/faq#arkime_requires_full_packet_captures_error",
                     caplen, origlen);
-            }
         }
 
-        if (unlikely(caplen > MOLOCH_PACKET_MAX_LEN)) {
+        if (unlikely(caplen > ARKIME_PACKET_MAX_LEN)) {
             if (!config.ignoreErrors) {
                 LOGEXIT("ERROR - The packet length %u is too large.", caplen);
             } else {
-                MOLOCH_TYPE_FREE(MolochPacket_t, packet);
+                ARKIME_TYPE_FREE(ArkimePacket_t, packet);
                 pcapoverip_client_free(poic);
                 return FALSE;
             }
@@ -142,7 +151,7 @@ gboolean pcapoverip_client_read_cb(gint UNUSED(fd), GIOCondition cond, gpointer 
         }
 
         if (poic->len - pos < 16 + caplen) { // Not enough data for packet
-            MOLOCH_TYPE_FREE(MolochPacket_t, packet);
+            ARKIME_TYPE_FREE(ArkimePacket_t, packet);
             break;
         }
 
@@ -151,9 +160,9 @@ gboolean pcapoverip_client_read_cb(gint UNUSED(fd), GIOCondition cond, gpointer 
         packet->readerPos     = poic->interface;
 
         if (config.bpf && bpf_filter(bpfp.bf_insns, packet->pkt, packet->pktlen, packet->pktlen)) {
-            MOLOCH_TYPE_FREE(MolochPacket_t, packet);
+            ARKIME_TYPE_FREE(ArkimePacket_t, packet);
         } else {
-            moloch_packet_batch(&batch, packet);
+            arkime_packet_batch(&batch, packet);
         }
 
         pos += 16 + caplen;
@@ -162,8 +171,7 @@ gboolean pcapoverip_client_read_cb(gint UNUSED(fd), GIOCondition cond, gpointer 
 
     if (pos > 0) { // We processed some of the buffer!
         if (poic->state == 1) {
-            moloch_packet_batch_flush(&batch);
-            moloch_packet_batch_init(&batch);
+            arkime_packet_batch_flush(&batch);
         }
         memmove(poic->data, poic->data + pos, poic->len - pos);
         poic->len -= pos;
@@ -172,7 +180,8 @@ gboolean pcapoverip_client_read_cb(gint UNUSED(fd), GIOCondition cond, gpointer 
     return TRUE;
 }
 /******************************************************************************/
-LOCAL void pcapoverip_client_connect(int interface) {
+LOCAL void pcapoverip_client_connect(int interface)
+{
     GError                   *error = NULL;
     GSocketConnectable       *connectable;
     GSocketAddressEnumerator *enumerator;
@@ -188,8 +197,7 @@ LOCAL void pcapoverip_client_connect(int interface) {
     g_object_unref(connectable);
 
     GSocket *conn = NULL;
-    while (!conn && (sockaddr = g_socket_address_enumerator_next (enumerator, NULL, &error)))
-    {
+    while (!conn && (sockaddr = g_socket_address_enumerator_next (enumerator, NULL, &error))) {
         conn = g_socket_new(G_SOCKET_FAMILY_IPV4, G_SOCKET_TYPE_STREAM, G_SOCKET_PROTOCOL_TCP, &error);
 
         if (!error) {
@@ -206,7 +214,7 @@ LOCAL void pcapoverip_client_connect(int interface) {
             g_socket_set_blocking (conn, FALSE);
             struct sockaddr_in localAddress, remoteAddress;
             socklen_t addressLength = sizeof(localAddress);
-            getsockname(g_socket_get_fd(conn), (struct sockaddr*)&localAddress, &addressLength);
+            getsockname(g_socket_get_fd(conn), (struct sockaddr *)&localAddress, &addressLength);
             g_socket_address_to_native(sockaddr, &remoteAddress, addressLength, NULL);
             if (config.debug > 0)
                 LOG("connected %s:%d", config.interface[interface], port);
@@ -232,11 +240,11 @@ LOCAL void pcapoverip_client_connect(int interface) {
     g_socket_set_keepalive(conn, TRUE);
     int fd = g_socket_get_fd(conn);
 
-    POIClient_t *poic = MOLOCH_TYPE_ALLOC0(POIClient_t);
+    POIClient_t *poic = ARKIME_TYPE_ALLOC0(POIClient_t);
     poic->interface = interface;
     poic->isClient = 1;
     poic->socket = conn;
-    poic->readWatch = moloch_watch_fd(fd, MOLOCH_GIO_READ_COND, pcapoverip_client_read_cb, poic);
+    poic->readWatch = arkime_watch_fd(fd, ARKIME_GIO_READ_COND, pcapoverip_client_read_cb, poic);
     isConnected[poic->interface] = 1;
 }
 /******************************************************************************/
@@ -247,14 +255,14 @@ LOCAL gboolean pcapoverip_client_check_connections (gpointer UNUSED(user_data))
         if (!isConnected[i])
             pcapoverip_client_connect(i);
     }
-    return TRUE;
+    return G_SOURCE_CONTINUE;
 }
 /******************************************************************************/
 LOCAL void pcapoverip_client_start()
 {
     pcapoverip_client_check_connections(NULL);
     g_timeout_add_seconds(5, pcapoverip_client_check_connections, NULL);
-    moloch_packet_set_dltsnap(DLT_EN10MB, config.snapLen);
+    arkime_packet_set_dltsnap(DLT_EN10MB, config.snapLen);
 }
 /******************************************************************************/
 gboolean pcapoverip_server_read_cb(gint UNUSED(fd), GIOCondition UNUSED(cond), gpointer data)
@@ -266,11 +274,11 @@ gboolean pcapoverip_server_read_cb(gint UNUSED(fd), GIOCondition UNUSED(cond), g
         LOGEXIT("ERROR - Error accepting pcap-over-ip: %s", error->message);
     }
 
-    POIClient_t *poic = MOLOCH_TYPE_ALLOC0(POIClient_t);
+    POIClient_t *poic = ARKIME_TYPE_ALLOC0(POIClient_t);
     poic->socket = client;
 
     int cfd = g_socket_get_fd(client);
-    poic->readWatch = moloch_watch_fd(cfd, MOLOCH_GIO_READ_COND, pcapoverip_client_read_cb, poic);
+    poic->readWatch = arkime_watch_fd(cfd, ARKIME_GIO_READ_COND, pcapoverip_client_read_cb, poic);
     return TRUE;
 }
 /******************************************************************************/
@@ -300,11 +308,11 @@ LOCAL void pcapoverip_server_start()
 
     int fd = g_socket_get_fd(socket);
 
-    moloch_watch_fd(fd, MOLOCH_GIO_READ_COND, pcapoverip_server_read_cb, socket);
-    moloch_packet_set_dltsnap(DLT_EN10MB, config.snapLen);
+    arkime_watch_fd(fd, ARKIME_GIO_READ_COND, pcapoverip_server_read_cb, socket);
+    arkime_packet_set_dltsnap(DLT_EN10MB, config.snapLen);
 }
 /******************************************************************************/
-LOCAL int pcapoverip_stats(MolochReaderStats_t *stats)
+LOCAL int pcapoverip_stats(ArkimeReaderStats_t *stats)
 {
     stats->dropped = 0;
     stats->total = packets;
@@ -313,19 +321,13 @@ LOCAL int pcapoverip_stats(MolochReaderStats_t *stats)
 /******************************************************************************/
 void reader_pcapoverip_init(char *name)
 {
-    port        = moloch_config_int(NULL, "pcapOverIpPort", 57012, 1, 0xffff);
+    port        = arkime_config_int(NULL, "pcapOverIpPort", 57012, 1, 0xffff);
 
     if (strcmp(name, "pcapoveripclient") == 0 || strcmp(name, "pcap-over-ip-client") == 0) {
-        moloch_reader_start         = pcapoverip_client_start;
+        arkime_reader_start         = pcapoverip_client_start;
     } else {
-        moloch_reader_start         = pcapoverip_server_start;
+        arkime_reader_start         = pcapoverip_server_start;
     }
-    moloch_reader_stats         = pcapoverip_stats;
-    moloch_packet_batch_init(&batch);
-    deadPcap = pcap_open_dead(DLT_EN10MB, config.snapLen);
-    if (config.bpf) {
-        if (pcap_compile(deadPcap, &bpfp, config.bpf, 1, PCAP_NETMASK_UNKNOWN) == -1) {
-            CONFIGEXIT("Couldn't compile bpf filter '%s' with %s", config.bpf, pcap_geterr(deadPcap));
-        }
-    }
+    arkime_reader_stats         = pcapoverip_stats;
+    arkime_packet_batch_init(&batch);
 }

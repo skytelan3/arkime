@@ -1,6 +1,7 @@
 import Vue from 'vue';
 import qs from 'qs';
 import store from '../../store';
+import Utils from '../utils/utils';
 
 let getDecodingsQIP;
 let _decodingsCache;
@@ -57,6 +58,8 @@ export default {
         }
       }
 
+      Utils.setFacetsQuery(params, 'sessions');
+
       // set whether map is open on the sessions page
       if (localStorage.getItem('sessions-open-map') === 'true') {
         params.map = true;
@@ -70,7 +73,7 @@ export default {
         url: 'api/sessions',
         method: 'POST',
         data: params,
-        cancelToken: cancelToken
+        cancelToken
       };
 
       Vue.axios(options)
@@ -98,7 +101,7 @@ export default {
       const options = {
         method: 'GET',
         params: {
-          cluster: cluster
+          cluster
         },
         url: `api/session/${node}/${id}/detail`
       };
@@ -114,10 +117,10 @@ export default {
 
   /**
    * Gets session packets
-   * @param {string} id         The unique id of the session
-   * @param {string} node       The node that the session belongs to
+   * @param {string} id       The unique id of the session
+   * @param {string} node     The node that the session belongs to
    * @param {string} cluster  The Elasticsearch cluster that the session belongs to
-   * @param {Object} params     The params to send with the request
+   * @param {Object} params   The params to send with the request
    * @returns {Object} { promise, source } An object including a promise object
    * that signals the completion or rejection of the request and a source object
    * to allow the request to be cancelled
@@ -130,10 +133,10 @@ export default {
         method: 'GET',
         params: {
           ...params,
-          cluster: cluster
+          cluster
         },
         cancelToken: source.token,
-        url: `${node}/session/${id}/packets`
+        url: `api/session/${node}/${id}/packets`
       };
 
       Vue.axios(options)
@@ -252,7 +255,7 @@ export default {
 
       // add tags and cluster to data instead of url params
       options.data.tags = params.tags;
-      options.data.cluster = cluster; // ALW use the cluster before routeParams replaces it
+      options.data.remoteCluster = cluster; // ALW use the cluster before routeParams replaces it
       delete options.params.tags;
       delete options.params.cluster;
 
@@ -370,8 +373,8 @@ export default {
     const clonedParams = JSON.parse(JSON.stringify(routeParams));
 
     const params = {
-      exp: exp,
-      counts: counts,
+      exp,
+      counts,
       view: clonedParams.view,
       date: clonedParams.date,
       stopTime: clonedParams.stopTime,
@@ -447,10 +450,10 @@ export default {
     delete combinedParams.numMatching;
 
     return {
-      data: data,
+      data,
       url: baseUrl,
-      error: error,
-      method: method,
+      error,
+      method,
       params: combinedParams
     };
   }

@@ -23,13 +23,17 @@ const store = new Vuex.Store({
     fieldsMap: {}, // NOTE: this has duplicate fields where dbField and dbField2 are different
     fieldsAliasMap: {},
     fieldhistory: [],
-    timeRange: 1,
+    timeRange: DEFAULT_TIME_RANGE ?? 1, /* eslint-disable-line no-undef */
     expression: undefined,
     time: {
       startTime: undefined,
       stopTime: undefined
     },
+    hideViz: false,
     stickyViz: false,
+    fetchGraphData: false,
+    disabledAggregations: false,
+    forcedAggregations: false,
     showMaps: true,
     showToolBars: true,
     mapSrc: true,
@@ -41,7 +45,6 @@ const store = new Vuex.Store({
     issueSearch: undefined,
     focusTimeRange: undefined,
     shiftKeyHold: false,
-    displayKeyboardShortcutsHelp: undefined,
     responseTime: undefined,
     sessionsTableState: undefined,
     loadingData: false,
@@ -49,7 +52,13 @@ const store = new Vuex.Store({
     sortsParam: 'firstPacket:desc',
     stickySessionsBtn: false,
     showCapStartTimes: true,
-    capStartTimes: [{ nodeName: 'none', startTime: 1 }]
+    capStartTimes: [{ nodeName: 'none', startTime: 1 }],
+    roles: [],
+    fieldActions: {},
+    notifiers: [],
+    sessionDetailDLWidth: 160,
+    sessionDetailCols: localStorage.getItem('sessionDetailCols') || 2,
+    userSettingDefaults: {}
   },
   getters: {
     sessionsTableState (state) {
@@ -57,6 +66,9 @@ const store = new Vuex.Store({
         state.sessionsTableState = Utils.getDefaultTableState();
       }
       return state.sessionsTableState;
+    },
+    getFieldActions (state) {
+      return state.fieldActions;
     }
   },
   mutations: {
@@ -97,6 +109,12 @@ const store = new Vuex.Store({
     toggleStickyViz (state, value) {
       state.stickyViz = value;
     },
+    toggleHideViz (state, value) {
+      state.hideViz = value;
+    },
+    setFetchGraphData (state, value) {
+      state.fetchGraphData = value;
+    },
     toggleMaps (state, value) {
       state.showMaps = value;
     },
@@ -120,23 +138,18 @@ const store = new Vuex.Store({
     },
     setFocusSearch (state, value) {
       state.focusSearch = value;
+      setTimeout(() => { state.focusSearch = false; });
     },
     setIssueSearch (state, value) {
       state.issueSearch = value;
-      if (value) {
-        setTimeout(() => {
-          state.issueSearch = false;
-        });
-      }
+      setTimeout(() => { state.issueSearch = false; });
     },
     setFocusTimeRange (state, value) {
       state.focusTimeRange = value;
+      setTimeout(() => { state.focusTimeRange = false; });
     },
     setShiftKeyHold (state, value) {
       state.shiftKeyHold = value;
-    },
-    setDisplayKeyboardShortcutsHelp (state, value) {
-      state.displayKeyboardShortcutsHelp = value;
     },
     setUser (state, value) {
       state.user = value;
@@ -153,22 +166,8 @@ const store = new Vuex.Store({
     setViews (state, value) {
       state.views = value;
     },
-    addViews (state, value) {
-      state.views[value.name] = value;
-    },
-    deleteViews (state, value) {
-      state.views[value] = null;
-      delete state.views[value];
-    },
-    updateViews (state, value) {
-      // if name of view changes in update
-      if (value.name !== value.key) {
-        state.views[value.key] = null;
-        delete state.views[value.key];
-      }
-      delete value.key;
-
-      state.views[value.name] = value;
+    addView (state, value) {
+      state.views.push(value);
     },
     setLoadingData (state, value) {
       state.loadingData = value;
@@ -221,6 +220,8 @@ const store = new Vuex.Store({
       state.remoteclusters = value.remoteclusters;
       state.fieldhistory = value.fieldhistory.fields || [];
       state.esCluster.availableCluster = value.clusters;
+      state.roles = Vue.filter('parseRoles')(value.roles);
+      state.userSettingDefaults = value.userSettingDefaults;
 
       // fieldsMap has keys for these fields: dbField, dbField2, fieldECS, and exp (id/key)
       // fieldsAliasMap has keys for field aliases
@@ -238,6 +239,28 @@ const store = new Vuex.Store({
           state.fieldsAliasMap[alias] = field;
         });
       }
+    },
+    setRoles (state, value) {
+      state.roles = value;
+    },
+    setDisabledAggregations (state, value) {
+      state.disabledAggregations = value;
+    },
+    setForcedAggregations (state, value) {
+      state.forcedAggregations = value;
+    },
+    setFieldActions (state, value) {
+      state.fieldActions = value;
+    },
+    setNotifiers (state, value) {
+      state.notifiers = value;
+    },
+    setSessionDetailDLWidth (state, value) {
+      state.sessionDetailDLWidth = value;
+    },
+    setSessionDetailCols (state, value) {
+      state.sessionDetailCols = value;
+      localStorage.setItem('sessionDetailCols', value);
     }
   }
 });

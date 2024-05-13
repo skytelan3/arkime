@@ -1,3 +1,7 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div>
     <div class="row">
@@ -7,10 +11,51 @@
         </hunt-status>
       </div>
     </div>
-    <div class="row" v-if="job.description">
-      <div class="col-12">
-        <span class="fa fa-fw fa-file-text" />&nbsp;
-        {{ job.description }}
+    <div class="row">
+      <div class="col-12 d-flex">
+        <span class="fa fa-fw fa-file-text mt-1" />&nbsp;
+        <template v-if="!editDescription">
+          <span v-if="job.description" class="pl-1">
+            {{ job.description }}
+          </span>
+          <em v-else class="pl-1">
+            No description
+          </em>
+          <button
+            v-if="canEdit"
+            v-b-tooltip.hover.right
+            title="Edit description"
+            @click="editDescription = true"
+            class="btn btn-xs btn-theme-secondary ml-1">
+            <span class="fa fa-pencil" />
+          </button>
+        </template>
+        <div
+          v-else-if="canEdit"
+          class="flex-grow-1">
+          <b-input-group
+            size="sm"
+            prepend="Description">
+            <b-form-input
+              v-model="newDescription"
+              placeholder="Update the description"
+            />
+            <b-input-group-append>
+              <b-button
+                variant="warning"
+                @click="editDescription = false"
+                title="Cancel hunt description update">
+                Cancel
+              </b-button>
+              <b-button
+                variant="success"
+                title="Save hunt description"
+                @click="updateJobDescription">
+                Save
+              </b-button>
+            </b-input-group-append>
+          </b-input-group>
+        </div>
       </div>
     </div>
     <div>
@@ -76,7 +121,7 @@
       <div class="col-12">
         <span class="fa fa-fw fa-bell">
         </span>&nbsp;
-        Notifying: {{ job.notifier }}
+        Notifying: {{ notifierName }}
       </div>
     </div>
     <div class="row">
@@ -110,7 +155,7 @@
         <span class="fa fa-fw fa-search">
         </span>&nbsp;
         The sessions query view was:
-        <strong>{{ job.query.view }}</strong>
+        <strong>{{ getViewName(job.query.view) }}</strong>
       </div>
     </div>
     <div class="row">
@@ -123,9 +168,8 @@
         <strong>{{ job.query.stopTime * 1000 | timezoneDateString(user.settings.timezone, false) }}</strong>
       </div>
     </div>
-    <template v-if="!anonymousMode">
-      <div class="row mb-2"
-        v-if="user.userId === job.userId || user.createEnabled">
+    <template v-if="canEdit">
+      <div class="row mb-2">
         <div class="col-12">
           <span class="fa fa-fw fa-share-alt">
           </span>&nbsp;
@@ -145,7 +189,7 @@
             </span>
           </template>
           <template v-else-if="job.users && !job.users.length">
-            This hunt is not being shared.
+            This hunt is not being shared with specific users.
             Click this button to share it with other users:
           </template>
           <button class="btn btn-xs btn-theme-secondary ml-1"
@@ -167,7 +211,7 @@
               <input type="text"
                 v-model="newUsers"
                 class="form-control"
-                v-focus-input="focusInput"
+                v-focus="focusInput"
                 @keyup.enter="addUsers(newUsers, job)"
                 placeholder="Comma separated list of user IDs"
               />
@@ -187,9 +231,28 @@
           </template>
         </div>
       </div>
+      <div class="row mb-2">
+        <div class="col-12">
+          <span class="fa fa-fw fa-share-alt">
+          </span>&nbsp;
+          <template v-if="job.roles && job.roles.length">
+            This job is being shared with these roles:
+          </template>
+          <template v-else-if="!job.roles || !job.roles.length">
+            This hunt is not being shared with any roles.
+            Add roles here:
+          </template>
+          <RoleDropdown
+            :roles="roles"
+            :selected-roles="job.roles"
+            @selected-roles-updated="updateJobRoles"
+          />
+        </div>
+      </div>
+
     </template>
     <div class="row mb-2"
-      v-else-if="job.users.indexOf(user.userId) > -1">
+      v-else-if="isShared">
       <div class="col-12">
         <span class="fa fa-fw fa-share-alt">
         </span>&nbsp;
@@ -221,23 +284,45 @@
 
 <script>
 import HuntStatus from './HuntStatus';
-import FocusInput from '../utils/FocusInput';
+import HuntService from './HuntService';
+import Focus from '../../../../../common/vueapp/Focus';
+import RoleDropdown from '../../../../../common/vueapp/RoleDropdown';
 
 export default {
   name: 'HuntData',
   props: {
     job: Object,
-    user: Object
+    user: Object,
+    notifierName: String
   },
-  components: { HuntStatus },
-  directives: { FocusInput },
+  components: {
+    HuntStatus,
+    RoleDropdown
+  },
+  directives: { Focus },
   data: function () {
     return {
       newUsers: '',
-      showAddUsers: false,
       focusInput: false,
-      anonymousMode: this.$constants.MOLOCH_ANONYMOUS_MODE
+      showAddUsers: false,
+      editDescription: false,
+      newDescription: this.job.description,
+      anonymousMode: this.$constants.ANONYMOUS_MODE
     };
+  },
+  computed: {
+    roles () {
+      return this.$store.state.roles;
+    },
+    views () {
+      return this.$store.state.views;
+    },
+    canEdit () {
+      return !this.anonymousMode && HuntService.canEditHunt(this.user, this.job);
+    },
+    isShared () {
+      return HuntService.isShared(this.user, this.job);
+    }
   },
   methods: {
     removeJob: function (job, list) {
@@ -254,6 +339,19 @@ export default {
       this.newUsers = '';
       this.showAddUsers = !this.showAddUsers;
       this.focusInput = this.showAddUsers;
+    },
+    updateJobRoles: function (roles) {
+      this.$set(this.job, 'roles', roles);
+      this.$emit('updateHunt', this.job);
+    },
+    updateJobDescription: function (roles) {
+      this.$set(this.job, 'description', this.newDescription);
+      this.$emit('updateHunt', this.job);
+      this.editDescription = false;
+    },
+    getViewName: function (viewId) {
+      const view = this.views.find(v => v.id === viewId || v.name === viewId);
+      return view?.name || 'unknown or deleted view';
     }
   }
 };

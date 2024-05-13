@@ -3,20 +3,9 @@
  *
  * decryptPcap.js [options like -c/-n] <full path filename>
  *
- *
  * Copyright 2020 AOL Inc. All rights reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this Software except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 'use strict';
@@ -24,8 +13,7 @@ const Config = require('./config.js');
 const Db = require('./db.js');
 const cryptoLib = require('crypto');
 const fs = require('fs');
-
-const escInfo = Config.getArray('elasticsearch', ',', 'http://localhost:9200');
+const ArkimeConfig = require('../common/arkimeConfig');
 
 function main () {
   const query = { size: 100, query: { term: { name: process.argv[2] } }, sort: [{ num: { order: 'desc' } }] };
@@ -52,23 +40,39 @@ function main () {
     }
 
     // Decrypt the dek
-    // eslint-disable-next-line node/no-deprecated-api
+    // eslint-disable-next-line n/no-deprecated-api
     const kdecipher = cryptoLib.createDecipher('aes-192-cbc', kek);
     const encKey = Buffer.concat([kdecipher.update(Buffer.from(info.dek, 'hex')), kdecipher.final()]);
 
-    // Setup IV
-    const iv = Buffer.alloc(16);
-    Buffer.from(info.iv, 'hex').copy(iv);
-
-    // Setup streams
     const r = fs.createReadStream(process.argv[2]);
-    const d = cryptoLib.createDecipheriv(info.encoding, encKey, iv);
-    d.on('end', function () {
-      process.exit();
-    });
 
-    // Doit
-    r.pipe(d).pipe(process.stdout);
+    if (info.encoding === 'aes-256-ctr') {
+      // Setup IV
+      const iv = Buffer.alloc(16);
+      Buffer.from(info.iv, 'hex').copy(iv);
+
+      // Setup streams
+      const d = cryptoLib.createDecipheriv(info.encoding, encKey, iv);
+      d.on('end', () => {
+        process.exit();
+      });
+
+      // Doit
+      r.pipe(d).pipe(process.stdout);
+    } else if (info.encoding === 'xor-2048') {
+      let pos = 0;
+      r.on('data', (chunk) => {
+        for (let i = 0; i < chunk.length; i++, pos++) {
+          chunk[i] ^= encKey[pos % 256];
+        }
+        process.stdout.write(chunk);
+      });
+      r.on('end', () => {
+        process.exit();
+      });
+    } else {
+      console.log('Unknown encoding', info.encoding);
+    }
   });
 }
 
@@ -77,17 +81,26 @@ if (process.argv.length < 3) {
   process.exit();
 }
 
-Db.initialize({
-  host: escInfo,
-  prefix: Config.get('prefix', 'arkime_'),
-  esClientKey: Config.get('esClientKey', null),
-  esClientCert: Config.get('esClientCert', null),
-  esClientKeyPass: Config.get('esClientKeyPass', null),
-  insecure: Config.insecure,
-  usersHost: Config.getArray('usersElasticsearch', ','),
-  usersPrefix: Config.get('usersPrefix'),
-  esApiKey: Config.get('elasticsearchAPIKey', null),
-  usersEsApiKey: Config.get('usersElasticsearchAPIKey', null),
-  esBasicAuth: Config.get('elasticsearchBasicAuth', null),
-  usersEsBasicAuth: Config.get('usersElasticsearchBasicAuth', null)
-}, main);
+async function premain () {
+  await Config.initialize();
+
+  const escInfo = Config.getArray('elasticsearch', 'http://localhost:9200');
+  Db.initialize({
+    host: escInfo,
+    prefix: Config.get('prefix', 'arkime_'),
+    queryExtraIndices: Config.getArray('queryExtraIndices', ''),
+    esClientKey: Config.get('esClientKey', null),
+    esClientCert: Config.get('esClientCert', null),
+    esClientKeyPass: Config.get('esClientKeyPass', null),
+    insecure: ArkimeConfig.insecure,
+    usersHost: Config.getArray('usersElasticsearch'),
+    usersPrefix: Config.get('usersPrefix'),
+    esApiKey: Config.get('elasticsearchAPIKey', null),
+    usersEsApiKey: Config.get('usersElasticsearchAPIKey', null),
+    esBasicAuth: Config.get('elasticsearchBasicAuth', null),
+    usersEsBasicAuth: Config.get('usersElasticsearchBasicAuth', null),
+    noUsersCheck: true
+  }, main);
+}
+
+premain();

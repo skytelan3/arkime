@@ -1,61 +1,81 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div v-if="compatibleBrowser">
-    <moloch-navbar></moloch-navbar>
+    <arkime-navbar></arkime-navbar>
     <router-view v-if="user" />
     <div class="pull-right small app-info-error">
-      <moloch-toast
+      <arkime-toast
         class="mr-1"
         type="danger"
         :duration="1000000"
         :done="messageDone"
         :message="appInfoMissing">
-      </moloch-toast>
+      </arkime-toast>
     </div>
-    <transition name="shortcuts-slide">
-      <moloch-keyboard-shortcuts
-        v-if="displayKeyboardShortcutsHelp">
-      </moloch-keyboard-shortcuts>
-      <div v-else-if="shiftKeyHold && !displayKeyboardShortcutsHelp"
-        class="shortcut-help">
-        <span class="fa fa-question fa-fw">
-        </span>
-      </div>
-    </transition>
-    <moloch-footer></moloch-footer>
-    <moloch-welcome-message
+    <keyboard-shortcuts
+      shortcuts-class="arkime-shortcuts"
+      @shift-hold-change="shiftHoldChange">
+      <template v-slot:content>
+        <code>'Q'</code> - set focus to query bar
+        <br>
+        <code>'T'</code> - set focus to time range selector
+        <br>
+        <code>'S'</code> - jump to the Sessions page
+        <br>
+        <code>'V'</code> - jump to the SPI View page
+        <br>
+        <code>'G'</code> - jump to the SPI Graph page
+        <br>
+        <code>'C'</code> - jump to the Connections page
+        <br>
+        <code>'H'</code> - jump to the Arkime Help page
+        <br>
+        <code>'U'</code> - jump to the Arkime Hunt page
+        <br>
+        <code>'shift + enter'</code> - issue search/refresh
+        <br>
+        <code>'esc'</code> - remove focus from any input and close this dialog
+        <br>
+        <code>'?'</code> - shows you this dialog, but I guess you already knew that
+      </template>
+    </keyboard-shortcuts>
+    <arkime-footer></arkime-footer>
+    <arkime-welcome-message
       v-if="user && (!user.welcomeMsgNum || user.welcomeMsgNum < 1)">
-    </moloch-welcome-message>
+    </arkime-welcome-message>
   </div>
   <div v-else>
-    <moloch-upgrade-browser>
-    </moloch-upgrade-browser>
+    <arkime-upgrade-browser>
+    </arkime-upgrade-browser>
   </div>
 </template>
 
 <script>
 import ConfigService from './components/utils/ConfigService';
-import MolochToast from './components/utils/Toast';
-import MolochNavbar from './components/utils/Navbar';
-import MolochFooter from './components/utils/Footer';
-import MolochWelcomeMessage from './components/utils/WelcomeMessage';
-import MolochUpgradeBrowser from './components/utils/UpgradeBrowser';
-import MolochKeyboardShortcuts from './components/utils/KeyboardShortcuts';
+import ArkimeToast from './components/utils/Toast';
+import ArkimeNavbar from './components/utils/Navbar';
+import ArkimeFooter from './components/utils/Footer';
+import ArkimeWelcomeMessage from './components/utils/WelcomeMessage';
+import ArkimeUpgradeBrowser from './components/utils/UpgradeBrowser';
+import KeyboardShortcuts from '../../../common/vueapp/KeyboardShortcuts';
 
 export default {
   name: 'App',
   components: {
-    MolochToast,
-    MolochNavbar,
-    MolochFooter,
-    MolochWelcomeMessage,
-    MolochUpgradeBrowser,
-    MolochKeyboardShortcuts
+    ArkimeToast,
+    ArkimeNavbar,
+    ArkimeFooter,
+    KeyboardShortcuts,
+    ArkimeWelcomeMessage,
+    ArkimeUpgradeBrowser
   },
   data: function () {
     return {
       appInfoMissing: '',
-      compatibleBrowser: true,
-      inputs: ['input', 'select', 'textarea']
+      compatibleBrowser: true
     };
   },
   computed: {
@@ -65,14 +85,6 @@ export default {
       },
       set: function (newValue) {
         this.$store.commit('setShiftKeyHold', newValue);
-      }
-    },
-    displayKeyboardShortcutsHelp: {
-      get: function () {
-        return this.$store.state.displayKeyboardShortcutsHelp;
-      },
-      set: function (newValue) {
-        this.$store.commit('setDisplayKeyboardShortcutsHelp', newValue);
       }
     },
     user: {
@@ -111,19 +123,15 @@ export default {
     // $store.state.shiftKeyHold, focusSearch, and focusTimeRange
     window.addEventListener('keyup', (e) => {
       const activeElement = document.activeElement;
+      const inputs = ['input', 'select', 'textarea'];
 
       if (e.keyCode === 27) { // esc
         activeElement.blur(); // remove focus from all inputs
-        this.$store.commit('setFocusSearch', false);
-        this.$store.commit('setFocusTimeRange', false);
-        return;
-      } else if (e.keyCode === 16) { // shift
-        this.shiftKeyHold = false;
         return;
       }
 
       // quit if the user is in an input or not holding the shift key
-      if (!this.shiftKeyHold || (activeElement && this.inputs.indexOf(activeElement.tagName.toLowerCase()) !== -1)) {
+      if (!this.shiftKeyHold || (activeElement && inputs.indexOf(activeElement.tagName.toLowerCase()) !== -1)) {
         return;
       }
 
@@ -176,37 +184,13 @@ export default {
         // trigger search/refresh
         this.$store.commit('setIssueSearch', true);
         break;
-      case 191: // /
-        // toggle display of the the keyboard shortcut dialog
-        this.$store.commit('setDisplayKeyboardShortcutsHelp', !this.displayKeyboardShortcutsHelp);
-        break;
       }
-    });
-
-    window.addEventListener('keydown', (e) => {
-      const activeElement = document.activeElement;
-      // quit if the user is in an input or not holding the shift key
-      if (activeElement && this.inputs.indexOf(activeElement.tagName.toLowerCase()) !== -1) {
-        return;
-      }
-      if (e.keyCode === 16) { // shift
-        this.shiftKeyHold = true;
-      } else if (e.keyCode === 27) { // esc
-        this.shiftKeyHold = false;
-      }
-    });
-
-    // if the user clicks something, remove shift hold
-    window.addEventListener('mousedown', (e) => {
-      this.shiftKeyHold = false;
-    });
-
-    // if the user focus is not in the web page, remove shift hold
-    window.addEventListener('blur', (e) => {
-      this.shiftKeyHold = false;
     });
   },
   methods: {
+    shiftHoldChange (val) {
+      this.shiftKeyHold = val;
+    },
     routeTo: function (url) {
       this.$router.push({
         path: url,
@@ -496,26 +480,18 @@ dl.dl-horizontal.dl-horizontal-wide dd {
   margin-bottom: 0;
 }
 
-.shortcut-help {
-  position: fixed;
+/* keyboard shortcut info styling */
+.arkime-shortcuts {
   top: 155px;
-  z-index: 1;
-  color: var(--color-tertiary-lighter);
-  background: var(--color-background, white);
+  z-index: 9;
+  position: fixed;
+  border-radius: 0 4px 4px 0;
   border: 1px solid var(--color-gray);
   border-left: none;
-  border-radius: 0 4px 4px 0 ;
+  background: var(--color-background, white);
   -webkit-box-shadow: 0 0 16px -2px black;
      -moz-box-shadow: 0 0 16px -2px black;
           box-shadow: 0 0 16px -2px black;
-}
-
-/* keyboard shortcuts help animation */
-.shortcuts-slide-enter-active, .shortcuts-slide-leave-active {
-  transition: all .5s ease;
-}
-.shortcuts-slide-enter, .shortcuts-slide-leave-to {
-  transform: translateX(-465px);
 }
 
 /* make the shortcut letter the same size/position as the icon */
@@ -571,15 +547,15 @@ dl.dl-horizontal.dl-horizontal-wide dd {
 }
 
 /* info page (404 & upgrade) */
-.moloch-info {
+.arkime-info {
   margin-top: 20px;
 }
 
-.moloch-info .center-area > img {
+.arkime-info .center-area > img {
   z-index: 99;
 }
 
-.moloch-info .center-area {
+.arkime-info .center-area {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -588,13 +564,13 @@ dl.dl-horizontal.dl-horizontal-wide dd {
   min-height: 75vh;
 }
 
-.moloch-info .well {
+.arkime-info .well {
   margin-top: -6px;
   min-width: 25%;
   box-shadow: 4px 4px 10px 0 rgba(0,0,0,0.5);
 }
 
-.moloch-info .well > h1 {
+.arkime-info .well > h1 {
   margin-top: 0;
   color: var(--color-primary);
 }

@@ -27,53 +27,58 @@
                "packets" : 1,
                "port" : 53
             },
-            "dns" : {
-               "host" : [
-                  "xqt-detect-mode2-97712e88-167a-45b9-93ee-913140e76678"
-               ],
-               "hostCnt" : 1,
-               "opcode" : [
-                  "QUERY"
-               ],
-               "opcodeCnt" : 1,
-               "qc" : [
-                  "IN"
-               ],
-               "qcCnt" : 1,
-               "qt" : [
-                  "AAAA"
-               ],
-               "qtCnt" : 1,
-               "status" : [
-                  "NXDOMAIN"
-               ],
-               "statusCnt" : 1
-            },
+            "dns" : [
+               {
+                  "answers" : [
+                     {
+                        "class" : "IN",
+                        "name" : "<root>",
+                        "ttl" : 757,
+                        "type" : "SOA"
+                     }
+                  ],
+                  "answersCnt" : 1,
+                  "headerFlags" : [
+                     "RA",
+                     "RD"
+                  ],
+                  "host" : [
+                     "xqt-detect-mode2-97712e88-167a-45b9-93ee-913140e76678"
+                  ],
+                  "hostCnt" : 1,
+                  "opcode" : "QUERY",
+                  "qc" : "IN",
+                  "qt" : "AAAA",
+                  "queryHost" : "xqt-detect-mode2-97712e88-167a-45b9-93ee-913140e76678",
+                  "status" : "NXDOMAIN"
+               }
+            ],
+            "dnsCnt" : 1,
             "dstOui" : [
                "Cisco Systems, Inc"
             ],
             "dstOuiCnt" : 1,
+            "dstOuterASN" : [
+               "---",
+               "AS8100 QuadraNet Enterprises LLC"
+            ],
+            "dstOuterGEO" : [
+               "US",
+               "US"
+            ],
+            "dstOuterIp" : [
+               "16.0.0.200",
+               "192.52.166.154"
+            ],
+            "dstOuterIpCnt" : 2,
+            "dstOuterRIR" : [
+               "ARIN",
+               "ARIN"
+            ],
             "dstPayload8" : "a62c818300010000",
             "dstRIR" : "ARIN",
             "fileId" : [],
             "firstPacket" : 1417577703821,
-            "greASN" : [
-               "---",
-               "AS8100 QuadraNet Enterprises LLC"
-            ],
-            "greGEO" : [
-               "US",
-               "US"
-            ],
-            "greIp" : [
-               "16.0.0.200",
-               "192.52.166.154"
-            ],
-            "greIpCnt" : 2,
-            "greRIR" : [
-               "ARIN",
-               "ARIN"
-            ],
             "ipProtocol" : 17,
             "lastPacket" : 1417577704035,
             "length" : 214,
@@ -123,6 +128,23 @@
                "Juniper Networks"
             ],
             "srcOuiCnt" : 1,
+            "srcOuterASN" : [
+               "---",
+               "AS8100 QuadraNet Enterprises LLC"
+            ],
+            "srcOuterGEO" : [
+               "US",
+               "US"
+            ],
+            "srcOuterIp" : [
+               "16.0.0.200",
+               "192.52.166.154"
+            ],
+            "srcOuterIpCnt" : 2,
+            "srcOuterRIR" : [
+               "ARIN",
+               "ARIN"
+            ],
             "srcPayload8" : "a62c010000010000",
             "srcRIR" : "ARIN",
             "totDataBytes" : 217

@@ -1,41 +1,47 @@
+/******************************************************************************/
+/* viewerUtils.js -- shared util functions
+ *
+ * Copyright Yahoo Inc.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 'use strict';
 
+const Config = require('./config.js');
+const Db = require('./db.js');
 const async = require('async');
 const http = require('http');
 const https = require('https');
+const ArkimeUtil = require('../common/arkimeUtil');
 const Auth = require('../common/auth');
 const User = require('../common/user');
-const molochparser = require('./molochparser.js');
+const arkimeparser = require('./arkimeparser.js');
+const internals = require('./internals');
 
-module.exports = (Config, Db, internals) => {
-  const ViewerUtils = {};
-
-  ViewerUtils.addCaTrust = (options, node) => {
+class ViewerUtils {
+  // ----------------------------------------------------------------------------
+  static addCaTrust (options, node) {
     if (!Config.isHTTPS(node)) {
       return;
     }
 
-    if (internals.caTrustCerts[node] !== undefined && internals.caTrustCerts[node].length > 0) {
-      options.ca = internals.caTrustCerts[node];
+    let certs = internals.caTrustCerts.get(node);
+    if (certs && certs.length > 0) {
+      options.ca = certs;
       return;
     }
 
-    internals.caTrustCerts[node] = Config.getCaTrustCerts(node);
+    const caTrustFile = Config.getFull(node, 'caTrustFile');
+    certs = ArkimeUtil.certificateFileToArray(caTrustFile);
+    internals.caTrustCerts.set(node, certs);
 
-    if (internals.caTrustCerts[node] !== undefined && internals.caTrustCerts[node].length > 0) {
-      options.ca = internals.caTrustCerts[node];
+    if (certs && certs.length > 0) {
+      options.ca = certs;
     }
   };
 
-  ViewerUtils.noCache = (req, res, ct) => {
-    res.header('Cache-Control', 'no-cache, private, no-store, must-revalidate, max-stale=0, post-check=0, pre-check=0');
-    if (ct) {
-      res.setHeader('Content-Type', ct);
-      res.header('X-Content-Type-Options', 'nosniff');
-    }
-  };
-
-  ViewerUtils.queryValueToArray = (val) => {
+  // ----------------------------------------------------------------------------
+  static queryValueToArray (val) {
     if (val === undefined || val === null) {
       return [];
     }
@@ -54,13 +60,17 @@ module.exports = (Config, Db, internals) => {
   //
   // This code was factored out from buildSessionQuery.
   // -------------------------------------------------------------------------
-  ViewerUtils.determineQueryTimes = (reqQuery) => {
+  static determineQueryTimes (reqQuery) {
     let startTimeSec = null;
     let stopTimeSec = null;
-    let interval = 60 * 60;
+    let interval;
 
     if (Config.debug) {
       console.log('determineQueryTimes <-', reqQuery);
+    }
+
+    if (reqQuery.date && isNaN(parseInt(reqQuery.date))) {
+      reqQuery.date = '-1';
     }
 
     if ((reqQuery.date && parseInt(reqQuery.date) === -1) ||
@@ -121,15 +131,16 @@ module.exports = (Config, Db, internals) => {
       console.log('determineQueryTimes ->', 'startTimeSec', startTimeSec, 'stopTimeSec', stopTimeSec, 'interval', interval);
     }
 
-    return [startTimeSec, stopTimeSec, interval];
+    return [startTimeSec, Math.floor(stopTimeSec), interval];
   };
 
+  // ----------------------------------------------------------------------------
   /* This method fixes up parts of the query that jison builds to what ES actually
    * understands.  This includes using the collapse function and the filename mapping.
    */
-  ViewerUtils.lookupQueryItems = (query, doneCb) => {
+  static lookupQueryItems (query, doneCb) {
     // console.log('BEFORE', JSON.stringify(query, false, 2));
-    collapseQuery(query);
+    ViewerUtils.#collapseQuery(query);
     // console.log('AFTER', JSON.stringify(query, false, 2));
     if (Config.get('multiES', false)) {
       return doneCb(null);
@@ -182,10 +193,11 @@ module.exports = (Config, Db, internals) => {
     finished = 1;
   };
 
+  // ----------------------------------------------------------------------------
   /* This method collapses cascading bool should/must into one. I couldn't figure
    * out how to do this in jison.
    */
-  function collapseQuery (query) {
+  static #collapseQuery (query) {
     function newArray (items, kind) {
       let newItems = [];
       const len = items.length;
@@ -209,16 +221,16 @@ module.exports = (Config, Db, internals) => {
         if (query.bool?.must_not?.bool?.should) {
           // most_not: { - when just NOTing one thing
           query.bool.must_not = query.bool.must_not.bool.should;
-          collapseQuery(query);
+          ViewerUtils.#collapseQuery(query);
         } else if (query.bool?.must_not?.length > 0) {
           // We can collapse both must_not: most_not: and most_not: should:
           const len = query.bool.must_not.length;
           const newItems = newArray(newArray(query.bool.must_not, 'must_not'), 'should');
           query.bool.must_not = newItems;
           if (newItems.length !== len) {
-            collapseQuery(query);
+            ViewerUtils.#collapseQuery(query);
           } else {
-            collapseQuery(query.bool.must_not);
+            ViewerUtils.#collapseQuery(query.bool.must_not);
           }
         } else if (query.bool?.should?.length > 0) {
           // Collapse should: should:
@@ -226,9 +238,9 @@ module.exports = (Config, Db, internals) => {
           const newItems = newArray(query.bool.should, 'should');
           query.bool.should = newItems;
           if (newItems.length !== len) {
-            collapseQuery(query);
+            ViewerUtils.#collapseQuery(query);
           } else {
-            collapseQuery(query.bool.should);
+            ViewerUtils.#collapseQuery(query.bool.should);
           }
         } else if (query.bool?.filter?.length > 0) {
           // Collapse filter: filter:
@@ -236,58 +248,60 @@ module.exports = (Config, Db, internals) => {
           const newItems = newArray(query.bool.filter, 'filter');
           query.bool.filter = newItems;
           if (newItems.length !== len) {
-            collapseQuery(query);
+            ViewerUtils.#collapseQuery(query);
           } else {
-            collapseQuery(query.bool.filter);
+            ViewerUtils.#collapseQuery(query.bool.filter);
           }
         } else {
           // Just recurse
-          collapseQuery(query.bool);
+          ViewerUtils.#collapseQuery(query.bool);
         }
       } else if (typeof query[prop] === 'object') {
-        collapseQuery(query[prop]);
+        ViewerUtils.#collapseQuery(query[prop]);
       }
     }
   };
 
-  ViewerUtils.continueBuildQuery = (req, query, err, finalCb, queryOverride = null) => {
+  // ----------------------------------------------------------------------------
+  static continueBuildQuery (req, query, err, finalCb, queryOverride = null) {
     // queryOverride can supercede req.query if specified
     const reqQuery = queryOverride || req.query;
 
-    if (!err && req.user.expression && req.user.expression.length > 0) {
+    if (!err && req.user.getExpression()) {
       try {
         // Expression was set by admin, so assume email search ok
-        molochparser.parser.yy.emailSearch = true;
-        const userExpression = molochparser.parse(req.user.expression);
+        arkimeparser.parser.yy.emailSearch = true;
+        const userExpression = arkimeparser.parse(req.user.getExpression());
         query.query.bool.filter.push(userExpression);
       } catch (e) {
-        console.log(`ERROR - Forced expression (${req.user.expression}) doesn't compile -`, e);
+        console.log(`ERROR - Forced expression (${req.user.getExpression()}) doesn't compile -`, e);
         err = e;
       }
     }
 
     ViewerUtils.lookupQueryItems(query.query.bool.filter, async (lerr) => {
-      req._molochESQuery = JSON.stringify(query);
+      req._arkimeESQuery = JSON.stringify(query);
 
       if (reqQuery.date === '-1' || // An all query
           Config.get('queryAllIndices', Config.get('multiES', false))) { // queryAllIndices (default: multiES)
-        req._molochESQueryIndices = Db.fixIndex(['sessions2-*', 'sessions3-*']);
-        return finalCb(err || lerr, query, Db.fixIndex(['sessions2-*', 'sessions3-*'])); // Then we just go against all indices for a slight overhead
+        req._arkimeESQueryIndices = Db.fixIndex(Db.getSessionIndices());
+        return finalCb(err || lerr, query, req._arkimeESQueryIndices); // Then we just go against all indices for a slight overhead
       }
 
-      const indices = await Db.getIndices(reqQuery.startTime, reqQuery.stopTime, reqQuery.bounding, Config.get('rotateIndex', 'daily'));
+      const indices = await Db.getIndices(reqQuery.startTime, reqQuery.stopTime, reqQuery.bounding, Config.get('rotateIndex', 'daily'), Config.getArray('queryExtraIndices', ''));
 
       if (indices.length > 3000) { // Will url be too long
-        req._molochESQueryIndices = Db.fixIndex(['sessions2-*', 'sessions3-*']);
-        return finalCb(err || lerr, query, Db.fixIndex(['sessions2-*', 'sessions3-*']));
+        req._arkimeESQueryIndices = Db.fixIndex(Db.getSessionIndices());
+        return finalCb(err || lerr, query, req._arkimeESQueryIndices);
       } else {
-        req._molochESQueryIndices = indices;
+        req._arkimeESQueryIndices = indices;
         return finalCb(err || lerr, query, indices);
       }
     });
   };
 
-  ViewerUtils.mapMerge = (aggregations) => {
+  // ----------------------------------------------------------------------------
+  static mapMerge (aggregations) {
     const map = { src: {}, dst: {}, xffGeo: {} };
 
     if (!aggregations || !aggregations.mapG1) {
@@ -309,7 +323,8 @@ module.exports = (Config, Db, internals) => {
     return map;
   };
 
-  ViewerUtils.graphMerge = (req, query, aggregations) => {
+  // ----------------------------------------------------------------------------
+  static graphMerge (req, query, aggregations) {
     let filters = req.user.settings.timelineDataFilters || internals.settingDefaults.timelineDataFilters;
 
     // Convert old names to names locally
@@ -390,7 +405,8 @@ module.exports = (Config, Db, internals) => {
     return graph;
   };
 
-  ViewerUtils.fixFields = (fields, fixCb) => {
+  // ----------------------------------------------------------------------------
+  static fixFields (fields, fixCb) {
     if (!fields.fileId) {
       fields.fileId = [];
       return fixCb(null, fields);
@@ -411,7 +427,8 @@ module.exports = (Config, Db, internals) => {
     });
   };
 
-  ViewerUtils.errorString = (err, result) => {
+  // ----------------------------------------------------------------------------
+  static errorString (err, result) {
     let str;
     if (err && typeof err === 'string') {
       str = err;
@@ -425,13 +442,14 @@ module.exports = (Config, Db, internals) => {
     }
 
     if (str.match('IndexMissingException')) {
-      return "Arkime's Elasticsearch database has no matching session indices for the timeframe selected.";
+      return "Arkime's OpenSearch/Elasticsearch database has no matching session indices for the timeframe selected.";
     } else {
-      return 'Elasticsearch error: ' + str;
+      return 'OpenSearch/Elasticsearch error: ' + str;
     }
   };
 
-  ViewerUtils.loadFields = async () => {
+  // ----------------------------------------------------------------------------
+  static async loadFields () {
     try {
       let data = await Db.loadFields();
       data = data.hits.hits;
@@ -439,11 +457,11 @@ module.exports = (Config, Db, internals) => {
       // Everything will use fieldECS or dbField2 as dbField
       for (let i = 0, ilen = data.length; i < ilen; i++) {
         if (data[i]._source.fieldECS) {
-          internals.oldDBFields[data[i]._source.dbField] = data[i]._source;
-          internals.oldDBFields[data[i]._source.dbField2] = data[i]._source;
+          internals.oldDBFields.set(data[i]._source.dbField, data[i]._source);
+          internals.oldDBFields.set(data[i]._source.dbField2, data[i]._source);
           data[i]._source.dbField = data[i]._source.fieldECS;
         } else {
-          internals.oldDBFields[data[i]._source.dbField] = data[i]._source;
+          internals.oldDBFields.set(data[i]._source.dbField, data[i]._source);
           data[i]._source.dbField = data[i]._source.dbField2;
         }
 
@@ -470,12 +488,16 @@ module.exports = (Config, Db, internals) => {
     }
   };
 
-  ViewerUtils.oldDB2newDB = (x) => {
-    if (!internals.oldDBFields[x]) { return x; }
-    return internals.oldDBFields[x].dbFieldECS || internals.oldDBFields[x].dbField2;
+  // ----------------------------------------------------------------------------
+  static oldDB2newDB (x) {
+    const old = internals.oldDBFields.get(x);
+
+    if (old === undefined) { return x; }
+    return old.dbFieldECS ?? old.dbField2;
   };
 
-  ViewerUtils.mergeUnarray = (to, from) => {
+  // ----------------------------------------------------------------------------
+  static mergeUnarray (to, from) {
     for (const key in from) {
       if (Array.isArray(from[key])) {
         to[key] = from[key][0];
@@ -485,38 +507,17 @@ module.exports = (Config, Db, internals) => {
     }
   };
 
-  ViewerUtils.commaStringToArray = (commaString) => {
-    // split string on commas and newlines
-    let values = commaString.split(/[,\n]+/g);
-
-    // remove any empty values
-    values = values.filter(function (val) {
-      return val !== '';
-    });
-
-    return values;
-  };
-
+  // ----------------------------------------------------------------------------
   // https://medium.com/dailyjs/rewriting-javascript-converting-an-array-of-objects-to-an-object-ec579cafbfc7
-  ViewerUtils.arrayToObject = (array, key) => {
+  static arrayToObject (array, key) {
     return array.reduce((obj, item) => {
       obj[item[key]] = item;
       return obj;
     }, {});
   };
 
-  // https://coderwall.com/p/pq0usg/javascript-string-split-that-ll-return-the-remainder
-  ViewerUtils.splitRemain = (str, separator, limit) => {
-    str = str.split(separator);
-    if (str.length <= limit) { return str; }
-
-    const ret = str.splice(0, limit);
-    ret.push(str.join(separator));
-
-    return ret;
-  };
-
-  ViewerUtils.arrayZeroFill = (n) => {
+  // ----------------------------------------------------------------------------
+  static arrayZeroFill (n) {
     const a = [];
 
     while (n > 0) {
@@ -527,7 +528,8 @@ module.exports = (Config, Db, internals) => {
     return a;
   };
 
-  ViewerUtils.getViewUrl = (node, cb) => {
+  // ----------------------------------------------------------------------------
+  static getViewUrl (node, cb) {
     if (Array.isArray(node)) {
       node = node[0];
     }
@@ -541,13 +543,13 @@ module.exports = (Config, Db, internals) => {
       return;
     }
 
-    Db.molochNodeStatsCache(node, function (err, stat) {
+    Db.arkimeNodeStatsCache(node, function (err, stat) {
       if (err) {
         return cb(err);
       }
 
       if (Config.debug > 1) {
-        console.log(`DEBUG: node:${node} is using ${stat.hostname} from elasticsearch stats index`);
+        console.log(`DEBUG: node:${node} is using ${stat.hostname} from OpenSearch/Elasticsearch stats index`);
       }
 
       if (Config.isHTTPS(node)) {
@@ -558,7 +560,8 @@ module.exports = (Config, Db, internals) => {
     });
   };
 
-  ViewerUtils.makeRequest = (node, path, user, cb) => {
+  // ----------------------------------------------------------------------------
+  static makeRequest (node, path, user, cb) {
     ViewerUtils.getViewUrl(node, (err, viewUrl, client) => {
       if (err) {
         return cb(err);
@@ -598,7 +601,8 @@ module.exports = (Config, Db, internals) => {
     });
   };
 
-  ViewerUtils.addCluster = (cluster, options) => {
+  // ----------------------------------------------------------------------------
+  static addCluster (cluster, options) {
     if (!options) options = {};
     if (cluster && Config.get('multiES', false)) {
       options.cluster = cluster;
@@ -606,16 +610,16 @@ module.exports = (Config, Db, internals) => {
     return options;
   };
 
+  // ----------------------------------------------------------------------------
   // check for anonymous mode before fetching user cache and return anonymous
   // user or the user requested by the userId
-  ViewerUtils.getUserCacheIncAnon = (userId, cb) => {
-    if (internals.noPasswordSecret) { // user is anonymous
+  static getUserCacheIncAnon (userId, cb) {
+    if (Auth.isAnonymousMode()) { // user is anonymous
       User.getUserCache('anonymous', (err, anonUser) => {
-        const anon = internals.anonymousUser;
+        const anon = Object.assign(new User(), internals.anonymousUser);
 
         if (anonUser) {
           anon.settings = anonUser.settings || {};
-          anon.views = anonUser.views;
         }
 
         return cb(null, anon);
@@ -624,32 +628,6 @@ module.exports = (Config, Db, internals) => {
       User.getUserCache(userId, cb);
     }
   };
+}
 
-  ViewerUtils.validateUserIds = async (userIdList) => {
-    // don't even bother searching for users if in anonymous mode
-    if (!!internals.noPasswordSecret && !Config.get('regressionTests', false)) {
-      return { validUsers: [], invalidUsers: [] };
-    }
-
-    try {
-      const users = await User.searchUsers({});
-      let usersList = [];
-      usersList = users.users.map((user) => {
-        return user.userId;
-      });
-
-      const validUsers = [];
-      const invalidUsers = [];
-      for (const user of userIdList) {
-        usersList.indexOf(user) > -1 ? validUsers.push(user) : invalidUsers.push(user);
-      }
-
-      return { validUsers, invalidUsers };
-    } catch (err) {
-      console.log('ERROR -', err);
-      throw new Error('Unable to validate userIds');
-    }
-  };
-
-  return ViewerUtils;
-};
+module.exports = ViewerUtils;

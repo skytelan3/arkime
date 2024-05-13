@@ -77,7 +77,7 @@ export default {
   saveSourceFile: function (sourceName, data, configCode) {
     // TODO: new file saving
     return new Promise((resolve, reject) => {
-      Vue.axios.put('source/' + sourceName + '/put', { raw: data, configCode: configCode })
+      Vue.axios.put('source/' + sourceName + '/put', { raw: data, configCode })
         .then((response) => {
           resolve(response.data);
         })
@@ -100,7 +100,7 @@ export default {
   },
   saveCurrConfig: function (config, configCode) {
     return new Promise((resolve, reject) => {
-      Vue.axios.put('config/save', { config: config, configCode: configCode })
+      Vue.axios.put('config/save', { config, configCode })
         .then((response) => {
           resolve(response.data);
         })
@@ -111,7 +111,7 @@ export default {
   },
   search: function (source, type, value) {
     return new Promise((resolve, reject) => {
-      const url = ((source ? source.replace(':', '%3A') + '/' : '') + type + '/' + value.replaceAll('/', '%2F'));
+      const url = ((source ? source.replaceAll(':', '%3A') + '/' : '') + type + '/' + value.replaceAll('/', '%2F'));
       Vue.axios.get(url)
         .then((response) => {
           resolve(response.data);

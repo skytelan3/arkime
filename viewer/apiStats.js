@@ -1,18 +1,28 @@
+/******************************************************************************/
+/* apiStats.js -- api calls for stats tab
+ *
+ * Copyright Yahoo Inc.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 'use strict';
 
+const Config = require('./config.js');
+const Db = require('./db.js');
 const RE2 = require('re2');
 const util = require('util');
 const async = require('async');
+const ArkimeUtil = require('../common/arkimeUtil');
+const internals = require('./internals');
+const ViewerUtils = require('./viewerUtils');
 
-module.exports = (Config, Db, internals, ViewerUtils) => {
-  const statsAPIs = {};
-
+class StatsAPIs {
   // --------------------------------------------------------------------------
   // APIs
   // --------------------------------------------------------------------------
   // ES HEALTH APIS -----------------------------------------------------------
   /**
-   * The Elasticsearch cluster health status and information.
+   * The OpenSearch/Elasticsearch cluster health status and information.
    * @typedef ESHealth
    * @type {object}
    * @property {number} active_primary_shards - The number of active primary shards.
@@ -38,17 +48,18 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @property {number} _timeStamp - timestamps in ms from unix epoc
    */
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/eshealth
    *
-   * Retrive Elasticsearch health and stats
+   * Retrieve OpenSearch/Elasticsearch health and stats
    * There is no auth necessary to retrieve eshealth
    * @name /eshealth
    * @returns {ESHealth} health - The elasticsearch cluster health status and info
    */
-  statsAPIs.getESHealth = async (req, res) => {
+  static async getESHealth (req, res) {
     try {
-      const health = await Db.healthCache();
+      const health = await Db.healthCache(req.query.cluster);
       return res.send(health);
     } catch (err) {
       return res.serverError(500, err.toString());
@@ -75,7 +86,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @returns {number} recordsTotal - The total number of nodes.
    * @returns {number} recordsFiltered - The number of nodes returned in this result.
    */
-  statsAPIs.getStats = (req, res) => {
+  static getStats (req, res) {
     const query = {
       from: 0,
       size: 10000,
@@ -102,6 +113,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         }
       }
     }
+    ViewerUtils.addCluster(req.query.cluster, query);
 
     const rquery = {
       query: { term: { locked: 0 } },
@@ -115,6 +127,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         }
       }
     };
+    ViewerUtils.addCluster(req.query.cluster, rquery);
 
     if (req.query.hide !== undefined && req.query.hide !== 'none') {
       if (req.query.hide === 'old' || req.query.hide === 'both') {
@@ -128,7 +141,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     const now = Math.floor(Date.now() / 1000);
 
     Promise.all([Db.search('stats', 'stat', query),
-      Db.numberOfDocuments('stats'),
+      Db.numberOfDocuments('stats', rquery.cluster ? { cluster: rquery.cluster } : {}),
       Db.search('files', 'file', rquery)
     ]).then(([stats, total, retention]) => {
       if (stats.error) { throw stats.error; }
@@ -208,6 +221,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/dstats
    *
@@ -223,7 +237,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @param {number} size=1440 - The size of the cubism graph. Defaults to 1440.
    * @returns {array} List of values to populate the cubism graph.
    */
-  statsAPIs.getDetailedStats = (req, res) => {
+  static getDetailedStats (req, res) {
     if (req.query.name === undefined) {
       return res.send('{}');
     }
@@ -248,7 +262,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     if (nodeName !== undefined && nodeName !== 'Total' && nodeName !== 'Average') {
       query.sort = { currentTime: { order: 'desc' } };
       query.size = req.query.size || 1440;
-      query.query.bool.filter.push({ term: { nodeName: nodeName } });
+      query.query.bool.filter.push({ term: { nodeName } });
     } else {
       query.size = 100000;
     }
@@ -337,27 +351,28 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/esstats
    *
-   * Fetches a list of stats for each Elasticsearch cluster.
+   * Fetches a list of stats for each OpenSearch/Elasticsearch cluster.
    * @name /esstats
-   * @param {string} filter - Search text to filter the list of Elasticsearch clusters by.
-   * @param {string} sortField=nodeName - The field to sort the Elasticsearch clusters list by.
+   * @param {string} filter - Search text to filter the list of OpenSearch/Elasticsearch clusters by.
+   * @param {string} sortField=nodeName - The field to sort the OpenSearch/Elasticsearch clusters list by.
    * @param {string} desc=false - Whether to return the results in descending order. Defaults to "false".
    * @returns {array} data - List of ES clusters with their corresponding stats.
    * @returns {number} recordsTotal - The total number of ES clusters.
    * @returns {number} recordsFiltered - The number of ES clusters returned in this result.
    */
-  statsAPIs.getESStats = (req, res) => {
+  static getESStats (req, res) {
     let stats = [];
 
     Promise.all([
-      Db.nodesStatsCache(),
-      Db.nodesInfoCache(),
-      Db.masterCache(),
-      Db.allocation(),
-      Db.getClusterSettings({ flatSettings: true })
+      Db.nodesStatsCache(req.query.cluster),
+      Db.nodesInfoCache(req.query.cluster),
+      Db.masterCache(req.query.cluster),
+      Db.allocation(req.query.cluster),
+      Db.getClusterSettings({ flatSettings: true, cluster: req.query.cluster })
     ]).then(([nodesStats, nodesInfo, master, { body: allocation }, { body: settings }]) => {
       const shards = new Map(allocation.map(i => [i.node, parseInt(i.shards, 10)]));
 
@@ -429,11 +444,11 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
 
         stats.push({
           name: node.name,
-          ip: ip,
+          ip,
           ipExcluded: ipExcludes.includes(ip),
           nodeExcluded: nodeExcludes.includes(node.name),
           storeSize: node.indices.store.size_in_bytes,
-          freeSize: node.roles.includes('data') ? node.fs.total.available_in_bytes : 0,
+          freeSize: node.roles.some(str => str.startsWith('data')) ? node.fs.total.available_in_bytes : 0,
           docs: node.indices.docs.count,
           searches: node.indices.search.query_current,
           searchesTime: node.indices.search.query_time_in_millis,
@@ -441,17 +456,17 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
           nonHeapSize: node.jvm.mem.non_heap_used_in_bytes,
           uptime: Math.floor(node.jvm.uptime_in_millis / (1000 * 60)),
           cpu: node.process.cpu.percent,
-          read: read,
-          write: write,
+          read,
+          write,
           writesRejected: writeInfo.rejected,
           writesCompleted: writeInfo.completed,
           writesRejectedDelta: rejected,
           writesCompletedDelta: completed,
           writesQueueSize: threadpoolInfo.queue_size,
-          load: node.os.load_average !== undefined ? /* ES 2 */ node.os.load_average : /* ES 5 */ node.os.cpu.load_average['5m'],
-          version: version,
-          molochtype: molochtype,
-          molochzone: molochzone,
+          load: node.os.cpu.load_average['5m'] ?? node.os.cpu.load_average['1m'],
+          version,
+          molochtype,
+          molochzone,
           roles: node.roles,
           isMaster: (master.length > 0 && node.name === master[0].node),
           shards: shards.get(node.name) || 0,
@@ -498,19 +513,19 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
   /**
    * GET - /api/esindices
    *
-   * Fetches a list of Elasticsearch indices.
+   * Fetches a list of OpenSearch/Elasticsearch indices.
    * @name /esindices
-   * @param {string} filter - Search text to filter the list of Elasticsearch indices by.
-   * @param {string} sortField=index - The field to sort the Elasticsearch indices list by.
+   * @param {string} filter - Search text to filter the list of OpenSearch/Elasticsearch indices by.
+   * @param {string} sortField=index - The field to sort the OpenSearch/Elasticsearch indices list by.
    * @param {string} desc=false - Whether to return the results in descending order. Defaults to "false".
    * @returns {array} data - List of ES indices with their corresponding stats.
    * @returns {number} recordsTotal - The total number of ES indices.
    * @returns {number} recordsFiltered - The number of ES indices returned in this result.
    */
-  statsAPIs.getESIndices = (req, res) => {
+  static getESIndices (req, res) {
     async.parallel({
-      indices: Db.indicesCache,
-      indicesSettings: Db.indicesSettingsCache
+      indices: async () => await Db.indicesCache(req.query.cluster),
+      indicesSettings: async () => await Db.indicesSettingsCache(req.query.cluster)
     }, (err, results) => {
       if (err) {
         console.log(`ERROR - ${req.method} /api/esindices`, util.inspect(err, false, 50));
@@ -523,6 +538,10 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
 
       const indices = results.indices;
       const indicesSettings = results.indicesSettings;
+
+      if (!Array.isArray(indices)) {
+        return res.serverError(500, 'No results');
+      }
 
       let findices = [];
 
@@ -583,92 +602,113 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * DELETE - /api/esindices/:index
    *
-   * Deletes an Elasticsearch index (admin and remove access only).
+   * Deletes an OpenSearch/Elasticsearch index (admin and remove access only).
    * @name /esindices/:index
    * @returns {boolean} success - Whether the delete index operation was successful.
    * @returns {string} text - The success/error message to (optionally) display to the user.
    */
-  statsAPIs.deleteESIndex = async (req, res) => {
+  static async deleteESIndex (req, res) {
     try {
-      await Db.deleteIndex([req.params.index], {});
+      await Db.deleteIndex([req.params.index], { cluster: req.query.cluster });
       return res.send(JSON.stringify({ success: true }));
     } catch (err) {
-      console.log(`ERROR - ${req.method} /api/esindices/${req.params.index}`, util.inspect(err, false, 50));
+      console.log(`ERROR - ${req.method} /api/esindices/%s`, ArkimeUtil.sanitizeStr(req.params.index), util.inspect(err, false, 50));
       res.status(404);
       return res.send(JSON.stringify({ success: false, text: 'Error deleting index' }));
     }
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST - /api/esindices/:index/optimize
    *
-   * Optimizes an Elasticsearch index (admin only).
+   * Optimizes an OpenSearch/Elasticsearch index (admin only).
    * @name /esindices/:index/optimize
    * @returns {boolean} success - Always true, the optimizeIndex function might block. Check the logs for errors.
    */
-  statsAPIs.optimizeESIndex = (req, res) => {
+  static optimizeESIndex (req, res) {
     try {
-      Db.optimizeIndex([req.params.index], {});
+      Db.optimizeIndex([req.params.index], { cluster: req.query.cluster });
     } catch (err) {
-      console.log(`ERROR - ${req.method} /api/esindices/${req.params.index}/optimize`, util.inspect(err, false, 50));
+      console.log(`ERROR - ${req.method} /api/esindices/%s/optimize`, ArkimeUtil.sanitizeStr(req.params.index), util.inspect(err, false, 50));
     }
 
     // always return successfully right away, optimizeIndex might block
     return res.send(JSON.stringify({ success: true }));
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST - /api/esindices/:index/close
    *
-   * Closes an Elasticsearch index (admin only).
+   * Closes an OpenSearch/Elasticsearch index (admin only).
    * @name /esindices/:index/close
    * @returns {boolean} success - Whether the close index operation was successful.
    * @returns {string} text - The success/error message to (optionally) display to the user.
    */
-  statsAPIs.closeESIndex = async (req, res) => {
+  static async closeESIndex (req, res) {
+    if (internals.multiES && req.query.cluster === undefined) {
+      return res.serverError(401, 'Not supported in multies');
+    }
+
     try {
-      await Db.closeIndex([req.params.index], {});
+      await Db.closeIndex([req.params.index], { cluster: req.query.cluster });
       return res.send(JSON.stringify({ success: true }));
     } catch (err) {
-      console.log(`ERROR - ${req.method} /api/esindices/${req.params.index}/close`, util.inspect(err, false, 50));
+      console.log(`ERROR - ${req.method} /api/esindices/%s/close`, ArkimeUtil.sanitizeStr(req.params.index), util.inspect(err, false, 50));
       res.status(404);
       return res.send(JSON.stringify({ success: false, text: 'Error closing index' }));
     }
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST - /api/esindices/:index/open
    *
-   * Opens an Elasticsearch index (admin only).
+   * Opens an OpenSearch/Elasticsearch index (admin only).
    * @name /esindices/:index/open
    * @returns {boolean} success - Always true, the openIndex function might block. Check the logs for errors.
    */
-  statsAPIs.openESIndex = (req, res) => {
+  static openESIndex (req, res) {
+    if (internals.multiES && req.query.cluster === undefined) {
+      return res.serverError(401, 'Not supported in multies');
+    }
+
     try {
-      Db.openIndex([req.params.index], {});
+      Db.openIndex([req.params.index], { cluster: req.query.cluster });
     } catch (err) {
-      console.log(`ERROR - ${req.method} /api/esindices/${req.params.index}/open`, util.inspect(err, false, 50));
+      console.log(`ERROR - ${req.method} /api/esindices/%s/open`, ArkimeUtil.sanitizeStr(req.params.index), util.inspect(err, false, 50));
     }
 
     // always return successfully right away, openIndex might block
     return res.send(JSON.stringify({ success: true }));
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST - /api/esindices/:index/shrink
    *
-   * Shrinks an Elasticsearch index (admin only).
+   * Shrinks an OpenSearch/Elasticsearch index (admin only).
    * @name /esindices/:index/shrink
    * @param {string} target - The index name to shrink the index to.
    * @param {number} numShards - The number of shards to shrink the index to.
    * @returns {boolean} success - Whether the close shrink operation was successful.
    * @returns {string} text - The success/error message to (optionally) display to the user.
    */
-  statsAPIs.shrinkESIndex = async (req, res) => {
-    if (!req.body || !req.body.target) {
+  static async shrinkESIndex (req, res) {
+    if (internals.multiES && req.query.cluster === undefined) {
+      return res.serverError(401, 'Not supported in multies');
+    }
+
+    if (!req.body) {
+      return res.serverError(403, 'Missing body');
+    }
+
+    if (!ArkimeUtil.isString(req.body.target)) {
       return res.serverError(403, 'Missing target');
     }
 
@@ -677,7 +717,8 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         'index.routing.allocation.total_shards_per_node': null,
         'index.routing.allocation.require._name': req.body.target,
         'index.blocks.write': true
-      }
+      },
+      cluster: req.query.cluster
     };
 
     try {
@@ -690,24 +731,25 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
             'index.codec': 'best_compression',
             'index.number_of_shards': req.body.numShards || 1
           }
-        }
+        },
+        cluster: req.query.cluster
       };
 
       // wait for no more reloacting shards
       const shrinkCheckInterval = setInterval(() => {
-        Db.healthCache().then(async (result) => {
+        Db.healthCache(req.query.cluster).then(async (result) => {
           if (result.relocating_shards === 0) {
             clearInterval(shrinkCheckInterval);
             try {
               await Db.shrinkIndex(req.params.index, shrinkParams);
 
-              const { body: indexResult } = await Db.indices(`${req.params.index}-shrink,${req.params.index}`);
+              const { body: indexResult } = await Db.indices(`${req.params.index}-shrink,${req.params.index}`, req.query.cluster);
               if (indexResult[0] && indexResult[1] &&
                 indexResult[0]['docs.count'] === indexResult[1]['docs.count']) {
-                await Db.deleteIndex([req.params.index], {});
+                await Db.deleteIndex([req.params.index], { cluster: req.query.cluster });
               }
             } catch (err) {
-              console.log(`ERROR - ${req.method} /api/esindices/${req.params.index}/shrink`, util.inspect(err, false, 50));
+              console.log(`ERROR - ${req.method} /api/esindices/%s/shrink`, ArkimeUtil.sanitizeStr(req.params.index), util.inspect(err, false, 50));
             }
           }
         });
@@ -718,7 +760,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     } catch (err) {
       return res.send(JSON.stringify({
         success: false,
-        text: err
+        text: ArkimeUtil.safeStr(err.message)
       }));
     }
   };
@@ -727,7 +769,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
   /**
    * GET - /api/estasks
    *
-   * Fetches Elasticsearch tasks.
+   * Fetches OpenSearch/Elasticsearch tasks.
    * @name /estasks
    * @param {string} filter - Search text to filter the list of ES tasks by.
    * @param {string} cancellable=false - Whether to return only cancellable tasks. Default is "false".
@@ -738,9 +780,10 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @returns {number} recordsTotal - The total number of ES tasks.
    * @returns {number} recordsFiltered - The number of ES tasks returned in this result.
    */
-  statsAPIs.getESTasks = async (req, res) => {
+  static async getESTasks (req, res) {
+    const options = ViewerUtils.addCluster(req.query.cluster);
     try {
-      const { body: { tasks } } = await Db.tasks();
+      const { body: { tasks } } = await Db.tasks(options);
 
       let regex;
       if (req.query.filter !== undefined) {
@@ -768,7 +811,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         }
 
         if (task.headers['X-Opaque-Id']) {
-          const parts = ViewerUtils.splitRemain(task.headers['X-Opaque-Id'], '::', 1);
+          const parts = ArkimeUtil.splitRemain(task.headers['X-Opaque-Id'], '::', 1);
           task.user = (parts.length === 1 ? '' : parts[0]);
         } else {
           task.user = '';
@@ -814,72 +857,75 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     }
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST - /api/estasks/:id/cancel
    *
-   * Cancels an Elasticsearch task (admin only).
+   * Cancels an OpenSearch/Elasticsearch task (admin only).
    * @name /estasks/:id/cancel
    * @returns {boolean} success - Whether the cancel task operation was successful.
    * @returns {string} text - The success/error message to (optionally) display to the user.
    */
-  statsAPIs.cancelESTask = async (req, res) => {
+  static async cancelESTask (req, res) {
     let taskId;
     if (req.params.id) {
       taskId = req.params.id;
-    } else if (req.body && req.body.taskId) {
+    } else if (req.body && ArkimeUtil.isString(req.body.taskId)) {
       taskId = req.body.taskId;
     } else {
       return res.serverError(403, 'Missing ID of task to cancel');
     }
 
     try {
-      const { body: result } = await Db.taskCancel(taskId);
+      const { body: result } = await Db.taskCancel(taskId, req.query.cluster);
       return res.send(JSON.stringify({ success: true, text: result }));
     } catch (err) {
-      console.log(`ERROR - ${req.method} /api/estasks/${taskId}/cancel`, util.inspect(err, false, 50));
+      console.log(`ERROR - ${req.method} /api/estasks/%s/cancel`, ArkimeUtil.sanitizeStr(taskId), util.inspect(err, false, 50));
       return res.serverError(500, err.toString());
     }
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST - /api/estasks/:id/cancelwith
    *
-   * Cancels an Elasticsearch task by opaque id. Used to cancel running tasks
+   * Cancels an OpenSearch/Elasticsearch task by opaque id. Used to cancel running tasks
    * that a user has created allowing a user to cancel their own tasks.
    * @name /estasks/:id/cancelwith
    * @returns {boolean} success - Whether the cancel task operation was successful.
    * @returns {string} text - The success/error message to (optionally) display to the user.
    */
-  statsAPIs.cancelUserESTask = async (req, res) => {
+  static async cancelUserESTask (req, res) {
     let cancelId;
     if (req.params.id) {
       cancelId = req.params.id;
-    } else if (req.body && req.body.cancelId) {
+    } else if (req.body && ArkimeUtil.isString(req.body.cancelId)) {
       cancelId = req.body.cancelId;
     } else {
       return res.serverError(403, 'Missing ID of task to cancel');
     }
 
     try {
-      const { body: result } = await Db.cancelByOpaqueId(`${req.user.userId}::${cancelId}`);
+      const { body: result } = await Db.cancelByOpaqueId(`${req.user.userId}::${cancelId}`, req.query.cluster);
       return res.send(JSON.stringify({ success: true, text: result }));
     } catch (err) {
-      console.log(`ERROR - ${req.method} /api/estasks/${cancelId}/cancelwith`, util.inspect(err, false, 50));
+      console.log(`ERROR - ${req.method} /api/estasks/%s/cancelwith`, ArkimeUtil.sanitizeStr(cancelId), util.inspect(err, false, 50));
       return res.serverError(500, err.toString());
     }
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST - /api/estasks/cancelall
    *
-   * Cancels all running Elasticsearch tasks (admin only).
+   * Cancels all running OpenSearch/Elasticsearch tasks (admin only).
    * @name /estasks/cancelall
    * @returns {boolean} success - Whether the cancel all tasks operation was successful.
    * @returns {string} text - The success/error message to (optionally) display to the user.
    */
-  statsAPIs.cancelAllESTasks = async (req, res) => {
+  static async cancelAllESTasks (req, res) {
     try {
-      const { body: result } = await Db.taskCancel();
+      const { body: result } = await Db.taskCancel(undefined, req.query.cluster);
       return res.send(JSON.stringify({ success: true, text: result }));
     } catch (err) {
       console.log(`ERROR - ${req.method} /api/estasks/cancelall`, util.inspect(err, false, 50));
@@ -891,15 +937,21 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
   /**
    * GET - /api/esadmin
    *
-   * Fetches all Elasticsearch settings that a user can change (es admin only - set in config with <a href="settings#esadminusers">esAdminUsers</a>).
+   * Fetches all OpenSearch/Elasticsearch settings that a user can change (es admin only - set in config with <a href="settings#esadminusers">esAdminUsers</a>).
    * @name /esadmin
    * @returns {array} settings - List of ES settings that a user can change
    */
-  statsAPIs.getESAdminSettings = (req, res) => {
+  static async getESAdminSettings (req, res) {
+    let prefix = internals.prefix;
+    if (req.query.cluster) {
+      const details = await Db.getClusterDetails();
+      prefix = details.body?.prefix[req.query.cluster];
+    }
+
     Promise.all([
-      Db.getClusterSettings({ flatSettings: true, include_defaults: true }),
-      Db.getILMPolicy(),
-      Db.getTemplate('sessions3_template')
+      Db.getClusterSettings({ flatSettings: true, include_defaults: true, cluster: req.query.cluster }),
+      Db.getILMPolicy(req.query.cluster),
+      Db.getTemplate('sessions3_template', req.query.cluster)
     ]).then(([{ body: settings }, ilm, { body: template }]) => {
       const rsettings = [];
 
@@ -910,7 +962,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       function addSetting (key, type, settingName, url, regex, current) {
         if (current === undefined) { current = getValue(key); }
         if (current === undefined) { return; }
-        rsettings.push({ key: key, current: current, name: settingName, type: type, url: url, regex: regex });
+        rsettings.push({ key, current, name: settingName, type, url, regex });
       }
 
       addSetting('search.max_buckets', 'Integer',
@@ -976,26 +1028,26 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         'Sessions - Number of shards for FUTURE sessions3 indices',
         'https://www.elastic.co/guide/en/elasticsearch/reference/current/index-modules.html#index-number-of-shards',
         '^\\d+$',
-        template[`${internals.prefix}sessions3_template`].settings['index.number_of_shards']);
+        template[`${prefix}sessions3_template`].settings['index.number_of_shards']);
 
       addSetting('arkime.sessions.replicas', 'Integer',
         'Sessions - Number of replicas for FUTURE sessions3 indices',
         'https://www.elastic.co/guide/en/elasticsearch/reference/current/index-modules.html#index-number-of-replicas',
         '^\\d+$',
-        template[`${internals.prefix}sessions3_template`].settings['index.number_of_replicas'] || 0);
+        template[`${prefix}sessions3_template`].settings['index.number_of_replicas'] || 0);
 
       addSetting('arkime.sessions.shards_per_node', 'Empty or Integer',
         'Sessions - Number of shards_per_node for FUTURE sessions3 indices',
         'https://www.elastic.co/guide/en/elasticsearch/reference/current/allocation-total-shards.html',
         '^(|\\d+)$',
-        template[`${internals.prefix}sessions3_template`].settings['index.routing.allocation.total_shards_per_node'] || '');
+        template[`${prefix}sessions3_template`].settings['index.routing.allocation.total_shards_per_node'] || '');
 
       function addIlm (key, current, ilmName, type, regex) {
-        rsettings.push({ key: key, current: current, name: ilmName, type: type, url: 'https://arkime.com/faq#ilm', regex: regex });
+        rsettings.push({ key, current, name: ilmName, type, url: 'https://arkime.com/faq#ilm', regex });
       }
 
-      if (ilm[`${internals.prefix}molochsessions`]) {
-        const silm = ilm[`${internals.prefix}molochsessions`];
+      if (ilm[`${prefix}molochsessions`]) {
+        const silm = ilm[`${prefix}molochsessions`];
         addIlm('arkime.ilm.sessions.forceTime', silm.policy.phases.warm.min_age,
           'ILM - Move to warm after', 'Time String', '^\\d+[hd]$');
         addIlm('arkime.ilm.sessions.replicas', silm.policy.phases.warm.actions.allocate.number_of_replicas,
@@ -1006,8 +1058,8 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
           'ILM - Delete session index after', 'Time String', '^\\d+[hd]$');
       }
 
-      if (ilm[`${internals.prefix}molochhistory`]) {
-        const hilm = ilm[`${internals.prefix}molochhistory`];
+      if (ilm[`${prefix}molochhistory`]) {
+        const hilm = ilm[`${prefix}molochhistory`];
         addIlm('arkime.ilm.history.deleteTime', hilm.policy.phases.delete.min_age,
           'ILM - Delete History index after', 'Time String', '^\\d+[hd]$');
       }
@@ -1016,24 +1068,31 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST - /api/esadmin/set
    *
-   * Sets Elasticsearch settings (es admin only - set in config with <a href="settings#esadminusers">esAdminUsers</a>).
+   * Sets OpenSearch/Elasticsearch settings (es admin only - set in config with <a href="settings#esadminusers">esAdminUsers</a>).
    * @name /esadmin/set
    * @returns {boolean} success - Whether saving the settings was successful.
    * @returns {string} text - The success/error message to (optionally) display to the user.
    */
-  statsAPIs.setESAdminSettings = async (req, res) => {
-    if (req.body.key === undefined) { return res.serverError(500, 'Missing key'); }
-    if (req.body.value === undefined) { return res.serverError(500, 'Missing value'); }
+  static async setESAdminSettings (req, res) {
+    if (!ArkimeUtil.isString(req.body.key)) { return res.serverError(500, 'Missing key'); }
+    if (!ArkimeUtil.isString(req.body.value, 0)) { return res.serverError(500, 'Missing value'); }
+
+    let prefix = internals.prefix;
+    if (req.query.cluster) {
+      const details = await Db.getClusterDetails();
+      prefix = details.body?.prefix[req.query.cluster];
+    }
 
     // Convert null string to null
     if (req.body.value === 'null') { req.body.value = null; }
 
     // Must set all 3 at once because of ES bug/feature
     if (req.body.key === 'arkime.disk.watermarks') {
-      const query = { body: { persistent: {} } };
+      const query = { body: { persistent: {} }, cluster: req.query.cluster };
       if (req.body.value === '' || req.body.value === null) {
         query.body.persistent['cluster.routing.allocation.disk.watermark.low'] = null;
         query.body.persistent['cluster.routing.allocation.disk.watermark.high'] = null;
@@ -1053,7 +1112,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         await Db.putClusterSettings(query);
         return res.send(JSON.stringify({
           success: true,
-          text: 'Successfully set ES settings'
+          text: 'Successfully set settings'
         }));
       } catch (err) {
         console.log(`ERROR - ${req.method} /api/esadmin/set`, util.inspect(err, false, 50));
@@ -1062,9 +1121,9 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     }
 
     if (req.body.key.startsWith('arkime.ilm')) {
-      Promise.all([Db.getILMPolicy()]).then(([ilm]) => {
-        const silm = ilm[`${internals.prefix}molochsessions`];
-        const hilm = ilm[`${internals.prefix}molochhistory`];
+      Promise.all([Db.getILMPolicy(req.query.cluster)]).then(([ilm]) => {
+        const silm = ilm[`${prefix}molochsessions`];
+        const hilm = ilm[`${prefix}molochhistory`];
 
         if (silm === undefined || hilm === undefined) {
           return res.serverError(500, 'ILM isn\'t configured');
@@ -1090,9 +1149,9 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
           return res.serverError(500, 'Unknown field');
         }
         if (req.body.key.startsWith('arkime.ilm.history')) {
-          Db.setILMPolicy(`${internals.prefix}molochhistory`, hilm);
+          Db.setILMPolicy(`${prefix}molochhistory`, hilm, req.query.cluster);
         } else {
-          Db.setILMPolicy(`${internals.prefix}molochsessions`, silm);
+          Db.setILMPolicy(`${prefix}molochsessions`, silm, req.query.cluster);
         }
         return res.send(JSON.stringify({ success: true, text: 'Set' }));
       });
@@ -1100,38 +1159,38 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     }
 
     if (req.body.key.startsWith('arkime.sessions')) {
-      Promise.all([Db.getTemplate('sessions3_template')]).then(([{ body: template }]) => {
+      Promise.all([Db.getTemplate('sessions3_template', req.query.cluster)]).then(([{ body: template }]) => {
         switch (req.body.key) {
         case 'arkime.sessions.shards':
-          template[`${internals.prefix}sessions3_template`].settings['index.number_of_shards'] = req.body.value;
+          template[`${prefix}sessions3_template`].settings['index.number_of_shards'] = req.body.value;
           break;
         case 'arkime.sessions.replicas':
-          template[`${internals.prefix}sessions3_template`].settings['index.number_of_replicas'] = req.body.value;
+          template[`${prefix}sessions3_template`].settings['index.number_of_replicas'] = req.body.value;
           break;
         case 'arkime.sessions.shards_per_node':
           if (req.body.value === '') {
-            delete template[`${internals.prefix}sessions3_template`].settings['index.routing.allocation.total_shards_per_node'];
+            delete template[`${prefix}sessions3_template`].settings['index.routing.allocation.total_shards_per_node'];
           } else {
-            template[`${internals.prefix}sessions3_template`].settings['index.routing.allocation.total_shards_per_node'] = req.body.value;
+            template[`${prefix}sessions3_template`].settings['index.routing.allocation.total_shards_per_node'] = req.body.value;
           }
           break;
         default:
           return res.serverError(500, 'Unknown field');
         }
-        Db.putTemplate('sessions3_template', template[`${internals.prefix}sessions3_template`]);
-        return res.send(JSON.stringify({ success: true, text: 'Successfully set ES settings' }));
+        Db.putTemplate('sessions3_template', template[`${prefix}sessions3_template`], req.query.cluster);
+        return res.send(JSON.stringify({ success: true, text: 'Successfully set settings' }));
       });
       return;
     }
 
-    const clusterQuery = { body: { persistent: {} } };
+    const clusterQuery = { body: { persistent: {} }, cluster: req.query.cluster };
     clusterQuery.body.persistent[req.body.key] = req.body.value || null;
 
     try {
       await Db.putClusterSettings(clusterQuery);
       return res.send(JSON.stringify({
         success: true,
-        text: 'Successfully set ES settings'
+        text: 'Successfully set settings'
       }));
     } catch (err) {
       console.log(`ERROR - ${req.method} /api/esadmin/set`, util.inspect(err, false, 50));
@@ -1139,6 +1198,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
     }
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST - /api/esadmin/reroute
    *
@@ -1147,29 +1207,31 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @returns {boolean} success - Whether the reroute was successful.
    * @returns {string} text - The success/error message to (optionally) display to the user.
    */
-  statsAPIs.rerouteES = async (req, res) => {
+  static async rerouteES (req, res) {
     try {
-      await Db.reroute();
+      await Db.reroute(req.query.cluster);
       return res.send(JSON.stringify({ success: true, text: 'Reroute successful' }));
     } catch (err) {
       return res.send(JSON.stringify({ success: true, text: 'Reroute failed' }));
     }
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST - /api/esadmin/flush
    *
-   * Flush and refresh any data waiting in Elasticsearch to disk (es admin only - set in config with <a href="settings#esadminusers">esAdminUsers</a>).
+   * Flush and refresh any data waiting in OpenSearch/Elasticsearch to disk (es admin only - set in config with <a href="settings#esadminusers">esAdminUsers</a>).
    * @name /esadmin/flush
    * @returns {boolean} success - Always true
    * @returns {string} text - The success message to (optionally) display to the user.
    */
-  statsAPIs.flushES = (req, res) => {
-    Db.refresh('*');
-    Db.flush('*');
+  static flushES (req, res) {
+    Db.refresh('*', req.query.cluster);
+    Db.flush('*', req.query.cluster);
     return res.send(JSON.stringify({ success: true, text: 'Flushed' }));
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST - /api/esadmin/unflood
    *
@@ -1178,13 +1240,15 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @returns {boolean} success - Always true
    * @returns {string} text - The success message to (optionally) display to the user.
    */
-  statsAPIs.unfloodES = (req, res) => {
+  static unfloodES (req, res) {
     Db.setIndexSettings('*', {
-      body: { 'index.blocks.read_only_allow_delete': null }
+      body: { 'index.blocks.read_only_allow_delete': null },
+      cluster: req.query.cluster
     });
     return res.send(JSON.stringify({ success: true, text: 'Unflooded' }));
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST - /api/esadmin/clearcache
    *
@@ -1193,9 +1257,9 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @returns {boolean} success - Whether clearing the cache was successful.
    * @returns {string} text - The success/error message to (optionally) display to the user.
    */
-  statsAPIs.clearCacheES = async (req, res) => {
+  static async clearCacheES (req, res) {
     try {
-      const { body: data } = await Db.clearCache();
+      const { body: data } = await Db.clearCache(req.query.cluster);
       return res.send(JSON.stringify({
         success: true,
         text: `Cache cleared: ${data._shards.successful} of ${data._shards.total} shards successful, with ${data._shards.failed} failing`
@@ -1210,9 +1274,9 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
   /**
    * GET - /api/esshards
    *
-   * Fetches all Elasticsearch shards
+   * Fetches all OpenSearch/Elasticsearch shards
    * @name /esshards
-   * @param {string} filter - Search text to filter the list of Elasticsearch shards by.
+   * @param {string} filter - Search text to filter the list of OpenSearch/Elasticsearch shards by.
    * @param {string} show=all - Which types of shard to show. Options include:
      all - show all shards.
      notstarted - show unstarted shards.
@@ -1225,11 +1289,15 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @returns {array} nodeExcludes - List of node names that disallow the allocation of shards.
    * @returns {array} ipExcludes - List of node ips that disallow the allocation of shards.
    */
-  statsAPIs.getESShards = (req, res) => {
+  static getESShards (req, res) {
+    const options = ViewerUtils.addCluster(req.query.cluster, { flatSettings: true });
     Promise.all([
-      Db.shards(),
-      Db.getClusterSettings({ flatSettings: true })
+      Db.shards(options.cluster ? { cluster: options.cluster } : undefined),
+      Db.getClusterSettings(options)
     ]).then(([{ body: shards }, { body: settings }]) => {
+      if (!Array.isArray(shards)) {
+        return res.serverError(500, 'No results');
+      }
       let ipExcludes = [];
       if (settings.persistent['cluster.routing.allocation.exclude._ip']) {
         ipExcludes = settings.persistent['cluster.routing.allocation.exclude._ip'].split(',');
@@ -1293,29 +1361,30 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       }
 
       res.send({
-        nodes: nodes,
-        indices: indices,
-        nodeExcludes: nodeExcludes,
-        ipExcludes: ipExcludes
+        nodes,
+        indices,
+        nodeExcludes,
+        ipExcludes
       });
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST - /api/esshards/:type/:value/exclude
    *
-   * Exclude Elasticsearch node by ip or name (admin only).
+   * Exclude OpenSearch/Elasticsearch node by ip or name (admin only).
    * @name /esshards/:type/:value/exclude
    * @returns {boolean} success - Whether exclude node operation was successful.
    * @returns {string} text - The success/error message to (optionally) display to the user.
    */
-  statsAPIs.excludeESShard = async (req, res) => {
-    if (Config.get('multiES', false)) {
+  static async excludeESShard (req, res) {
+    if (internals.multiES && req.query.cluster === undefined) {
       return res.serverError(401, 'Not supported in multies');
     }
 
     try {
-      const { body: settings } = await Db.getClusterSettings({ flatSettings: true });
+      const { body: settings } = await Db.getClusterSettings({ flatSettings: true, cluster: req.query.cluster });
       let exclude = [];
       let settingName;
 
@@ -1335,7 +1404,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         exclude.push(req.params.value);
       }
 
-      const query = { body: { persistent: {} } };
+      const query = { body: { persistent: {} }, cluster: req.query.cluster };
       query.body.persistent[settingName] = exclude.join(',');
 
       await Db.putClusterSettings(query);
@@ -1344,26 +1413,27 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         text: 'Successfully excluded node'
       }));
     } catch (err) {
-      console.log(`ERROR - ${req.method} /api/esshards/${req.params.type}/${req.params.value}/exclude`, util.inspect(err, false, 50));
+      console.log(`ERROR - ${req.method} /api/esshards/%s/%s/exclude`, ArkimeUtil.sanitizeStr(req.params.type), ArkimeUtil.sanitizeStr(req.params.value), util.inspect(err, false, 50));
       return res.serverError(500, 'Node exclusion failed');
     }
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST - /api/esshards/:type/:value/include
    *
-   * Include Elasticsearch node by ip or name (admin only).
+   * Include OpenSearch/Elasticsearch node by ip or name (admin only).
    * @name /esshards/:type/:value/include
    * @returns {boolean} success - Whether include node operation was successful.
    * @returns {string} text - The success/error message to (optionally) display to the user.
    */
-  statsAPIs.includeESShard = async (req, res) => {
-    if (Config.get('multiES', false)) {
+  static async includeESShard (req, res) {
+    if (internals.multiES && req.query.cluster === undefined) {
       return res.serverError(401, 'Not supported in multies');
     }
 
     try {
-      const { body: settings } = await Db.getClusterSettings({ flatSettings: true });
+      const { body: settings } = await Db.getClusterSettings({ flatSettings: true, cluster: req.query.cluster });
       let exclude = [];
       let settingName;
 
@@ -1384,7 +1454,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         exclude.splice(pos, 1);
       }
 
-      const query = { body: { persistent: {} } };
+      const query = { body: { persistent: {} }, cluster: req.query.cluster };
       query.body.persistent[settingName] = exclude.join(',');
 
       await Db.putClusterSettings(query);
@@ -1393,7 +1463,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
         text: 'Successfully included node'
       }));
     } catch (err) {
-      console.log(`ERROR - ${req.method} /api/esshards/${req.params.type}/${req.params.value}/include`, util.inspect(err, false, 50));
+      console.log(`ERROR - ${req.method} /api/esshards/%s/%s/include`, ArkimeUtil.sanitizeStr(req.params.type), ArkimeUtil.sanitizeStr(req.params.value), util.inspect(err, false, 50));
       return res.serverError(500, 'Node inclusion failed');
     }
   };
@@ -1412,11 +1482,12 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @returns {number} recordsTotal - The total number of indices.
    * @returns {number} recordsFiltered - The number of indices returned in this result.
    */
-  statsAPIs.getESRecovery = async (req, res) => {
+  static async getESRecovery (req, res) {
     const sortField = (req.query.sortField || 'index') + (req.query.desc === 'true' ? ':desc' : '');
+    const options = ViewerUtils.addCluster(req.query.cluster);
 
     try {
-      const { body: recoveries } = await Db.recovery(sortField, req.query.show !== 'all');
+      const { body: recoveries } = await Db.recovery(sortField, req.query.show !== 'all', options.cluster);
       let regex;
       if (req.query.filter !== undefined) {
         try {
@@ -1475,7 +1546,7 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
    * @returns {number} recordsTotal - The total number of stats.
    * @returns {number} recordsFiltered - The number of stats returned in this result.
    */
-  statsAPIs.getParliament = (req, res) => {
+  static getParliament (req, res) {
     const query = {
       size: 1000,
       query: {
@@ -1532,6 +1603,6 @@ module.exports = (Config, Db, internals, ViewerUtils) => {
       res.send({ recordsTotal: 0, recordsFiltered: 0, data: [] });
     });
   };
-
-  return statsAPIs;
 };
+
+module.exports = StatsAPIs;

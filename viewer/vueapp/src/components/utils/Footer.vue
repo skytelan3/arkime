@@ -1,39 +1,42 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
-
   <div class="footer">
     <p>
       <small>
-        Arkime v{{molochVersion}} |
-        <a href="https://arkime.com">arkime.com</a>
-        <span v-if="responseTime && !loadingData">
-          | {{ responseTime | commaString }}ms
-        </span>
-        <span v-if="loadingData">
-          |
-          <span class="fa fa-spinner fa-spin fa-lg text-theme-accent">
-          </span>
-        </span>
+        <div id="footerConfig"></div>
       </small>
     </p>
   </div>
-
 </template>
 
 <script>
+import Vue from 'vue';
+
+let footer;
+
 export default {
-  name: 'MolochFooter',
-  data: function () {
-    return {
-      molochVersion: this.$constants.MOLOCH_VERSION
-    };
+  name: 'ArkimeFooter',
+  mounted () {
+    footer = new Vue({
+      parent: this,
+      el: '#footerConfig',
+      // add span around template because vue wants a single root element
+      template: `<span>${new DOMParser().parseFromString(this.$constants.FOOTER_CONFIG, 'text/html').documentElement.textContent}</span>`,
+      computed: {
+        responseTime () {
+          return this.$parent.$store.state.responseTime;
+        },
+        loadingData () {
+          return this.$parent.$store.state.loadingData;
+        }
+      }
+    });
   },
-  computed: {
-    responseTime: function () {
-      return this.$store.state.responseTime;
-    },
-    loadingData: function () {
-      return this.$store.state.loadingData;
-    }
+  beforeDestroy () {
+    footer.$destroy();
   }
 };
 </script>

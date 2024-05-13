@@ -1,3 +1,7 @@
+/*
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+*/
 // The Vue build version to load with the `import` command
 // (runtime-only or standalone) has been set in webpack.base.conf with an alias.
 import Vue from 'vue';
@@ -15,7 +19,7 @@ import store from './store';
 import interceptorSetup from './interceptors';
 import './filters.js';
 
-import '../../../common.css';
+import '../../../common/common.css';
 
 Vue.config.productionTip = false;
 
@@ -23,7 +27,7 @@ Vue.use(VueAxios, axios);
 Vue.use(VueMoment);
 Vue.use(BootstrapVue);
 
-// setup axios http interceptor to add token to reqs
+// setup axios http interceptor to add cookie to reqs
 interceptorSetup();
 
 /* eslint-disable no-new */
@@ -32,5 +36,16 @@ new Vue({
   store,
   router,
   components: { App },
-  template: '<App/>'
+  template: '<App/>',
+  created: function () {
+    // define app constants
+    /* eslint-disable no-undef */
+    Vue.prototype.$constants = {
+      PATH,
+      VERSION,
+      LOGOUT_URL,
+      BUILD_DATE, // from webpack.DefinePlugin
+      BUILD_VERSION // from webpack.DefinePlugin
+    };
+  }
 });

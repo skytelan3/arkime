@@ -1,3 +1,7 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="help-content">
     <!-- side navbar -->
@@ -264,7 +268,7 @@ export default {
 /* help navigation */
 .help-content div.nav-pills {
   display: block;
-  min-width: 150px;
+  width: 150px;
   border: 1px solid var(--color-gray);
   border-radius: 0 8px 8px 0;
   position: fixed;

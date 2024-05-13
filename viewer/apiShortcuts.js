@@ -1,42 +1,81 @@
+/******************************************************************************/
+/* apiShortcuts.js -- api calls for shortcuts
+ *
+ * Copyright Yahoo Inc.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 'use strict';
 
+const Db = require('./db.js');
 const util = require('util');
+const ArkimeUtil = require('../common/arkimeUtil');
+const User = require('../common/user');
+const internals = require('./internals');
 
-module.exports = (Db, internals, ViewerUtils) => {
-  const shortcutAPIs = {};
+class Mutex {
+  constructor () {
+    this.queue = [];
+    this.locked = false;
+  }
 
+  lock () {
+    return new Promise((resolve, reject) => {
+      if (this.locked) {
+        this.queue.push(resolve);
+      } else {
+        this.locked = true;
+        resolve();
+      }
+    });
+  }
+
+  unlock () {
+    if (this.queue.length > 0) {
+      const resolve = this.queue.shift();
+      resolve();
+    } else {
+      this.locked = false;
+    }
+  }
+}
+
+class ShortcutAPIs {
   // --------------------------------------------------------------------------
   // HELPERS
   // --------------------------------------------------------------------------
   // https://stackoverflow.com/a/48569020
-  class Mutex {
-    constructor () {
-      this.queue = [];
-      this.locked = false;
-    }
 
-    lock () {
-      return new Promise((resolve, reject) => {
-        if (this.locked) {
-          this.queue.push(resolve);
-        } else {
-          this.locked = true;
-          resolve();
-        }
-      });
-    }
+  static #shortcutMutex = new Mutex();
 
-    unlock () {
-      if (this.queue.length > 0) {
-        const resolve = this.queue.shift();
-        resolve();
-      } else {
-        this.locked = false;
-      }
-    }
+  // --------------------------------------------------------------------------
+  /**
+   * @private
+   *
+   * Normalizes the data in a shortcut by turning values and users string to arrays
+   * and removing the type parameter and replacing it with `type: values`
+   * Also validates that the users added to the shortcut are valid within the system
+   * NOTE: Mutates the shortcut directly
+   * @param {Shortcut} shortcut - The shortcut to normalize
+   * @returns {Object} {type, values, invalidusers} - The shortcut type (ip, string, number),
+   *                                                  array of values, and list of invalid users
+   */
+  static async #normalizeShortcut (shortcut) {
+    // comma/newline separated value -> array of values
+    const values = ArkimeUtil.commaOrNewlineStringToArray(shortcut.value);
+    shortcut[shortcut.type] = values;
+
+    const type = shortcut.type;
+    delete shortcut.type;
+    delete shortcut.value;
+
+    // comma/newline separated value -> array of values
+    let users = ArkimeUtil.commaOrNewlineStringToArray(shortcut.users || '');
+    users = await User.validateUserIds(users);
+    shortcut.users = users.validUsers;
+
+    return { type, values, invalidUsers: users.invalidUsers };
   }
-
-  const shortcutMutex = new Mutex();
 
   // --------------------------------------------------------------------------
   // APIs
@@ -48,14 +87,17 @@ module.exports = (Db, internals, ViewerUtils) => {
    * @type {object}
    * @param {string} userId - The ID of the user that created the shortcut.
    * @param {string} name - The name of the shortcut.
-   * @param {boolean} shared=false - Whether the shortcut is shared with the other users in the cluster.
    * @param {string} description - The description of the shortcut to display to users.
    * @param {number[]} number - A list of number values to use as the shortcut value. A shortcut must contain a list of numbers, strings, or ips.
    * @param {string[]} ip - A list of ip values to use as the shortcut value. A shortcut must contain a list of numbers, strings, or ips.
    * @param {string[]} string - A list of string values to use as the shortcut value. A shortcut must contain a list of numbers, strings, or ips.
+   * @param {string} users - A list of userIds that have access to this shortcut.
+   * @param {string[]} roles - A list of Arkime roles that have access to this shortcut.
+   * @param {string[]} editRoles - A list of Arkime roles that have edit access to this shortcut.
    * @param {boolean} locked=false - Whether the shortcut is locked and must be updated using the db.pl script (can't be updated in the web application user interface).
    */
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/shortcuts
    *
@@ -73,10 +115,13 @@ module.exports = (Db, internals, ViewerUtils) => {
    * @returns {number} recordsTotal - The total number of shortcut results stored.
    * @returns {number} recordsFiltered - The number of shortcut items returned in this result.
    */
-  shortcutAPIs.getShortcuts = (req, res) => {
+  static async getShortcuts (req, res) {
     // return nothing if we can't find the user
     const user = req.settingUser;
     if (!user) { return res.send({}); }
+
+    const allRoles = await user.getRoles();
+    const roles = [...allRoles.keys()]; // es requires an array for terms search
 
     const map = req.query.map && req.query.map === 'true';
 
@@ -88,8 +133,10 @@ module.exports = (Db, internals, ViewerUtils) => {
             {
               bool: {
                 should: [
-                  { term: { shared: true } },
-                  { term: { userId: req.settingUser.userId } }
+                  { terms: { roles } }, // shared via user role
+                  { terms: { editRoles: roles } }, // shared via edit role
+                  { term: { users: req.settingUser.userId } }, // shared via userId
+                  { term: { userId: req.settingUser.userId } } // created by this user
                 ]
               }
             }
@@ -100,6 +147,10 @@ module.exports = (Db, internals, ViewerUtils) => {
       size: req.query.length || 50,
       from: req.query.start || 0
     };
+
+    if (req.query.all && roles.includes('arkimeAdmin')) {
+      query.query.bool.filter = []; // remove sharing restrictions
+    }
 
     query.sort[req.query.sort || 'name'] = {
       order: req.query.desc === 'true' ? 'desc' : 'asc'
@@ -122,9 +173,14 @@ module.exports = (Db, internals, ViewerUtils) => {
       }
     }
 
+    const numQuery = { ...query };
+    delete numQuery.sort;
+    delete numQuery.size;
+    delete numQuery.from;
+
     Promise.all([
       Db.searchShortcuts(query),
-      Db.numberOfShortcuts()
+      Db.numberOfShortcuts(numQuery)
     ]).then(([{ body: { hits: shortcuts } }, { body: { count: total } }]) => {
       const results = { list: [], map: {} };
       for (const hit of shortcuts.hits) {
@@ -153,6 +209,19 @@ module.exports = (Db, internals, ViewerUtils) => {
         shortcut.value = values.join('\n');
         delete shortcut[shortcut.type];
 
+        if ( // remove sensitive information for users this is shared with
+        // (except creator, arkimeAdmin, and editors)
+          user.userId !== shortcut.userId &&
+          !user.hasRole('arkimeAdmin') &&
+          !user.hasRole(shortcut.editRoles)) {
+          delete shortcut.users;
+          delete shortcut.roles;
+          delete shortcut.editRoles;
+        } else if (shortcut.users) {
+          // client expects a string
+          shortcut.users = shortcut.users.join(',');
+        }
+
         if (map) {
           results.map[shortcut.id] = shortcut;
         } else {
@@ -175,6 +244,7 @@ module.exports = (Db, internals, ViewerUtils) => {
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST - /api/shortcut
    *
@@ -183,19 +253,34 @@ module.exports = (Db, internals, ViewerUtils) => {
    * @param {string} name - The name of the new shortcut.
    * @param {string} type - The type of the shortcut (number, ip, or string).
    * @param {string} value - The shortcut value.
+   * @param {string} description - The optional description of this shortcut.
+   * @param {string} users - A comma separated list of users that can view this shortcut.
+   * @param {Array} roles - The roles that can view this shortcut.
    * @returns {Shortcut} shortcut - The new shortcut object.
    * @returns {boolean} success - Whether the create shortcut operation was successful.
    */
-  shortcutAPIs.createShortcut = (req, res) => {
+  static createShortcut (req, res) {
     // make sure all the necessary data is included in the post body
-    if (!req.body.name) {
+    if (!ArkimeUtil.isString(req.body.name)) {
       return res.serverError(403, 'Missing shortcut name');
     }
-    if (!req.body.type) {
+    if (!ArkimeUtil.isString(req.body.type)) {
       return res.serverError(403, 'Missing shortcut type');
     }
-    if (!req.body.value) {
+    if (!ArkimeUtil.isString(req.body.value)) {
       return res.serverError(403, 'Missing shortcut value');
+    }
+
+    if (req.body.roles !== undefined && !ArkimeUtil.isStringArray(req.body.roles)) {
+      return res.serverError(403, 'Roles field must be an array of strings');
+    }
+
+    if (req.body.editRoles !== undefined && !ArkimeUtil.isStringArray(req.body.editRoles)) {
+      return res.serverError(403, 'Edit roles field must be an array of strings');
+    }
+
+    if (req.body.users !== undefined && !ArkimeUtil.isString(req.body.users, 0)) {
+      return res.serverError(403, 'Users field must be a string');
     }
 
     req.body.name = req.body.name.replace(/[^-a-zA-Z0-9_]/g, '');
@@ -214,7 +299,7 @@ module.exports = (Db, internals, ViewerUtils) => {
       }
     };
 
-    shortcutMutex.lock().then(async () => {
+    ShortcutAPIs.#shortcutMutex.lock().then(async () => {
       try {
         const { body: { hits: shortcuts } } = await Db.searchShortcuts(query);
 
@@ -222,7 +307,7 @@ module.exports = (Db, internals, ViewerUtils) => {
         for (const hit of shortcuts.hits) {
           const shortcut = hit._source;
           if (shortcut.name === req.body.name) {
-            shortcutMutex.unlock();
+            ShortcutAPIs.#shortcutMutex.unlock();
             return res.serverError(403, `A shortcut with the name, ${req.body.name}, already exists`);
           }
         }
@@ -230,13 +315,7 @@ module.exports = (Db, internals, ViewerUtils) => {
         const newShortcut = req.body;
         newShortcut.userId = user.userId;
 
-        // comma/newline separated value -> array of values
-        const values = ViewerUtils.commaStringToArray(newShortcut.value);
-        newShortcut[newShortcut.type] = values;
-
-        const type = newShortcut.type;
-        delete newShortcut.type;
-        delete newShortcut.value;
+        const { type, values, invalidUsers } = await ShortcutAPIs.#normalizeShortcut(newShortcut);
 
         try {
           const { body: result } = await Db.createShortcut(newShortcut);
@@ -246,25 +325,28 @@ module.exports = (Db, internals, ViewerUtils) => {
           delete newShortcut.ip;
           delete newShortcut.string;
           delete newShortcut.number;
-          shortcutMutex.unlock();
+          ShortcutAPIs.#shortcutMutex.unlock();
 
           return res.send(JSON.stringify({
+            invalidUsers,
             success: true,
-            shortcut: newShortcut
+            shortcut: newShortcut,
+            text: 'Created new shortcut!'
           }));
         } catch (err) {
-          shortcutMutex.unlock();
+          ShortcutAPIs.#shortcutMutex.unlock();
           console.log(`ERROR - ${req.method} /api/shortcut (createShortcut)`, util.inspect(err, false, 50));
           return res.serverError(500, 'Error creating shortcut');
         }
       } catch (err) {
-        shortcutMutex.unlock();
+        ShortcutAPIs.#shortcutMutex.unlock();
         console.log(`ERROR - ${req.method} /api/shortcut (searchShortcuts)`, util.inspect(err, false, 50));
         return res.serverError(500, 'Error creating shortcut');
       }
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * PUT - /api/shortcut/:id
    *
@@ -273,20 +355,36 @@ module.exports = (Db, internals, ViewerUtils) => {
    * @param {string} name - The name of the shortcut.
    * @param {string} type - The type of the shortcut (number, ip, or string).
    * @param {string} value - The shortcut value.
+   * @param {string} description - The optional description of this shortcut.
+   * @param {string} users - A comma separated list of users that can view this shortcut.
+   * @param {Array} roles - The roles that can view this shortcut.
+   * @param {Array} editRoles - The roles that can edit this shortcut.
    * @returns {Shortcut} shortcut - The updated shortcut object.
-   * @returns {boolean} success - Whether the upate shortcut operation was successful.
+   * @returns {boolean} success - Whether the update operation was successful.
    * @returns {string} text - The success/error message to (optionally) display to the user.
    */
-  shortcutAPIs.updateShortcut = async (req, res) => {
+  static async updateShortcut (req, res) {
     // make sure all the necessary data is included in the post body
-    if (!req.body.name) {
+    if (!ArkimeUtil.isString(req.body.name)) {
       return res.serverError(403, 'Missing shortcut name');
     }
-    if (!req.body.type) {
+    if (!ArkimeUtil.isString(req.body.type)) {
       return res.serverError(403, 'Missing shortcut type');
     }
-    if (!req.body.value) {
+    if (!ArkimeUtil.isString(req.body.value)) {
       return res.serverError(403, 'Missing shortcut value');
+    }
+
+    if (req.body.roles !== undefined && !ArkimeUtil.isStringArray(req.body.roles)) {
+      return res.serverError(403, 'Roles field must be an array of strings');
+    }
+
+    if (req.body.editRoles !== undefined && !ArkimeUtil.isStringArray(req.body.editRoles)) {
+      return res.serverError(403, 'Edit roles field must be an array of strings');
+    }
+
+    if (req.body.users !== undefined && !ArkimeUtil.isString(req.body.users, 0)) {
+      return res.serverError(403, 'Users field must be a string');
     }
 
     const sentShortcut = req.body;
@@ -296,11 +394,6 @@ module.exports = (Db, internals, ViewerUtils) => {
 
       if (fetchedShortcut._source.locked) {
         return res.serverError(403, 'Locked Shortcut. Use db.pl script to update this shortcut.');
-      }
-
-      // only allow admins or shortcut creator to update shortcut item
-      if (!req.user.createEnabled && req.settingUser.userId !== fetchedShortcut._source.userId) {
-        return res.serverError(403, 'Permission denied');
       }
 
       const query = {
@@ -316,7 +409,7 @@ module.exports = (Db, internals, ViewerUtils) => {
         }
       };
 
-      shortcutMutex.lock().then(async () => {
+      ShortcutAPIs.#shortcutMutex.lock().then(async () => {
         try {
           const { body: { hits: shortcuts } } = await Db.searchShortcuts(query);
 
@@ -324,46 +417,49 @@ module.exports = (Db, internals, ViewerUtils) => {
           for (const hit of shortcuts.hits) {
             const shortcut = hit._source;
             if (shortcut.name === req.body.name) {
-              shortcutMutex.unlock();
+              ShortcutAPIs.#shortcutMutex.unlock();
               return res.serverError(403, `A shortcut with the name, ${req.body.name}, already exists`);
             }
           }
 
-          // comma/newline separated value -> array of values
-          const values = ViewerUtils.commaStringToArray(sentShortcut.value);
-          sentShortcut[sentShortcut.type] = values;
-          sentShortcut.userId = fetchedShortcut._source.userId;
+          const { values, invalidUsers } = await ShortcutAPIs.#normalizeShortcut(sentShortcut);
 
-          delete sentShortcut.type;
-          delete sentShortcut.value;
+          // sets the owner if it has changed
+          if (!await User.setOwner(req, res, sentShortcut, fetchedShortcut._source, 'userId')) {
+            ShortcutAPIs.#shortcutMutex.unlock();
+            return;
+          }
 
           try {
             await Db.setShortcut(req.params.id, sentShortcut);
-            shortcutMutex.unlock();
+            ShortcutAPIs.#shortcutMutex.unlock();
             sentShortcut.value = values.join('\n');
+            sentShortcut.users = sentShortcut.users.join(',');
 
             return res.send(JSON.stringify({
+              invalidUsers,
               success: true,
               shortcut: sentShortcut,
-              text: 'Successfully updated shortcut'
+              text: 'Updated shortcut!'
             }));
           } catch (err) {
-            shortcutMutex.unlock();
-            console.log(`ERROR - ${req.method} /api/shortcut/${req.params.id} (setShortcut)`, util.inspect(err, false, 50));
+            ShortcutAPIs.#shortcutMutex.unlock();
+            console.log(`ERROR - ${req.method} /api/shortcut/%s (setShortcut)`, ArkimeUtil.sanitizeStr(req.params.id), util.inspect(err, false, 50));
             return res.serverError(500, 'Error updating shortcut');
           }
         } catch (err) {
-          shortcutMutex.unlock();
-          console.log(`ERROR - ${req.method} /api/shortcut/${req.params.id} (searchShortcuts)`, util.inspect(err, false, 50));
+          ShortcutAPIs.#shortcutMutex.unlock();
+          console.log(`ERROR - ${req.method} /api/shortcut/%s (searchShortcuts)`, ArkimeUtil.sanitizeStr(req.params.id), util.inspect(err, false, 50));
           return res.serverError(500, 'Error updating shortcut');
         }
       });
     } catch (err) {
-      console.log(`ERROR - ${req.method} /api/shortcut/${req.params.id} (getShortcut)`, util.inspect(err, false, 50));
+      console.log(`ERROR - ${req.method} /api/shortcut/%s (getShortcut)`, ArkimeUtil.sanitizeStr(req.params.id), util.inspect(err, false, 50));
       return res.serverError(500, 'Fetching shortcut to update failed');
     }
   };
 
+  // --------------------------------------------------------------------------
   /**
    * DELETE - /api/shortcut/:id
    *
@@ -372,32 +468,20 @@ module.exports = (Db, internals, ViewerUtils) => {
    * @returns {boolean} success - Whether the delete shortcut operation was successful.
    * @returns {string} text - The success/error message to (optionally) display to the user.
    */
-  shortcutAPIs.deleteShortcut = async (req, res) => {
+  static async deleteShortcut (req, res) {
     try {
-      const { data: shortcut } = await Db.getShortcut(req.params.id);
-
-      // only allow admins or shortcut creator to delete shortcut item
-
-      if (!req.user.createEnabled && req.settingUser.userId !== shortcut?._source.userId) {
-        return res.serverError(403, 'Permission denied');
-      }
-
-      try {
-        await Db.deleteShortcut(req.params.id);
-        res.send(JSON.stringify({
-          success: true,
-          text: 'Deleted shortcut successfully'
-        }));
-      } catch (err) {
-        console.log(`ERROR - ${req.method} /api/shortcut/${req.params.id} (deleteShortcut)`, util.inspect(err, false, 50));
-        return res.serverError(500, 'Error deleting shortcut');
-      }
+      await Db.deleteShortcut(req.params.id);
+      res.send(JSON.stringify({
+        success: true,
+        text: 'Deleted shortcut successfully'
+      }));
     } catch (err) {
-      console.log(`ERROR - ${req.method} /api/shortcut/${req.params.id} (getShortcut)`, util.inspect(err, false, 50));
-      return res.serverError(500, 'Fetching shortcut to delete failed');
+      console.log(`ERROR - ${req.method} /api/shortcut/%s (deleteShortcut)`, ArkimeUtil.sanitizeStr(req.params.id), util.inspect(err, false, 50));
+      return res.serverError(500, 'Error deleting shortcut');
     }
   };
 
+  // --------------------------------------------------------------------------
   /**
    * GET - /api/syncshortcuts
    *
@@ -408,10 +492,10 @@ module.exports = (Db, internals, ViewerUtils) => {
    * @ignore
    * @returns {boolean} success - Always true.
    */
-  shortcutAPIs.syncShortcuts = (req, res) => {
+  static syncShortcuts (req, res) {
     Db.updateLocalShortcuts();
     return res.send(JSON.stringify({ success: true }));
   };
-
-  return shortcutAPIs;
 };
+
+module.exports = ShortcutAPIs;

@@ -13,6 +13,18 @@ export default {
     });
   },
 
+  getStats () {
+    return new Promise((resolve, reject) => {
+      Vue.axios.get('api/parliament/stats')
+        .then((response) => {
+          resolve(response.data);
+        })
+        .catch((error) => {
+          reject(error.response.data);
+        });
+    });
+  },
+
   createGroup: function (newGroup) {
     return new Promise((resolve, reject) => {
       Vue.axios.post('api/groups', newGroup)
@@ -85,9 +97,9 @@ export default {
     });
   },
 
-  updateParliamentOrder: function (reorderedParliament) {
+  updateOrder: function (order) {
     return new Promise((resolve, reject) => {
-      Vue.axios.put('api/parliament', { reorderedParliament: reorderedParliament })
+      Vue.axios.put('api/parliament/order', order)
         .then((response) => {
           resolve(response.data);
         })
@@ -112,7 +124,7 @@ export default {
   acknowledgeIssues: function (issues) {
     return new Promise((resolve, reject) => {
       Vue.axios.put('api/acknowledgeIssues', {
-        issues: issues
+        issues
       })
         .then((response) => {
           resolve(response.data);
@@ -153,7 +165,7 @@ export default {
   removeSelectedAcknowledgedIssues: function (issues) {
     return new Promise((resolve, reject) => {
       Vue.axios.put('api/removeSelectedAcknowledgedIssues', {
-        issues: issues
+        issues
       })
         .then((response) => {
           resolve(response.data);
@@ -168,7 +180,7 @@ export default {
     return new Promise((resolve, reject) => {
       Vue.axios.put('api/ignoreIssues', {
         ms: forMs,
-        issues: issues
+        issues
       })
         .then((response) => {
           resolve(response.data);
@@ -182,7 +194,7 @@ export default {
   removeIgnoreIssues: function (issues) {
     return new Promise((resolve, reject) => {
       Vue.axios.put('api/removeIgnoreIssues', {
-        issues: issues
+        issues
       })
         .then((response) => {
           resolve(response.data);

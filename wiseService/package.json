@@ -5,10 +5,6 @@
     "type": "git",
     "url": "https://github.com/arkime/arkime.git"
   },
-  "dependencies": {
-    "core-js": "^3.6.5",
-    "serve-favicon": "^2.5.0"
-  },
   "scripts": {
     "bundle": "cd ../ && npm run wise:bundle",
     "bundle:min": "cd ../ && npm run wise:build",
@@ -18,13 +14,17 @@
     "lint": "cd ../ && npm run wise:lint"
   },
   "engines": {
-    "node": ">= 6.0.0",
+    "node": ">= 18.15.0 < 21",
     "npm": ">= 3.0.0"
   },
   "nodemonConfig": {
     "ignore": [
-      "node_modules/*",
-      "vueapp/*"
+      "node_modules",
+      "vueapp"
+    ],
+    "watch": [
+      ".",
+      "../common"
     ]
   },
   "browserslist": [

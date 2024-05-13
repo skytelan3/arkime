@@ -15,7 +15,8 @@ import SessionsService from '../src/components/sessions/SessionsService';
 import UserService from '../src/components/users/UserService';
 import ConfigService from '../src/components/utils/ConfigService';
 import '../src/filters.js';
-const { hunts, userWithSettings } = require('./consts');
+import '../../../common/vueapp/vueFilters';
+const { roles, hunts, userWithSettings } = require('../../../common/vueapp/tests/consts');
 
 console.info = jest.fn(); // ignore tooltip warnings
 
@@ -25,15 +26,44 @@ Vue.use(VueAxios, axios);
 Vue.use(BootstrapVue);
 
 Vue.prototype.$constants = {
-  MOLOCH_HUNTWARN: 10000,
-  MOLOCH_HUNTLIMIT: 1000000,
-  MOLOCH_ANONYMOUS_MODE: false
+  HUNTWARN: 10000,
+  HUNTLIMIT: 1000000,
+  ANONYMOUS_MODE: false
 };
 
 jest.mock('../src/components/hunt/HuntService');
 jest.mock('../src/components/users/UserService');
 jest.mock('../src/components/sessions/SessionsService');
 jest.mock('../src/components/settings/SettingsService');
+
+HuntService.userHasHuntRole = jest.fn((user, hunt) => {
+  if (hunt.roles.length) {
+    for (const role of hunt.roles) {
+      if (user.roles.indexOf(role) > -1) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+});
+HuntService.canEditHunt = jest.fn((user, hunt) => {
+  const userRoles = user.roles || [];
+  return user.userId === hunt.userId || userRoles.includes('arkimeAdmin');
+});
+HuntService.canViewHunt = jest.fn((user, hunt) => {
+  const huntUsers = hunt.users || [];
+  const userRoles = user.roles || [];
+
+  return user.userId === hunt.userId ||
+    userRoles.includes('arkimeAdmin') ||
+    huntUsers.includes(user.userId) ||
+    HuntService.userHasHuntRole(user, hunt);
+});
+HuntService.isShared = jest.fn((user, hunt) => {
+  const huntUsers = hunt.users || [];
+  return HuntService.userHasHuntRole(user, hunt) || huntUsers.includes(user.userId);
+});
 
 const store = {
   state: {
@@ -47,7 +77,8 @@ const store = {
         inactive: []
       },
       selectedCluster: []
-    }
+    },
+    roles
   },
   mutations: {
     setAvailableCluster () {},
@@ -57,19 +88,15 @@ const store = {
     setTime: jest.fn(),
     setTimeRange: jest.fn(),
     setExpression: jest.fn(),
-    setIssueSearch: jest.fn()
+    setIssueSearch: jest.fn(),
+    toggleHideViz: jest.fn(),
+    toggleStickyViz: jest.fn()
   }
 };
 
-const $route = { query: {} };
+const $route = { query: {}, path: 'http://localhost:8123/arkime/hunt' };
 
 beforeEach(() => {
-  ConfigService.getMolochClusters = jest.fn().mockResolvedValue({
-    data: {
-      name: 'Test2',
-      url: 'http://localhost:8124'
-    }
-  });
   ConfigService.getClusters = jest.fn().mockResolvedValue({
     data: { active: [], inactive: [] }
   });
@@ -369,4 +396,128 @@ test('hunt page create hunt and form validation', async () => {
     expect(store.mutations.setIssueSearch).toHaveBeenCalledWith(store.state, true);
     expect(store.mutations.setExpression).toHaveBeenCalledWith(store.state, hunts[1].query.expression);
   });
+});
+
+test('hunt update', async () => {
+  HuntService.get = jest.fn().mockResolvedValue({
+    data: {
+      data: hunts,
+      recordsTotal: 0,
+      recordsFiltered: 0
+    }
+  });
+  HuntService.updateHunt = jest.fn().mockResolvedValue({
+    data: { succes: true, text: 'yay' }
+  });
+
+  const {
+    getAllByText, getByTitle, getAllByTitle, getAllByRole,
+    getByPlaceholderText, queryByPlaceholderText
+  } = render(Hunt, {
+    store,
+    mocks: { $route }
+  });
+
+  const toggleBtn = getAllByRole('button')[0];
+  await fireEvent.click(toggleBtn); // toggle the hunt detail row open
+
+  // can update hunt description ------------------------------------------- //
+  const editDescBtn = getAllByTitle('Edit description')[0];
+  await fireEvent.click(editDescBtn);
+  const descInput = getByPlaceholderText('Update the description');
+  fireEvent.update(descInput, 'amazing description');
+  const cancelBtn = getByTitle('Cancel hunt description update');
+  await fireEvent.click(cancelBtn); // cancel button hides input
+  expect(queryByPlaceholderText('Update the description')).not.toBeInTheDocument();
+  await fireEvent.click(editDescBtn);
+  fireEvent.update(descInput, 'amazing description');
+  const saveBtn = getByTitle('Save hunt description');
+  fireEvent.click(saveBtn);
+
+  expect(HuntService.updateHunt).toHaveBeenCalledWith(hunts[0].id, {
+    description: 'amazing description',
+    roles: ['arkimeUser']
+  });
+
+  // can add roles to hunts ------------------------------------------------ //
+  const roleDropdown = getAllByText('arkimeUser')[0];
+  await fireEvent.click(roleDropdown); // click to open the dropdown
+  const roleCheckbox = getAllByRole('checkbox')[3];
+  await fireEvent.click(roleCheckbox);
+
+  expect(HuntService.updateHunt).toHaveBeenCalledWith(hunts[0].id, {
+    description: 'amazing description',
+    roles: ['arkimeUser', 'cont3xtUser']
+  });
+});
+
+test('role can not see hunt details', async () => {
+  HuntService.get = jest.fn().mockResolvedValue({
+    data: {
+      data: hunts,
+      recordsTotal: 0,
+      recordsFiltered: 0
+    }
+  });
+
+  store.state.user.roles = ['uselessRole'];
+
+  const {
+    queryByTitle, getAllByText, queryByText
+  } = render(Hunt, {
+    store,
+    mocks: { $route }
+  });
+
+  // need to wait for table to render
+  await waitFor(() => { getAllByText(hunts[0].name); });
+
+  // no toggle detail buttons
+  expect(queryByTitle('toggle')).not.toBeInTheDocument();
+
+  // no open hunt matches button
+  expect(queryByTitle('Open results in a new Sessions tab.')).not.toBeInTheDocument();
+
+  for (const hunt of hunts) { // secret fields hidden
+    expect(queryByText(hunt.id)).not.toBeInTheDocument();
+  }
+});
+
+test('role can see but not edit hunt', async () => {
+  HuntService.get = jest.fn().mockResolvedValue({
+    data: {
+      data: hunts,
+      recordsTotal: 0,
+      recordsFiltered: 0
+    }
+  });
+
+  store.state.user.roles = ['arkimeUser'];
+
+  const {
+    queryByTitle, getAllByText, queryByText, getAllByRole
+  } = render(Hunt, {
+    store,
+    mocks: { $route }
+  });
+
+  // need to wait for table to render
+  await waitFor(() => { getAllByText(hunts[0].name); });
+
+  // no remove button
+  expect(queryByTitle('Remove this hunt')).not.toBeInTheDocument();
+
+  // can view details
+  for (const hunt of hunts) {
+    getAllByText(hunt.id);
+  }
+
+  // can toggle open details
+  const toggleBtn = getAllByRole('button')[0];
+  await fireEvent.click(toggleBtn); // toggle the hunt detail row open
+
+  // but can't edit anything
+  expect(queryByText('arkimeUser')).not.toBeInTheDocument();
+  expect(queryByTitle('Edit description')).not.toBeInTheDocument();
+  expect(queryByTitle('Share this hunt with user(s)')).not.toBeInTheDocument();
 });

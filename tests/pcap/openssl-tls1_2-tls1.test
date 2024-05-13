@@ -5,6 +5,37 @@
             "@timestamp" : "SET",
             "cert" : [
                {
+                  "hash" : "c5:3e:73:07:3f:93:ce:78:95:de:74:84:12:6b:c3:03:da:b9:e6:57",
+                  "issuerCN" : [
+                     "entrust.net certification authority (2048)"
+                  ],
+                  "issuerON" : [
+                     "Entrust.net"
+                  ],
+                  "issuerOU" : [
+                     "www.entrust.net/CPS_2048 incorp. by ref. (limits liab.)",
+                     "(c) 1999 Entrust.net Limited"
+                  ],
+                  "notAfter" : 1636685477000,
+                  "notBefore" : 1321026040000,
+                  "publicAlgorithm" : "rsaEncryption",
+                  "remainingDays" : 2585,
+                  "remainingSeconds" : 223347403,
+                  "serial" : "4c0e8c39",
+                  "subjectCN" : [
+                     "entrust certification authority - l1c"
+                  ],
+                  "subjectON" : [
+                     "Entrust, Inc."
+                  ],
+                  "subjectOU" : [
+                     "www.entrust.net/rpa is incorporated by reference",
+                     "(c) 2009 Entrust, Inc."
+                  ],
+                  "validDays" : 3653,
+                  "validSeconds" : 315659437
+               },
+               {
                   "alt" : [
                      "toshiba.aol.ca",
                      "main-w.welcomescreen.aol.com",
@@ -77,10 +108,15 @@
                   "issuerON" : [
                      "Entrust, Inc."
                   ],
+                  "issuerOU" : [
+                     "www.entrust.net/rpa is incorporated by reference",
+                     "(c) 2009 Entrust, Inc."
+                  ],
                   "notAfter" : 1497242632000,
                   "notBefore" : 1402510723000,
                   "publicAlgorithm" : "rsaEncryption",
-                  "remainingDays" : -1,
+                  "remainingDays" : 971,
+                  "remainingSeconds" : 83904558,
                   "serial" : "4c235548",
                   "subjectCN" : [
                      "www.aol.com"
@@ -88,28 +124,11 @@
                   "subjectON" : [
                      "AOL Inc."
                   ],
-                  "validDays" : 1096
-               },
-               {
-                  "hash" : "c5:3e:73:07:3f:93:ce:78:95:de:74:84:12:6b:c3:03:da:b9:e6:57",
-                  "issuerCN" : [
-                     "entrust.net certification authority (2048)"
+                  "subjectOU" : [
+                     "Homepages"
                   ],
-                  "issuerON" : [
-                     "Entrust.net"
-                  ],
-                  "notAfter" : 1636685477000,
-                  "notBefore" : 1321026040000,
-                  "publicAlgorithm" : "rsaEncryption",
-                  "remainingDays" : -1,
-                  "serial" : "4c0e8c39",
-                  "subjectCN" : [
-                     "entrust certification authority - l1c"
-                  ],
-                  "subjectON" : [
-                     "Entrust, Inc."
-                  ],
-                  "validDays" : 3653
+                  "validDays" : 1096,
+                  "validSeconds" : 94731909
                }
             ],
             "certCnt" : 2,
@@ -225,9 +244,10 @@
             "srcOuiCnt" : 1,
             "srcPayload8" : "1603010102010000",
             "tags" : [
+               "cert:certificate-authority",
                "srcip"
             ],
-            "tagsCnt" : 1,
+            "tagsCnt" : 2,
             "tcpflags" : {
                "ack" : 8,
                "dstZero" : 0,
@@ -283,6 +303,14 @@
                   "771,49200-49196-49192-49188-49172-49162-163-159-107-106-57-56-136-135-49202-49198-49194-49190-49167-49157-157-61-53-132-49170-49160-22-19-49165-49155-10-49199-49195-49191-49187-49171-49161-162-158-103-64-51-50-154-153-69-68-49201-49197-49193-49189-49166-49156-156-60-47-150-65-7-49169-49159-49164-49154-5-4-21-18-9-20-17-8-6-3-255,11-10-35-13-15,24-23,0-1-2"
                ],
                "ja3stringCnt" : 1,
+               "ja4" : [
+                  "t12i740500_c43983326036_3eafcbe19126"
+               ],
+               "ja4Cnt" : 1,
+               "ja4_r" : [
+                  "t12i740500_0003,0004,0005,0006,0007,0008,0009,000a,0011,0012,0013,0014,0015,0016,002f,0032,0033,0035,0038,0039,003c,003d,0040,0041,0044,0045,0067,006a,006b,0084,0087,0088,0096,0099,009a,009c,009d,009e,009f,00a2,00a3,00ff,c002,c003,c004,c005,c007,c008,c009,c00a,c00c,c00d,c00e,c00f,c011,c012,c013,c014,c023,c024,c025,c026,c027,c028,c029,c02a,c02b,c02c,c02d,c02e,c02f,c030,c031,c032_000a,000b,000d,000f,0023_0601,0602,0603,0501,0502,0503,0401,0402,0403,0301,0302,0303,0201,0202,0203,0101"
+               ],
+               "ja4_rCnt" : 1,
                "version" : [
                   "TLSv1"
                ],

@@ -132,6 +132,10 @@
             "fileId" : [],
             "firstPacket" : 1483544164032,
             "http" : {
+               "bodyMagic" : [
+                  "video/mp2t"
+               ],
+               "bodyMagicCnt" : 1,
                "clientVersion" : [
                   "1.1"
                ],
@@ -143,6 +147,7 @@
                "method" : [
                   "GET"
                ],
+               "method-GET" : 1,
                "methodCnt" : 1,
                "path" : [
                   "/xxxxxx/xxxxxxxxx/xxxxxxxxxx/xxx/xx/xxxxxxx/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.ts"

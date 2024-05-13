@@ -3,21 +3,11 @@
  *
  * Copyright 2012-2016 AOL Inc. All rights reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this Software except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
  */
 'use strict';
 
-const request = require('request');
+const axios = require('axios');
 const WISESource = require('./wiseSource.js');
 
 let source;
@@ -27,7 +17,7 @@ class VirusTotalSource extends WISESource {
   constructor (api, section) {
     super(api, section, { fullQuery: true });
     this.waiting = [];
-    this.processing = {};
+    this.processing = new Map();
 
     this.key = this.api.getConfig('virustotal', 'key');
     if (this.key === undefined) {
@@ -84,70 +74,71 @@ class VirusTotalSource extends WISESource {
 
     const options = {
       url: 'https://www.virustotal.com/vtapi/v2/file/report?',
-      qs: { apikey: this.key, resource: this.waiting.join(',') },
-      method: 'GET',
-      json: true
+      params: { apikey: this.key, resource: this.waiting.join(',') },
+      method: 'GET'
     };
     const sent = this.waiting;
 
     this.waiting = [];
 
-    request(options, (err, im, results) => {
-      if (err || im.statusCode !== 200 || results === undefined) {
-        console.log(this.section, 'Error for request:\n', options, '\n', im, '\nresults:\n', results);
-        sent.forEach((md5) => {
-          const cb = this.processing[md5];
+    axios(options)
+      .then((response) => {
+        let results = response.data;
+        if (response.status !== 200) {
+          console.log(this.section, 'Error for request:\n', options, '\n', '\nresults:\n', results);
+          sent.forEach((md5) => {
+            const cb = this.processing.get(md5);
+            if (!cb) {
+              return;
+            }
+            this.processing.delete(md5);
+            cb(undefined, undefined);
+          });
+          return;
+        }
+
+        if (!Array.isArray(results)) {
+          results = [results];
+        }
+
+        results.forEach((result) => {
+          const cb = this.processing.get(result.md5);
           if (!cb) {
             return;
           }
-          delete this.processing[md5];
-          cb(undefined, undefined);
-        });
-        return;
-      }
+          this.processing.delete(result.md5);
 
-      if (!Array.isArray(results)) {
-        results = [results];
-      }
+          let wiseResult;
+          if (result.response_code === 0) {
+            wiseResult = WISESource.emptyResult;
+          } else {
+            const args = [this.hitsField, '' + result.positives, this.linksField, result.permalink];
 
-      results.forEach((result) => {
-        const cb = this.processing[result.md5];
-        if (!cb) {
-          return;
-        }
-        delete this.processing[result.md5];
+            for (let i = 0; i < this.dataSources.length; i++) {
+              const uc = this.dataSources[i];
 
-        let wiseResult;
-        if (result.response_code === 0) {
-          wiseResult = WISESource.emptyResult;
-        } else {
-          const args = [this.hitsField, '' + result.positives, this.linksField, result.permalink];
-
-          for (let i = 0; i < this.dataSources.length; i++) {
-            const uc = this.dataSources[i];
-
-            if (result.scans[uc] && result.scans[uc].detected) {
-              args.push(this.dataFields[i], result.scans[uc].result);
+              if (result.scans[uc] && result.scans[uc].detected) {
+                args.push(this.dataFields[i], result.scans[uc].result);
+              }
             }
+
+            wiseResult = WISESource.encodeResult.apply(null, args);
           }
 
-          wiseResult = WISESource.encodeResult.apply(null, args);
-        }
-
-        cb(null, wiseResult);
+          cb(null, wiseResult);
+        });
+      }).catch((err) => {
+        console.log(this.section, err);
       });
-    }).on('error', (err) => {
-      console.log(this.section, err);
-    });
   };
 
   // ----------------------------------------------------------------------------
   getMd5 (query, cb) {
-    if (query.contentType === undefined || this.contentTypes[query.contentType] !== 1) {
+    if (query.contentType !== undefined && this.contentTypes[query.contentType] !== 1) {
       return cb(null, undefined);
     }
 
-    this.processing[query.value] = cb;
+    this.processing.set(query.value, cb);
     if (this.waiting.length < this.maxOutstanding) {
       this.waiting.push(query.value);
     } else {

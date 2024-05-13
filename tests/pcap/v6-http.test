@@ -31,6 +31,7 @@
             "length" : 302005,
             "network" : {
                "bytes" : 2838,
+               "community_id" : "1:0fx8iuIOVuN5EqSAPlk7AsecuJg=",
                "packets" : 33
             },
             "node" : "test",
@@ -165,6 +166,7 @@
             "length" : 5859,
             "network" : {
                "bytes" : 180,
+               "community_id" : "1:N1pYzX56SZ4pCJrRuglkQ+2ylvE=",
                "packets" : 2
             },
             "node" : "test",
@@ -237,6 +239,7 @@
             "length" : 0,
             "network" : {
                "bytes" : 78,
+               "community_id" : "1:eilndz0cTfzOL/w14PcBW0lsMzo=",
                "packets" : 1
             },
             "node" : "test",
@@ -291,25 +294,6 @@
                "mac-cnt" : 1,
                "packets" : 0,
                "port" : 5353
-            },
-            "dns" : {
-               "host" : [
-                  "1.e.6.0.8.9.e.c.7.d.9.3.9.9.9.0.0.0.0.0.d.2.0.1.8.f.6.0.1.0.0.2.ip6.arpa",
-                  "linux.local"
-               ],
-               "hostCnt" : 2,
-               "opcode" : [
-                  "QUERY"
-               ],
-               "opcodeCnt" : 1,
-               "qc" : [
-                  "IN"
-               ],
-               "qcCnt" : 1,
-               "qt" : [
-                  "ANY"
-               ],
-               "qtCnt" : 1
             },
             "fileId" : [],
             "firstPacket" : 1186341099605,
@@ -377,6 +361,10 @@
             ],
             "srcOuiCnt" : 1,
             "srcPayload8" : "0000000000020000",
+            "tags" : [
+               "dns:qdcount-not-1"
+            ],
+            "tagsCnt" : 1,
             "totDataBytes" : 1286
          },
          "header" : {
@@ -416,6 +404,7 @@
             "length" : 0,
             "network" : {
                "bytes" : 110,
+               "community_id" : "1:0MCR19cydrs2qJRBo+L/DglvPSE=",
                "packets" : 1
             },
             "node" : "test",
@@ -508,6 +497,7 @@
                "method" : [
                   "GET"
                ],
+               "method-GET" : 1,
                "methodCnt" : 1,
                "path" : [
                   "/"

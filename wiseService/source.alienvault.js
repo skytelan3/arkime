@@ -2,17 +2,7 @@
 /*
  * Copyright 2012-2016 AOL Inc. All rights reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this Software except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
  */
 'use strict';
 
@@ -93,7 +83,7 @@ class AlienVaultSource extends WISESource {
     }
 
     // Get the new revision
-    WISESource.request('https://reputation.alienvault.com/' + this.key + '/reputation.rev', '/tmp/alienvault.rev', (statusCode) => {
+    WISESource.request('https://reputation.alienvault.com/reputation.rev', '/tmp/alienvault.rev', (statusCode) => {
       // If statusCode isn't success or not changed then try again if not already
       if (statusCode !== 200 && statusCode !== 304) {
         if (!this.retry) {
@@ -112,7 +102,7 @@ class AlienVaultSource extends WISESource {
         }
 
         // Fetch new data file
-        WISESource.request('https://reputation.alienvault.com/' + this.key + '/reputation.data', '/tmp/alienvault.data', (subStatusCode) => {
+        WISESource.request('https://reputation.alienvault.com/reputation.data', '/tmp/alienvault.data', (subStatusCode) => {
           if (subStatusCode === 200) {
             this.loaded = true;
             this.parseFile();

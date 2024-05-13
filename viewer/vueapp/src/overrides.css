@@ -11,6 +11,13 @@ textarea.form-control:focus {
   background-color: var(--color-inputs, #FFF);
 }
 
+input.form-control:disabled,
+select.form-control:disabled,
+textarea.form-control:disabled {
+  color: var(--color-gray-darker, #333);
+  background-color: var(--color-gray-lighter, #DDD);
+}
+
 
 /* dark default buttons ---------------------------------------------------- */
 .btn.btn-default {
@@ -202,6 +209,10 @@ input.field-typeahead + ul[uib-typeahead-popup] {
   background-color: var(--color-primary-light);
 }
 
+.dropdown-sticky-search-bar-container {
+  padding-inline: 8px !important;
+}
+
 /* give cards theme color -------------------------------------------------- */
 .card {
   border-color: var(--color-gray-light);
@@ -275,4 +286,10 @@ pre {
 .bootstrap-datetimepicker-widget table th.picker-switch:hover ,
 .bootstrap-datetimepicker-widget table td > a:hover {
   color: black !important;
+}
+
+
+/* apply theme colors to modals -------------------------------------------- */
+.modal-content {
+  background-color: var(--color-background);
 }

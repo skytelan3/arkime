@@ -10,8 +10,10 @@ import HistoryComponent from '../src/components/history/History.vue';
 import HistoryService from '../src/components/history/HistoryService';
 import UserService from '../src/components/users/UserService';
 import HasPermission from '../src/components/utils/HasPermission.vue';
+import HasRole from '../../../common/vueapp/HasRole.vue';
 import '../src/filters.js';
-const { histories, userWithSettings } = require('./consts');
+import '../../../common/vueapp/vueFilters';
+const { histories, userWithSettings } = require('../../../common/vueapp/tests/consts');
 
 console.info = jest.fn(); // ignore tooltip warnings
 
@@ -19,6 +21,11 @@ global.$ = global.jQuery = $;
 
 Vue.use(BootstrapVue);
 Vue.directive('has-permission', HasPermission);
+Vue.directive('has-role', HasRole);
+
+Vue.prototype.$constants = {
+  MULTIVIEWER: false
+};
 
 jest.mock('../src/components/history/HistoryService');
 jest.mock('../src/components/users/UserService');
@@ -33,6 +40,13 @@ const store = {
     time: {
       startTime: 0,
       stopTime: 0
+    },
+    esCluster: {
+      availableCluster: {
+        active: [],
+        inactive: []
+      },
+      selectedCluster: []
     }
   },
   mutations: {

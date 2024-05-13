@@ -1,4 +1,7 @@
-import uuid from 'uuidv4';
+import Vue from 'vue';
+import { v4 as uuidv4 } from 'uuid';
+
+import store from '../../store';
 
 export default {
 
@@ -7,7 +10,7 @@ export default {
    * @returns {string} The unique random string
    */
   createRandomString: function () {
-    return uuid();
+    return uuidv4();
   },
 
   /** @returns the default sessions table state if none is defined by the user */
@@ -42,21 +45,31 @@ export default {
   /**
    * Check that at least one ES cluster is selected from ES Cluster Dropdown Menu
    * Also, check that a valid/active cluster is selected
-   * @param {string} A string the contains a list of ES cluster in the format ES1,ES2,ES3, ...
-   * @param {array} An array of available ES cluster
+   * If the vue component object is passed in, it sets the error message on the vue comonent "error" property
+   * @param {string} queryCluster A string the contains a list of ES cluster in the format ES1,ES2,ES3, ...
+   * @param {array} availableClusterList An array of available ES cluster
+   * @param {object} self The vue component object
    * @returns {object} An object of result
    */
-  checkClusterSelection: function (queryCluster, availableClusterList) {
+  checkClusterSelection: function (queryCluster, availableClusterList, self, errorName) {
     const result = {
       valid: true,
       error: ''
     };
+
+    // only validate in multiviewer mode
+    if (!Vue.prototype.$constants.MULTIVIEWER) {
+      return result;
+    }
+
+    if (!errorName) { errorName = 'error'; }
 
     if (queryCluster === undefined) {
       return result;
     } else if (queryCluster === 'none') {
       result.valid = false;
       result.error = 'No ES cluster is selected. Select at least one ES cluster.';
+      if (self) { self[errorName] = result.error; }
       return result;
     } else if (availableClusterList.length === 0) {
       // either no active cluster or it is taking time to fetch the available cluster
@@ -73,7 +86,48 @@ export default {
       // invalid selection
       result.valid = false;
       result.error = 'Invalid ES cluster is selected';
+      if (self) { self[errorName] = result.error; }
       return result;
     }
+  },
+
+  /**
+   * Sets the facets query based on the query time range and whether the user wants to force aggregations
+   * NOTE: mutates the query object and sets the store values
+   * @param {object} query The query parameters for the search to be passed to the server
+   * @param {string} page The page the query is for
+   */
+  setFacetsQuery (query, page) {
+    if (!page || (page !== 'sessions' && page !== 'spiview')) {
+      store.commit('setDisabledAggregations', false);
+      query.facets = 1;
+      return;
+    }
+
+    if (
+      (localStorage['force-aggregations'] && localStorage['force-aggregations'] !== 'false') ||
+      (sessionStorage['force-aggregations'] && sessionStorage['force-aggregations'] !== 'false')
+    ) {
+      store.commit('setDisabledAggregations', false);
+      store.commit('setForcedAggregations', true);
+      query.facets = 1;
+      return;
+    }
+
+    if (query.date === '-1') {
+      store.commit('setDisabledAggregations', true);
+      query.facets = 0;
+      return;
+    } else if (query.stopTime && query.startTime) {
+      store.commit('setDisabledAggregations', true);
+      const deltaTime = (query.stopTime - query.startTime) / 86400; // secs to days
+      /* eslint-disable no-undef */
+      if (deltaTime >= (TURN_OFF_GRAPH_DAYS || 30)) {
+        query.facets = 0;
+        return;
+      }
+    }
+
+    store.commit('setDisabledAggregations', false);
   }
 };

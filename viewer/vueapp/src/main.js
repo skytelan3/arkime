@@ -16,14 +16,16 @@ import 'pc-bootstrap4-datetimepicker/build/css/bootstrap-datetimepicker.css';
 
 // internal deps
 import App from './App';
-import MolochSessionField from './components/sessions/SessionField';
+import ArkimeSessionField from './components/sessions/SessionField';
 import HasPermission from './components/utils/HasPermission';
+import HasRole from '@/../../../common/vueapp/HasRole';
 import interceptorSetup from './interceptors';
 import router from './router';
 import store from './store';
 import './filters.js';
+import '@/../../../common/vueapp/vueFilters.js';
 
-import '../../../common.css';
+import '../../../common/common.css';
 // bootstrap overrides
 import './overrides.css';
 // themed css deps
@@ -44,8 +46,9 @@ Vue.use(BootstrapVue);
 Vue.use(VueAxios, axios);
 Vue.use(VueMoment, { moment });
 
+Vue.directive('has-role', HasRole);
 Vue.directive('has-permission', HasPermission);
-Vue.component('moloch-session-field', MolochSessionField);
+Vue.component('arkime-session-field', ArkimeSessionField);
 
 interceptorSetup();
 
@@ -60,22 +63,26 @@ new Vue({
     // define app constants
     /* eslint-disable no-undef */
     Vue.prototype.$constants = {
-      MOLOCH_TITLE_CONFIG: MOLOCH_TITLE_CONFIG,
-      MOLOCH_DEMO_MODE: MOLOCH_DEMO_MODE,
-      MOLOCH_DEV_MODE: MOLOCH_DEV_MODE,
-      MOLOCH_VERSION: MOLOCH_VERSION,
-      MOLOCH_PATH: MOLOCH_PATH,
-      MOLOCH_MULTIVIEWER: MOLOCH_MULTIVIEWER,
-      MOLOCH_HASUSERSES: MOLOCH_HASUSERSES,
-      MOLOCH_HUNTWARN: MOLOCH_HUNTWARN,
-      MOLOCH_HUNTLIMIT: MOLOCH_HUNTLIMIT,
-      MOLOCH_ANONYMOUS_MODE: MOLOCH_ANONYMOUS_MODE,
-      MOLOCH_BUSINESS_DAY_START: MOLOCH_BUSINESS_DAY_START,
-      MOLOCH_BUSINESS_DAY_END: MOLOCH_BUSINESS_DAY_END,
-      MOLOCH_BUSINESS_DAYS: MOLOCH_BUSINESS_DAYS,
-      MOLOCH_TMP_ROLES_SUPPORT: MOLOCH_TMP_ROLES_SUPPORT,
-      BUILD_VERSION: BUILD_VERSION, // from webpack.DefinePlugin
-      BUILD_DATE: BUILD_DATE // from webpack.DefinePlugin
+      TITLE_CONFIG,
+      FOOTER_CONFIG,
+      DEMO_MODE,
+      VERSION,
+      PATH,
+      MULTIVIEWER,
+      HASUSERSES,
+      HUNTWARN,
+      HUNTLIMIT,
+      ANONYMOUS_MODE,
+      BUSINESS_DAY_START,
+      BUSINESS_DAY_END,
+      BUSINESS_DAYS,
+      TURN_OFF_GRAPH_DAYS,
+      DISABLE_USER_PASSWORD_UI,
+      BUILD_VERSION, // from webpack.DefinePlugin
+      BUILD_DATE, // from webpack.DefinePlugin
+      LOGOUT_URL,
+      DEFAULT_TIME_RANGE,
+      SPIVIEW_CATEGORY_ORDER
     };
   }
 });

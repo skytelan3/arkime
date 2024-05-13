@@ -1,3 +1,7 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
 
   <div class="form-inline time-form">
@@ -21,9 +25,9 @@
           tabindex="3"
           role="listbox"
           v-model="timeRange"
+          v-focus="focusTimeRange"
           @change="changeTimeRange"
           @blur="onOffTimeRangeFocus"
-          v-focus-input="focusTimeRange"
           class="form-control time-range-control">
           <option value="1">Last hour</option>
           <option value="6"
@@ -245,8 +249,9 @@
 </template>
 
 <script>
-import FocusInput from '../utils/FocusInput';
+import Focus from '../../../../../common/vueapp/Focus';
 
+import qs from 'qs';
 import datePicker from 'vue-bootstrap-datetimepicker';
 import moment from 'moment-timezone';
 
@@ -257,9 +262,9 @@ let startDateCheck;
 let stopDateCheck;
 
 export default {
-  name: 'MolochTime',
+  name: 'ArkimeTime',
   components: { datePicker },
-  directives: { FocusInput },
+  directives: { Focus },
   props: [
     'timezone',
     'hideBounding',
@@ -361,15 +366,23 @@ export default {
       }
     }
   },
-  created: function () {
+  created () {
     this.setCurrentTime();
 
     let date = this.$route.query.date;
-    // if no time params exist, default to last hour
+    // if no time params exist, default to config default or last hour
     if (!this.$route.query.startTime &&
       !this.$route.query.stopTime &&
       !this.$route.query.date) {
-      date = 1;
+      date = this.$constants.DEFAULT_TIME_RANGE ?? 1;
+
+      // SILENTLY update the url to reflect the default time range
+      let path = this.$constants.PATH ?? '/';
+      if (this.$route.path) {
+        path += this.$route.path.slice(1);
+      }
+      const params = qs.stringify({ ...this.$route.query, date });
+      window.history.replaceState(null, '', `${path}?${params}`);
     }
 
     this.setupTimeParams(
@@ -678,7 +691,7 @@ export default {
         let stop = stopTime;
         let start = startTime;
 
-        if (stop !== undefined && start !== undefined && !isNaN(stop) && !isNaN(start)) {
+        if (!isNaN(stop) && !isNaN(start)) {
           stop = parseInt(stop, 10);
           start = parseInt(start, 10);
 
@@ -707,11 +720,11 @@ export default {
           this.localStartTime = moment(start * 1000);
           this.time.startTime = start;
         } else { // if we can't parse stop or start time, set default
-          this.timeRange = '1'; // default to 1 hour
+          this.timeRange = this.$constants.DEFAULT_TIME_RANGE ?? '1'; // default to config or 1 hour
         }
-      } else if (!date) {
+      } else {
         // there are no time query parameters, so set defaults
-        this.timeRange = '1'; // default to 1 hour
+        this.timeRange = this.$constants.DEFAULT_TIME_RANGE ?? '1'; // default to config or 1 hour
       }
     },
     /* watch for the url parameters to change and update the page */

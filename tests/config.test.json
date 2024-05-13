@@ -1,7 +1,7 @@
 {
  "wiseService": {
   "usersPrefix": "tests",
-  "userNameHeader": "anonymous",
+  "authMode": "digest",
   "usersElasticsearch": "http://localhost:9200"
  },
  "file:email": {
@@ -33,6 +33,14 @@
   "tags": "ipwisejson",
   "type": "ip",
   "format": "json",
+  "keyPath": "ip",
+  "fields": "field:tags;shortcut:tag"
+ },
+ "file:ipjsonl": {
+  "file": "../tests/ip.wise.jsonl",
+  "tags": "ipwisejsonl",
+  "type": "ip",
+  "format": "jsonl",
   "keyPath": "ip",
   "fields": "field:tags;shortcut:tag"
  },
@@ -88,6 +96,7 @@
   "format": "json",
   "url": "https://www.microsoft.com/en-us/download/confirmation.aspx?id=56519",
   "urlScrapeRedirect": "https[^\"]*71D86715-5596-4529-9B13-DA13A5DE5B63[^\"]*json",
+  "headers": "user-agent:curl",
   "arrayPath": "values",
   "keyPath": "properties.addressPrefixes",
   "fields": "field:cloud.service;db:cloud.service;kind:lotermfield;friendly:Service;shortcut:name\\nfield:cloud.region;db:cloud.region;kind:lotermfield;friendly:Region;shortcut:properties.region",
@@ -115,5 +124,8 @@
  },
  "valueactions:test": {
   "file": "../tests/valueactions.ini"
+ },
+ "fieldactions:test": {
+  "file": "../tests/fieldactions.ini"
  }
 }

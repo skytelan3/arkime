@@ -1,3 +1,7 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="spigraph-pie">
 
@@ -14,11 +18,11 @@
               Add another field:
             </span>
           </span>
-          <moloch-field-typeahead
+          <arkime-field-typeahead
             :fields="fields"
             @fieldSelected="changeField"
             page="SpigraphSubfield">
-          </moloch-field-typeahead>
+          </arkime-field-typeahead>
         </div>
       </div>
       <drag-list
@@ -128,14 +132,14 @@
                     <span class="color-swatch"
                       style="background-color:transparent;">
                     </span>
-                    <moloch-session-field
+                    <arkime-session-field
                       :field="fieldList[index]"
                       :value="parent.name"
                       :expr="fieldList[index].exp"
                       :parse="true"
                       :session-btn="true"
                       :pull-left="true">
-                    </moloch-session-field>
+                    </arkime-session-field>
                   </td>
                   <td :key="`${index}-${parent.name}-1`"
                     v-if="fieldList[index] && !fieldList[index].hide">
@@ -148,24 +152,24 @@
                   :style="{ backgroundColor: item.color }">
                 </span>
                 <template v-if="item.parents && item.parents.length && fieldList[item.parents.length]">
-                  <moloch-session-field
+                  <arkime-session-field
                     :field="fieldList[item.parents.length]"
                     :value="item.name"
                     :expr="fieldList[item.parents.length].exp"
                     :parse="true"
                     :session-btn="true"
                     :pull-left="true">
-                  </moloch-session-field>
+                  </arkime-session-field>
                 </template>
                 <template v-else>
-                  <moloch-session-field
+                  <arkime-session-field
                     :field="fieldList[0]"
                     :value="item.name"
                     :expr="fieldList[0].exp"
                     :parse="true"
                     :session-btn="true"
                     :pull-left="true">
-                  </moloch-session-field>
+                  </arkime-session-field>
                 </template>
               </td>
               <td>
@@ -179,11 +183,11 @@
     <!-- /table area -->
 
     <!-- no results -->
-    <moloch-no-results
+    <arkime-no-results
       v-if="!tableData.length"
       class="mt-5 mb-5"
       :view="query.view">
-    </moloch-no-results> <!-- /no results -->
+    </arkime-no-results> <!-- /no results -->
 
   </div>
 </template>
@@ -194,8 +198,8 @@ import Vue from 'vue';
 // import services
 import SpigraphService from './SpigraphService';
 // import internal
-import MolochNoResults from '../utils/NoResults';
-import MolochFieldTypeahead from '../utils/FieldTypeahead';
+import ArkimeNoResults from '../utils/NoResults';
+import ArkimeFieldTypeahead from '../utils/FieldTypeahead';
 import Popup from './Popup';
 import DragList from '../utils/DragList';
 // import utils
@@ -357,10 +361,10 @@ function fillColor (d) {
 
 // Vue component ----------------------------------------------------------- //
 export default {
-  name: 'MolochPie',
+  name: 'ArkimePie',
   components: {
-    MolochNoResults,
-    MolochFieldTypeahead,
+    ArkimeNoResults,
+    ArkimeFieldTypeahead,
     Popup,
     DragList
   },
@@ -456,7 +460,7 @@ export default {
     addExpression: function (slice, op) {
       const fullExpression = `${slice.field} == ${slice.name}`;
       this.$store.commit('addToExpression', {
-        expression: fullExpression, op: op
+        expression: fullExpression, op
       });
     },
     /**
@@ -681,8 +685,8 @@ export default {
         .attr('viewBox', `${-width / 2} ${-height / 2} ${width} ${height}`)
         .attr('width', width)
         .attr('height', height)
-        .call(d3.zoom().on('zoom', () => { // allow zooming of the pie graph
-          g.attr('transform', d3.event.transform);
+        .call(d3.zoom().on('zoom', (e) => { // allow zooming of the pie graph
+          g.attr('transform', e.transform);
         }))
         .append('g');
 
@@ -755,14 +759,14 @@ export default {
         .style('fill', fillColor); // apply the colors to the slices
 
       newSlice // hover functionality
-        .on('mouseover', function (d) {
+        .on('mouseover', function (e, d) {
           mouseover(d, this);
           if (popupTimer) { clearTimeout(popupTimer); }
           popupTimer = setTimeout(() => {
             vueSelf.showInfo(d);
           }, 400);
         })
-        .on('mouseleave', function (d) {
+        .on('mouseleave', function (e, d) {
           mouseleave(d, this);
           if (popupTimer) { clearTimeout(popupTimer); }
         });
@@ -852,14 +856,14 @@ export default {
         .attr('xlink:href', (d) => '#rect' + getUid(d));
 
       newBox // hover functionality
-        .on('mouseover', function (d) {
+        .on('mouseover', function (e, d) {
           mouseoverBox(d, this);
           if (popupTimer) { clearTimeout(popupTimer); }
           popupTimer = setTimeout(() => {
             vueSelf.showInfo(d);
           }, 400);
         })
-        .on('mouseleave', function (d) {
+        .on('mouseleave', function (e, d) {
           mouseleaveBox(d, this);
           if (popupTimer) { clearTimeout(popupTimer); }
         });
@@ -910,7 +914,7 @@ export default {
       this.$emit('toggleLoad', true);
       this.$emit('toggleError', '');
 
-      // create unique cancel id to make canel req for corresponding es task
+      // create unique cancel id to make cancel req for corresponding es task
       const cancelId = Utils.createRandomString();
       const source = Vue.axios.CancelToken.source();
 
@@ -950,7 +954,8 @@ export default {
           this.tableData = response.data.tableResults;
           this.sortTable();
           this.applyColorsToTableData(response.data.tableResults);
-          this.showHiddenColumns(); // initializes resizeable cols
+          this.showHiddenColumns(); // initializes resizable cols
+          this.$emit('fetchedResults', response.data.tableResults, this.fieldTypeaheadList, this.baseFieldObj);
         });
       }).catch((error) => {
         pendingPromise = null;

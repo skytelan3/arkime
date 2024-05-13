@@ -1,251 +1,246 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
-  <div :class="{'sticky-viz':stickyViz && primary, 'hide-viz':hideViz && primary}">
-
-    <!-- viz options button -->
-    <div class="viz-options-btn-container">
-      <b-dropdown
-        right
-        size="sm"
-        v-if="primary"
-        variant="primary"
-        class="viz-options-btn">
-        <template #button-content>
-          <span class="fa fa-bar-chart-o fa-fw" />
-          <span class="fa fa-gear fa-fw" />
-        </template>
-        <b-dropdown-item
-          @click="toggleStickyViz">
-          {{ !stickyViz ? 'Pin' : 'Unpin' }}{{ page && page === 'spigraph' ? ' top' : '' }} {{ page && page === 'sessions' ? 'graph, map, and column headers' : 'graph and map' }}
-        </b-dropdown-item>
-        <b-dropdown-item
-          v-if="showHideBtn"
-          @click="toggleHideViz"
-          v-b-tooltip.hover.left="!hideViz ? 'Speeds up large queries!' : 'Show graph & map'">
-          {{ !hideViz ? 'Hide' : 'Show' }} graph and map
-        </b-dropdown-item>
-      </b-dropdown>
-    </div>
-    <!-- viz options button -->
+  <div :class="{'sticky-viz':stickyViz && primary, 'hide-viz':hideViz && primary, 'disabled-msg':disabledAggregations}">
 
     <div class="pt-2 pl-2 pr-2 viz-container"
       :id="'vizContainer' + id"
       :class="{'map-visible':showMap,'map-invisible':!showMap}">
 
       <div v-show="!hideViz">
-        <!-- map content -->
-        <div :class="{'expanded':mapExpanded}">
-
-          <!-- map open button -->
-          <div class="map-btn"
-            v-show="!showMap && primary"
-            @click="toggleMap"
-            v-b-tooltip.hover.left
-            title="View map">
-            <span class="fa fa-fw fa-globe">
-            </span>
-          </div> <!-- /map open button -->
-
-          <div class="inline-map">
-            <div v-if="mapData">
-              <div class="map-container">
-
-                <!-- map -->
-                <div class="map"
-                  :id="'molochMap' + id">
-                </div> <!-- /map -->
-
-                <!-- map buttons -->
-                <button type="button"
-                  v-if="primary"
-                  class="btn btn-xs btn-default btn-close-map btn-fw"
-                  @click="toggleMap"
-                  v-b-tooltip.hover.left
-                  title="Close map">
-                  <span class="fa fa-close">
-                  </span>
-                </button>
-                <button type="button"
-                  class="btn btn-xs btn-default btn-fw btn-z-index-2"
-                  :class="{'btn-expand-map':primary,'btn-close-map':!primary}"
-                  @click="toggleMapSize"
-                  v-b-tooltip.hover.left
-                  title="Expand/Collapse Map">
-                  <span class="fa"
-                    :class="{'fa-expand':!mapExpanded,'fa-compress':mapExpanded}">
-                  </span>
-                </button>
-                <div v-if="primary"
-                  class="btn-group-vertical src-dst-btns btn-fw">
-                  <button type="button"
-                    class="btn btn-xs btn-default"
-                    :class="{'active':src}"
-                    @click="toggleSrcDstXff('src')"
-                    v-b-tooltip.hover.left
-                    title="Toggle source countries">
-                    <strong>S</strong>
-                  </button>
-                  <button type="button"
-                    class="btn btn-xs btn-default"
-                    :class="{'active':dst}"
-                    @click="toggleSrcDstXff('dst')"
-                    v-b-tooltip.hover.left
-                    title="Toggle destination countries">
-                    <strong>D</strong>
-                  </button>
-                </div>
-                <button v-if="primary"
-                  type="button"
-                  class="btn btn-xs btn-default btn-fw xff-btn"
-                  @click="toggleSrcDstXff('xffGeo')"
-                  :class="{'active':xffGeo}"
-                  title="Toggle XFF Countries">
-                  <small>XFF</small>
-                </button> <!-- /map buttons -->
-
-                <!-- map legend -->
-                <div class="map-legend"
-                  v-if="mapExpanded && legend.length">
-                  <strong>Top 10</strong>&nbsp;
-                  <span v-for="(item, key) in legend"
-                    :key="key"
-                    class="legend-item"
-                    :style="{'background-color':item.color}">
-                    {{ item.name }}
-                    ({{ item.value | commaString }})
-                  </span>
-                </div> <!-- map legend -->
-
-              </div>
+        <div class="row" v-if="disabledAggregations">
+          <div class="col text-center">
+            <div class="alert alert-sm alert-info container">
+              <strong>
+                This cluster is set to hide the graph if a time range of {{ turnOffGraphDays }} days or greater is requested
+              </strong>
+              <span class="fa fa-info-circle fa-lg ml-1 mr-1 cursor-help"
+                v-b-tooltip="'This helps with performance as computing the visualization data takes longer than just fetching the sessions data'"
+              />
+              <br>
+              Click the "Fetch Viz Data" button above to fetch visualization data for this query (or open the dropdown for more options).
             </div>
           </div>
+        </div>
 
-        </div> <!-- /map content -->
+        <template v-else>
+          <!-- map content -->
+          <div :class="{'expanded':mapExpanded}">
 
-        <!-- graph content -->
-        <div>
+            <!-- map open button -->
+            <div class="map-btn"
+              v-show="!showMap && primary"
+              @click="toggleMap"
+              v-b-tooltip.hover.left
+              title="View map">
+              <span class="fa fa-fw fa-globe">
+              </span>
+            </div> <!-- /map open button -->
 
-          <!-- graph controls -->
-          <div class="session-graph-btn-container"
-            v-if="primary">
-            <!-- zoom in/out -->
-            <div class="btn-group btn-group-xs">
-              <label class="btn btn-default"
-                @click="zoomOut"
-                v-b-tooltip.hover.right
-                title="Zoom out">
-                <span class="fa fa-search-minus">
-                </span>
-              </label>
-              <label class="btn btn-default"
-                @click="zoomIn"
-                v-b-tooltip.hover.right
-                title="Zoom in">
-                <span class="fa fa-search-plus">
-                </span>
-              </label>
-            </div> <!-- /zoom in/out -->
-            <!-- pan left/right -->
-            <div class="btn-group btn-group-xs ml-1">
-              <label class="btn btn-default"
-                @click="panLeft"
-                v-b-tooltip.hover
-                title="Pan left">
-                <span class="fa fa-chevron-left">
-                </span>
-              </label>
-              <b-dropdown size="sm"
-                boundary="body"
-                variant="default"
-                class="pan-dropdown">
-                <template slot="button-content">
-                  {{ plotPan * 100 + '%' }}
-                </template>
-                <b-dropdown-item @click="plotPanChange(0.05)">
-                  5%
-                </b-dropdown-item>
-                <b-dropdown-item @click="plotPanChange(0.1)">
-                  10%
-                </b-dropdown-item>
-                <b-dropdown-item @click="plotPanChange(0.2)">
-                  20%
-                </b-dropdown-item>
-                <b-dropdown-item @click="plotPanChange(0.5)">
-                  50%
-                </b-dropdown-item>
-                <b-dropdown-item @click="plotPanChange(1)">
-                  100%
-                </b-dropdown-item>
-              </b-dropdown>
-              <label class="btn btn-default"
-                @click="panRight"
-                v-b-tooltip.hover
-                title="Pan right">
-                <span class="fa fa-chevron-right">
-                </span>
-              </label>
-            </div> <!-- /pan left/right -->
-            <!-- graph type -->
-            <div class="btn-group btn-group-xs btn-group-radios ml-1">
-              <b-form-radio-group
-                size="sm"
-                buttons
-                v-model="graphType"
-                @input="changeGraphType">
-                <b-radio
-                  value="sessionsHisto"
-                  key="sessionsHisto"
-                  class="btn-radio">
-                  {{ "Session" }}
-                </b-radio>
-                <b-radio
-                  v-for="filter in timelineDataFilters"
-                  :value="filter.dbField + 'Histo'"
-                  :key="filter.dbField"
-                  class="btn-radio">
-                  {{ filter.friendlyName }}
-                </b-radio>
-              </b-form-radio-group>
-            </div> <!-- graph type -->
-            <!-- series type -->
-            <div class="btn-group btn-group-xs btn-group-radios ml-1">
-              <b-form-radio-group
-                size="sm"
-                buttons
-                v-model="seriesType"
-                @input="changeSeriesType">
-                <b-radio value="lines"
-                  class="btn-radio">
-                  Lines
-                </b-radio>
-                <b-radio value="bars"
-                  class="btn-radio">
-                  Bars
-                </b-radio>
-              </b-form-radio-group>
-            </div> <!-- series type -->
-            <!-- cap times -->
-            <div class="btn-group btn-group-xs btn-group-checkboxes ml-1">
-              <b-form-checkbox
-                button
-                size="sm"
-                :active="showCapStartTimes"
-                v-model="showCapStartTimes"
-                @change="toggleCapStartTimes"
-                v-b-tooltip="'Toggle the capture process start time(s)'">
-                Cap Restarts
-              </b-form-checkbox> <!-- /cap times -->
+            <div class="inline-map">
+              <div v-if="mapData">
+                <div class="map-container">
+
+                  <!-- map -->
+                  <div class="map"
+                    :id="'arkimeMap' + id">
+                  </div> <!-- /map -->
+
+                  <!-- map buttons -->
+                  <button type="button"
+                    v-if="primary"
+                    class="btn btn-xs btn-default btn-close-map btn-fw"
+                    @click="toggleMap"
+                    v-b-tooltip.hover.left
+                    title="Close map">
+                    <span class="fa fa-close">
+                    </span>
+                  </button>
+                  <button type="button"
+                    class="btn btn-xs btn-default btn-fw btn-z-index-2"
+                    :class="{'btn-expand-map':primary,'btn-close-map':!primary}"
+                    @click="toggleMapSize"
+                    v-b-tooltip.hover.left
+                    title="Expand/Collapse Map">
+                    <span class="fa"
+                      :class="{'fa-expand':!mapExpanded,'fa-compress':mapExpanded}">
+                    </span>
+                  </button>
+                  <div v-if="primary"
+                    class="btn-group-vertical src-dst-btns btn-fw">
+                    <button type="button"
+                      class="btn btn-xs btn-default"
+                      :class="{'active':src}"
+                      @click="toggleSrcDstXff('src')"
+                      v-b-tooltip.hover.left
+                      title="Toggle source countries">
+                      <strong>S</strong>
+                    </button>
+                    <button type="button"
+                      class="btn btn-xs btn-default"
+                      :class="{'active':dst}"
+                      @click="toggleSrcDstXff('dst')"
+                      v-b-tooltip.hover.left
+                      title="Toggle destination countries">
+                      <strong>D</strong>
+                    </button>
+                  </div>
+                  <button v-if="primary"
+                    type="button"
+                    class="btn btn-xs btn-default btn-fw xff-btn"
+                    @click="toggleSrcDstXff('xffGeo')"
+                    :class="{'active':xffGeo}"
+                    title="Toggle XFF Countries">
+                    <small>XFF</small>
+                  </button> <!-- /map buttons -->
+
+                  <!-- map legend -->
+                  <div class="map-legend"
+                    v-if="mapExpanded && legend.length">
+                    <strong>Top 10</strong>&nbsp;
+                    <span v-for="(item, key) in legend"
+                      :key="key"
+                      class="legend-item"
+                      :style="{'background-color':item.color}">
+                      {{ item.name }}
+                      ({{ item.value | commaString }})
+                    </span>
+                  </div> <!-- map legend -->
+
+                </div>
+              </div>
             </div>
-          </div> <!-- /graph controls -->
 
-          <!-- graph -->
-          <div v-if="graphData"
-            class="plot-container pr-4">
-            <div class="plot-area"
-              :id="'plotArea' + id">
-            </div>
-          </div> <!-- /graph -->
+          </div> <!-- /map content -->
 
-        </div> <!-- /graph content -->
+          <!-- graph content -->
+          <div>
+
+            <!-- graph controls -->
+            <div class="session-graph-btn-container"
+              v-if="primary">
+              <!-- zoom in/out -->
+              <div class="btn-group btn-group-xs">
+                <label class="btn btn-default"
+                  @click="zoomOut"
+                  v-b-tooltip.hover.right
+                  title="Zoom out">
+                  <span class="fa fa-search-minus">
+                  </span>
+                </label>
+                <label class="btn btn-default"
+                  @click="zoomIn"
+                  v-b-tooltip.hover.right
+                  title="Zoom in">
+                  <span class="fa fa-search-plus">
+                  </span>
+                </label>
+              </div> <!-- /zoom in/out -->
+              <!-- pan left/right -->
+              <div class="btn-group btn-group-xs ml-1">
+                <label class="btn btn-default"
+                  @click="panLeft"
+                  v-b-tooltip.hover
+                  title="Pan left">
+                  <span class="fa fa-chevron-left">
+                  </span>
+                </label>
+                <b-dropdown size="sm"
+                  boundary="body"
+                  variant="default"
+                  class="pan-dropdown">
+                  <template slot="button-content">
+                    {{ plotPan * 100 + '%' }}
+                  </template>
+                  <b-dropdown-item @click="plotPanChange(0.05)">
+                    5%
+                  </b-dropdown-item>
+                  <b-dropdown-item @click="plotPanChange(0.1)">
+                    10%
+                  </b-dropdown-item>
+                  <b-dropdown-item @click="plotPanChange(0.2)">
+                    20%
+                  </b-dropdown-item>
+                  <b-dropdown-item @click="plotPanChange(0.5)">
+                    50%
+                  </b-dropdown-item>
+                  <b-dropdown-item @click="plotPanChange(1)">
+                    100%
+                  </b-dropdown-item>
+                </b-dropdown>
+                <label class="btn btn-default"
+                  @click="panRight"
+                  v-b-tooltip.hover
+                  title="Pan right">
+                  <span class="fa fa-chevron-right">
+                  </span>
+                </label>
+              </div> <!-- /pan left/right -->
+              <!-- graph type -->
+              <div class="btn-group btn-group-xs btn-group-radios ml-1">
+                <b-form-radio-group
+                  size="sm"
+                  buttons
+                  v-model="graphType"
+                  @input="changeGraphType">
+                  <b-radio
+                    value="sessionsHisto"
+                    key="sessionsHisto"
+                    class="btn-radio">
+                    {{ "Session" }}
+                  </b-radio>
+                  <b-radio
+                    v-for="filter in timelineDataFilters"
+                    :value="filter.dbField + 'Histo'"
+                    :key="filter.dbField"
+                    class="btn-radio">
+                    {{ filter.friendlyName }}
+                  </b-radio>
+                </b-form-radio-group>
+              </div> <!-- graph type -->
+              <!-- series type -->
+              <div class="btn-group btn-group-xs btn-group-radios ml-1">
+                <b-form-radio-group
+                  size="sm"
+                  buttons
+                  v-model="seriesType"
+                  @input="changeSeriesType">
+                  <b-radio value="lines"
+                    class="btn-radio">
+                    Lines
+                  </b-radio>
+                  <b-radio value="bars"
+                    class="btn-radio">
+                    Bars
+                  </b-radio>
+                </b-form-radio-group>
+              </div> <!-- series type -->
+              <!-- cap times -->
+              <div class="btn-group btn-group-xs btn-group-checkboxes ml-1">
+                <b-form-checkbox
+                  button
+                  size="sm"
+                  :active="showCapStartTimes"
+                  v-model="showCapStartTimes"
+                  @change="toggleCapStartTimes"
+                  v-b-tooltip="'Toggle the capture process start time(s)'">
+                  Cap Restarts
+                </b-form-checkbox> <!-- /cap times -->
+              </div>
+            </div> <!-- /graph controls -->
+
+            <!-- graph -->
+            <div v-if="graphData"
+              class="plot-container">
+              <div class="plot-area"
+                :id="'plotArea' + id">
+              </div>
+            </div> <!-- /graph -->
+
+          </div> <!-- /graph content -->
+        </template>
       </div>
 
     </div>
@@ -260,18 +255,16 @@ import moment from 'moment-timezone';
 
 // color vars
 let foregroundColor;
-let primaryColor;
 let srcColor;
 let dstColor;
 let highlightColor;
+let axisColor;
 let waterColor;
 let landColorDark;
 let landColorLight;
 
 let timeout;
 let basePath;
-let plotCheck;
-let initialized;
 
 // bar width vars
 let barWidth;
@@ -280,10 +273,10 @@ let barWidthInUnits;
 let barWidthInPixels;
 
 export default {
-  name: 'MolochVisualizations',
+  name: 'ArkimeVisualizations',
   props: {
     graphData: {
-      typte: Object,
+      type: Object,
       default: () => { return {}; }
     },
     mapData: {
@@ -298,9 +291,7 @@ export default {
     timelineDataFilters: {
       type: Array,
       required: true
-    },
-    showHideBtn: Boolean,
-    page: String
+    }
   },
   data: function () {
     return {
@@ -317,8 +308,9 @@ export default {
       graph: undefined,
       graphOptions: {},
       showMap: undefined,
-      stickyViz: false,
-      hideViz: false
+      turnOffGraphDays: this.$constants.TURN_OFF_GRAPH_DAYS,
+      plotCheck: undefined,
+      initialized: false
     };
   },
   computed: {
@@ -387,6 +379,15 @@ export default {
     },
     capStartTimes: function () {
       return this.$store.state.capStartTimes;
+    },
+    stickyViz: function () {
+      return this.$store.state.stickyViz;
+    },
+    hideViz: function () {
+      return this.$store.state.hideViz;
+    },
+    disabledAggregations: function () {
+      return this.$store.state.disabledAggregations;
     }
   },
   watch: {
@@ -399,16 +400,16 @@ export default {
     xffGeo: function (newVal, oldVal) {
       this.setupMapData(this.mapData);
     },
-    graphType: function (newVal, oldVal) {
+    graphType: function () {
+      if (!this.initialized) { return; }
+
       function changeGraphType (that) {
         let interval = 0;
         // need to wait for graph to load initially if there is a req for cap times
         if (!that.graph) { interval = 100; }
         setTimeout(() => {
           that.setupGraphData();
-          that.plot.setData(that.graph);
-          that.plot.setupGrid();
-          that.plot.draw();
+          that.plot = $.plot(that.plotArea, that.graph, that.graphOptions);
         }, interval);
       }
       if (this.primary) {
@@ -418,21 +419,26 @@ export default {
         setTimeout(() => { changeGraphType(this); }, id * 100);
       }
     },
-    seriesType: function (newVal, oldVal) {
+    seriesType: function () {
+      if (!this.initialized) { return; }
+
       this.setupGraphData();
       this.plot = $.plot(this.plotArea, this.graph, this.graphOptions);
     },
     graphData: function (newVal, oldVal) {
-      if (newVal && oldVal && !this.hideViz) {
-        if (plotCheck) { clearInterval(plotCheck); }
-        plotCheck = setInterval(() => { // wait for plot func to be loaded
-          if ($.plot || initialized) {
-            clearInterval(plotCheck);
-            initialized = true;
-            plotCheck = undefined;
-            this.setupGraphData(); // setup this.graph and this.graphOptions
-            this.plot = $.plot(this.plotArea, this.graph, this.graphOptions);
-            this.calculateHoverBarWidth();
+      if (newVal && oldVal && !this.hideViz && !this.disabledAggregations) {
+        if (this.plotCheck) { clearInterval(this.plotCheck); }
+        this.plotCheck = setInterval(() => { // wait for plot func to be loaded
+          if ($.plot) {
+            clearInterval(this.plotCheck);
+            this.plotCheck = undefined;
+            // create map
+            this.displayMap();
+            // create graph
+            // setup the graph data and options
+            this.setupGraphData();
+            // create flot graph
+            this.setupGraphElement();
           }
         });
       }
@@ -450,43 +456,45 @@ export default {
         }, id * 100);
       }
     },
-    capStartTimes (newVal, oldVal) {
-      if (!this.primary) {
+    capStartTimes () {
+      if (!this.primary && this.initialized) {
         this.setupGraphData();
         this.plot = $.plot(this.plotArea, this.graph, this.graphOptions);
       }
     }
   },
   created: function () {
-    // set styles for graph and map
-    const styles = window.getComputedStyle(document.body);
-
-    foregroundColor = styles.getPropertyValue('--color-foreground').trim();
-    primaryColor = styles.getPropertyValue('--color-primary').trim();
-    srcColor = styles.getPropertyValue('--color-src').trim() || '#CA0404';
-    dstColor = styles.getPropertyValue('--color-dst').trim() || '#0000FF';
-    highlightColor = styles.getPropertyValue('--color-gray-darker').trim();
-    waterColor = styles.getPropertyValue('--color-water').trim();
-    landColorDark = styles.getPropertyValue('--color-land-dark').trim();
-    landColorLight = styles.getPropertyValue('--color-land-light').trim();
-
-    if (!landColorDark || !landColorLight) {
-      landColorDark = styles.getPropertyValue('--color-primary-dark').trim();
-      landColorLight = styles.getPropertyValue('--color-primary-lightest').trim();
-    }
-  },
-  mounted: function () {
-    // lazy load flot so it loads after data
-    import(/* webpackChunkName: "flot" */ 'public/flot-0.7/jquery.flot.min');
-    import(/* webpackChunkName: "flot" */ 'public/flot-0.7/jquery.flot.selection.min');
-    import(/* webpackChunkName: "flot" */ 'public/flot-0.7/jquery.flot.navigate.min');
-    import(/* webpackChunkName: "flot" */ 'public/flot-0.7/jquery.flot.resize');
-    import(/* webpackChunkName: "flot" */ 'public/flot-0.7/jquery.flot.stack.min');
-
-    // lazy load jvector map so it loads after data
-    import(/* webpackChunkName: "jvectormap" */ 'public/jquery-jvectormap-1.2.2.min.js');
+    // lazy loading graphing libs to reduce bundle size
+    import( // cannot be bundled with flot because of jquery magic and must be first
+      /* webpackChunkName: "graphing" */
+      /* webpackMode: "lazy" */
+      /* webpackPreload: true */
+      'public/jquery.event.drag'
+    );
     import(
-      /* webpackChunkName: "jvectormapworld" */ 'public/jquery-jvectormap-world-en.js'
+      /* webpackChunkName: "graphing" */
+      /* webpackMode: "lazy" */
+      /* webpackPreload: true */
+      'public/jquery.flot.min'
+    );
+    import( // cannot be bundled with flot because of inline jquery magic
+      /* webpackChunkName: "graphing" */
+      /* webpackMode: "lazy" */
+      /* webpackPreload: true */
+      'public/jquery.flot.resize'
+    );
+
+    import(
+      /* webpackChunkName: "graphing" */
+      /* webpackMode: "lazy" */
+      /* webpackPreload: true */
+      'public/jquery-jvectormap-1.2.2.min.js'
+    );
+    import(
+      /* webpackChunkName: "graphing" */
+      /* webpackMode: "lazy" */
+      /* webpackPreload: true */
+      'public/jquery-jvectormap-world-en.js'
     ).then(() => {
       function setupMapAndGraph (that) {
         // create map
@@ -498,25 +506,32 @@ export default {
         that.setupGraphElement();
       }
 
+      // set styles for graph and map
+      const styles = window.getComputedStyle(document.body);
+
+      foregroundColor = styles.getPropertyValue('--color-foreground').trim();
+      srcColor = styles.getPropertyValue('--color-src').trim() || '#CA0404';
+      dstColor = styles.getPropertyValue('--color-dst').trim() || '#0000FF';
+      highlightColor = styles.getPropertyValue('--color-gray-darker').trim();
+      axisColor = styles.getPropertyValue('--color-gray').trim();
+      waterColor = styles.getPropertyValue('--color-water').trim();
+      landColorDark = styles.getPropertyValue('--color-land-dark').trim();
+      landColorLight = styles.getPropertyValue('--color-land-light').trim();
+
+      if (!landColorDark || !landColorLight) {
+        landColorDark = styles.getPropertyValue('--color-primary-dark').trim();
+        landColorLight = styles.getPropertyValue('--color-primary-lightest').trim();
+      }
+
       basePath = this.$route.path.split('/')[1];
 
       const showMap = localStorage && localStorage[`${basePath}-open-map`] &&
         localStorage[`${basePath}-open-map`] !== 'false';
 
-      const stickyViz = localStorage && localStorage[`${basePath}-sticky-viz`] &&
-        localStorage[`${basePath}-sticky-viz`] !== 'false';
-
-      const hideViz = localStorage && localStorage[`${basePath}-hide-viz`] &&
-        localStorage[`${basePath}-hide-viz`] !== 'false';
-
       this.showCapStartTimes = localStorage && localStorage[`${basePath}-cap-times`] &&
         localStorage[`${basePath}-cap-times`] !== 'false';
 
-      this.$store.commit('toggleStickyViz', stickyViz);
-
       this.showMap = showMap;
-      this.stickyViz = stickyViz;
-      this.hideViz = hideViz;
 
       if (this.primary) {
         this.$store.commit('toggleMaps', showMap);
@@ -552,18 +567,6 @@ export default {
       return 'sessionsHisto';
     },
     /* exposed functions --------------------------------------------------- */
-    toggleStickyViz: function () {
-      this.stickyViz = !this.stickyViz;
-      this.$store.commit('toggleStickyViz', this.stickyViz);
-      localStorage[`${basePath}-sticky-viz`] = this.stickyViz;
-    },
-    toggleHideViz: function () {
-      this.hideViz = !this.hideViz;
-      localStorage[`${basePath}-hide-viz`] = this.hideViz;
-      if (!this.hideViz) {
-        this.$emit('fetchGraphData');
-      }
-    },
     /* exposed MAP functions */
     toggleMap: function () {
       if (this.primary) {
@@ -605,21 +608,21 @@ export default {
     },
     zoomOut: function () {
       this.plot.zoomOut();
-      this.debounce(this.updateResults, this.plot, 400);
+      this.debounce(this.updateResults, this.plot, 600);
     },
     zoomIn: function () {
       this.plot.zoom();
-      this.debounce(this.updateResults, this.plot, 400);
+      this.debounce(this.updateResults, this.plot, 600);
     },
     panLeft: function () {
       const panValue = Math.floor(this.plotWidth * this.plotPan) * -1;
       this.plot.pan({ left: panValue });
-      this.debounce(this.updateResults, this.plot, 400);
+      this.debounce(this.updateResults, this.plot, 600);
     },
     panRight: function () {
       const panValue = Math.floor(this.plotWidth * this.plotPan);
       this.plot.pan({ left: panValue });
-      this.debounce(this.updateResults, this.plot, 400);
+      this.debounce(this.updateResults, this.plot, 600);
     },
     plotPanChange: function (value) {
       this.plotPan = value;
@@ -655,26 +658,45 @@ export default {
       if (times.startTime && times.stopTime) {
         this.$store.commit('setTimeRange', 0); // set time range to custom
         this.$store.commit('setTime', times); // set start/stop time
-        this.$router.push({ // issue a search with the new time params
-          query: {
-            ...this.$route.query,
-            date: undefined,
-            stopTime: times.stopTime,
-            startTime: times.startTime
-          }
-        });
+
+        if (this.$route.query.date !== undefined ||
+            this.$route.query.startTime !== times.startTime || this.$route.query.stopTime !== times.stopTime) {
+          this.$router.push({ // issue a search with the new time params
+            query: {
+              ...this.$route.query,
+              date: undefined,
+              stopTime: times.stopTime,
+              startTime: times.startTime
+            }
+          });
+        }
       }
     },
     setupGraphElement: function () {
+      this.plotCheck = setInterval(() => {
+        if ($.plot) {
+          clearInterval(this.plotCheck);
+          this.plotCheck = undefined;
+        }
+      }, 50);
+
       this.plotArea = $('#plotArea' + this.id);
+
+      if (!this.plotArea[0]) { return; } // don't continue if graph is hidden
+
       this.plot = $.plot(this.plotArea, this.graph, this.graphOptions);
+      this.initialized = true;
 
       this.calculateHoverBarWidth();
 
       setTimeout(() => { // wait for plot to render
         // account for size of the y axis labels
-        const yAxisLabelSize = $(this.plotArea.find('.yAxis > .tickLabel')).width() * 2;
-        this.plotWidth = this.plotArea.find('canvas')[0].width - yAxisLabelSize;
+        const yAxisLabel = $(this.plotArea.find('.yAxis > .tickLabel'));
+        const canvasArea = this.plotArea.find('canvas');
+        const yAxisLabelSize = (yAxisLabel?.width() || 0) * 2;
+        if (canvasArea && canvasArea.length) {
+          this.plotWidth = canvasArea[0].width - yAxisLabelSize;
+        }
       }, 1000);
 
       // triggered when an area of the graph is selected
@@ -702,7 +724,9 @@ export default {
             };
 
             let type;
-            if (this.graphType === 'totPacketsHisto' || this.graphType === 'totBytesHisto' || this.graphType === 'totDataBytesHisto') {
+            if (this.graphType === 'totPacketsHisto' || this.graphType === 'network.packetsHisto' ||
+                this.graphType === 'totBytesHisto' || this.graphType === 'network.bytesHisto' ||
+                this.graphType === 'totDataBytesHisto') {
               type = item.seriesIndex === 0 ? 'Src' : 'Dst';
             }
 
@@ -787,13 +811,26 @@ export default {
         ];
         break;
       default:
-        this.graph = [{ data: this.graphData[this.graphType], color: primaryColor }];
+        this.graph = [{ data: this.graphData[this.graphType], color: foregroundColor }];
       } /* switch */
 
-      const showBars = this.seriesType === 'bars';
-
       for (let i = 0, len = this.graph.length; i < len; ++i) {
-        this.graph[i].bars = { show: showBars };
+        this.graph[i].bars = { show: this.seriesType === 'bars' };
+
+        // if there's no value for the graph x min/max
+        // add it to the beginning/end of the data so that the graph
+        // shows the full time range (not just the data's time range)
+        if (!this.graph[i].data[0]) { continue; }
+
+        if (!this.graphData.xmin) { continue; }
+        if (this.graph[i].data[0][0] !== this.graphData.xmin) {
+          this.graph[i].data.unshift([this.graphData.xmin, 0]);
+        }
+
+        if (!this.graphData.xmax) { continue; }
+        if (this.graph[i].data[this.graph[i].data.length - 1][0] !== this.graphData.xmax) {
+          this.graph[i].data.push([this.graphData.xmax, 0]);
+        }
       }
 
       barWidth = (this.graphData.interval * 1000) / 1.7;
@@ -801,10 +838,8 @@ export default {
       this.graphOptions = { // flot graph options
         series: {
           stack: true,
-          bars: { barWidth: barWidth },
-          lines: {
-            fill: true
-          }
+          lines: { fill: true },
+          bars: { barWidth: [barWidth, true] }
         },
         selection: {
           mode: 'x',
@@ -813,10 +848,11 @@ export default {
         xaxis: {
           mode: 'time',
           label: 'Datetime',
-          color: foregroundColor,
+          color: axisColor,
+          timeBase: 'milliseconds',
           min: this.graphData.xmin || null,
           max: this.graphData.xmax || null,
-          tickFormatter: (v, axis) => {
+          tickFormatter: (v) => {
             return this.$options.filters.timezoneDateString(
               v, this.timezone, false
             );
@@ -824,34 +860,25 @@ export default {
         },
         yaxis: {
           min: 0,
-          color: foregroundColor,
+          color: axisColor,
           zoomRange: false,
-          autoscaleMargin: 0.2,
+          autoscaleMargin: 0.02,
           tickFormatter: (v) => {
             if (this.graphType === 'totBytesHisto' || this.graphType === 'totDataBytesHisto') {
               return this.$options.filters.humanReadableBytes(v);
-            } else {
-              return this.$options.filters.humanReadableNumber(v);
             }
+            return this.$options.filters.humanReadableNumber(v);
           }
         },
         grid: {
+          markings: [],
           borderWidth: 0,
-          color: foregroundColor,
           hoverable: true,
           clickable: true,
-          markings: []
+          color: axisColor
         },
-        zoom: {
-          interactive: false,
-          trigger: 'dblclick',
-          amount: 2
-        },
-        pan: {
-          interactive: false,
-          cursor: 'move',
-          frameRate: 20
-        }
+        pan: { interactive: false },
+        zoom: { interactive: false }
       };
 
       if (this.showCapStartTimes) {
@@ -867,16 +894,16 @@ export default {
       }
 
       // add business hours to graph if they exist
-      if (this.$constants.MOLOCH_BUSINESS_DAY_START && this.$constants.MOLOCH_BUSINESS_DAY_END) {
+      if (this.$constants.BUSINESS_DAY_START && this.$constants.BUSINESS_DAY_END) {
         this.addBusinessHours();
       }
     },
     addBusinessHours () {
-      if (!this.$constants.MOLOCH_BUSINESS_DAY_START || !this.$constants.MOLOCH_BUSINESS_DAY_END) {
+      if (!this.$constants.BUSINESS_DAY_START || !this.$constants.BUSINESS_DAY_END) {
         return;
       }
 
-      const businessDays = this.$constants.MOLOCH_BUSINESS_DAYS.split(',');
+      const businessDays = this.$constants.BUSINESS_DAYS.split(',');
       const startDate = moment(this.graphData.xmin); // the start of the graph
       const stopDate = moment(this.graphData.xmax); // the end of the graph
       let daysInRange = stopDate.diff(startDate, 'days'); // # days in graph
@@ -890,12 +917,12 @@ export default {
         // only display business hours on the specified business days
         if (businessDays.indexOf(dayOfWeek.toString()) >= 0) {
           // get the start of the business day
-          const dayStart = day.clone().add(this.$constants.MOLOCH_BUSINESS_DAY_START, 'hours');
+          const dayStart = day.clone().add(this.$constants.BUSINESS_DAY_START, 'hours');
           // get the end of the business day
-          const dayStop = day.clone().add(this.$constants.MOLOCH_BUSINESS_DAY_END, 'hours');
+          const dayStop = day.clone().add(this.$constants.BUSINESS_DAY_END, 'hours');
           // add business hours for this day to graph
           this.graphOptions.grid.markings.push({
-            color: color,
+            color,
             xaxis: {
               from: dayStart.valueOf(),
               to: dayStop.valueOf()
@@ -950,7 +977,11 @@ export default {
       this.setupMapData();
     },
     setupMapElement: function () {
-      this.mapEl = $('#molochMap' + this.id);
+      if (this.mapEl) {
+        this.map = $(this.mapEl).children('.jvectormap-container').remove();
+      }
+
+      this.mapEl = $('#arkimeMap' + this.id);
 
       // watch for the window to resize to resize the expanded map
       window.addEventListener('resize', this.onMapResize, { passive: true });
@@ -1064,6 +1095,8 @@ export default {
     $(document).off('mouseup', this.isOutsideClick);
     $(this.mapEl).off('resize', this.onMapResize);
     $(this.mapEl).remove();
+
+    this.initialized = false;
   }
 };
 </script>
@@ -1182,8 +1215,9 @@ export default {
 }
 
 /* make graph labels smaller */
-.tickLabels .tickLabel {
-  font-size: smaller;
+.tickLabel {
+  font-size: 11px;
+  fill: var(--color-foreground);
 }
 
 /* position the pan dropdown between the pan buttons */
@@ -1289,14 +1323,15 @@ export default {
 
 /* graph styles -------------------- */
 .plot-area {
-  width: 100%;
+  width: 102%;
   height: 170px;
+  margin-left: -20px;
 }
 
 .map-visible .plot-container {
   position: relative;
   display: inline-block;
-  width: 75%;
+  width: 76%;
 }
 .map-invisible .plot-container {
   position: relative;
@@ -1340,6 +1375,13 @@ export default {
   background-color: var(--color-background, white);
 }
 
+.sticky-viz.disabled-msg {
+  padding-bottom: 48px;
+}
+.sticky-viz.disabled-msg .viz-container {
+  height: 62px;
+}
+
 /* viz options button styles ----------------- */
 .viz-options-btn-container {
   z-index: 5;
@@ -1360,7 +1402,7 @@ export default {
   padding-bottom: 0px;
 }
 .hide-viz.sticky-viz .viz-container {
-  z-index: 5;
+  z-index: 4;
   overflow: visible;
   box-shadow: none !important;
   background-color: transparent;

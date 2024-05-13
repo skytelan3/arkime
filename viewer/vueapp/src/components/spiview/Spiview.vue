@@ -1,14 +1,18 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
 
   <div class="spiview-page">
 
-    <MolochCollapsible>
+    <ArkimeCollapsible>
       <span class="fixed-header">
         <!-- search navbar -->
-        <moloch-search
-          :num-matching-sessions="filtered"
-          @changeSearch="changeSearch">
-        </moloch-search> <!-- /search navbar -->
+        <arkime-search
+          @changeSearch="changeSearch"
+          :num-matching-sessions="filtered">
+        </arkime-search> <!-- /search navbar -->
 
         <!-- info navbar -->
         <form class="info-nav">
@@ -115,6 +119,7 @@
               Loading SPI data
             </em>
             <button type="button"
+              :class="{'disabled-aggregations':disabledAggregations}"
               class="btn btn-warning btn-sm pull-right cancel-btn"
               @click="cancelLoading">
               <span class="fa fa-ban">
@@ -142,29 +147,26 @@
           </span>
         </div>
       </form> <!-- /warning navbar -->
-    </MolochCollapsible>
+    </ArkimeCollapsible>
 
     <!-- visualizations -->
-    <moloch-visualizations
+    <arkime-visualizations
       v-if="mapData && graphData && showToolBars"
-      :graph-data="graphData"
-      :map-data="mapData"
       :primary="true"
-      :timelineDataFilters="timelineDataFilters"
+      :map-data="mapData"
+      :graph-data="graphData"
       @fetchMapData="fetchVizData"
-      @fetchGraphData="fetchGraphData"
-      :show-hide-btn="true"
-      page="spiview">
-    </moloch-visualizations> <!-- /visualizations -->
+      :timelineDataFilters="timelineDataFilters">
+    </arkime-visualizations> <!-- /visualizations -->
 
     <div class="spiview-content mr-1 ml-1">
 
       <!-- page error -->
-      <moloch-error
+      <arkime-error
         v-if="error"
         :message="error"
         class="mt-5 mb-5">
-      </moloch-error> <!-- /page error -->
+      </arkime-error> <!-- /page error -->
 
       <!-- spiview panels -->
       <div role="tablist">
@@ -206,14 +208,14 @@
                 @click.stop
                 class="protocol-value">
                 <strong>
-                  <moloch-session-field
+                  <arkime-session-field
                     :field="{dbField:'ipProtocol', exp:'protocols', type:'lotermfield', group:'general', transform:'ipProtocolLookup'}"
                     :expr="'protocols'"
                     :value="key"
                     :pull-left="true"
                     :parse="false"
                     :session-btn="true">
-                  </moloch-session-field>
+                  </arkime-session-field>
                 </strong>
                 <sup>({{ value | commaString }})</sup>
               </span>
@@ -273,6 +275,10 @@
                               @click="openSpiGraph(field.dbField)">
                               Open {{ field.friendlyName }} SPI Graph
                             </b-dropdown-item>
+                            <field-actions
+                              :separator="true"
+                              :expr="field.exp"
+                            />
                           </b-dropdown>
                         </span>
                       </template>
@@ -321,6 +327,10 @@
                           @click="pivot(value)">
                           Pivot on {{ value.field.friendlyName }}
                         </b-dropdown-item>
+                        <field-actions
+                          :separator="true"
+                          :expr="value.field.exp"
+                        />
                       </b-dropdown> <!-- spiview field label button -->
                       <!-- spiview field data -->
                       <span v-if="value && value.value && value.value.buckets">
@@ -328,14 +338,14 @@
                           :key="bucket.key">
                           <span v-if="bucket.key || bucket.key === 0"
                             class="small spi-bucket mr-1 no-wrap">
-                            <moloch-session-field
+                            <arkime-session-field
                               :field="value.field"
                               :value="bucket.key"
                               :expr="value.field.exp"
                               :parse="true"
                               :pull-left="true"
                               :session-btn="true">
-                            </moloch-session-field>
+                            </arkime-session-field>
                             <sup>({{ bucket.doc_count | commaString }})</sup>
                           </span>
                         </span>
@@ -392,13 +402,15 @@
 import Vue from 'vue';
 
 import SessionsService from '../sessions/SessionsService';
+import ConfigService from '../utils/ConfigService';
 import FieldService from '../search/FieldService';
 import UserService from '../users/UserService';
 
-import MolochError from '../utils/Error';
-import MolochSearch from '../search/Search';
-import MolochVisualizations from '../visualizations/Visualizations';
-import MolochCollapsible from '../utils/CollapsibleWrapper';
+import ArkimeError from '../utils/Error';
+import ArkimeSearch from '../search/Search';
+import ArkimeVisualizations from '../visualizations/Visualizations';
+import ArkimeCollapsible from '../utils/CollapsibleWrapper';
+import FieldActions from '../sessions/FieldActions';
 
 // import utils
 import Utils from '../utils/utils';
@@ -421,10 +433,11 @@ let newConfigTimeout;
 export default {
   name: 'Spiview',
   components: {
-    MolochError,
-    MolochSearch,
-    MolochVisualizations,
-    MolochCollapsible
+    ArkimeError,
+    ArkimeSearch,
+    ArkimeVisualizations,
+    ArkimeCollapsible,
+    FieldActions
   },
   data: function () {
     return {
@@ -445,7 +458,6 @@ export default {
       newFieldConfigName: '',
       fieldConfigError: '',
       fieldConfigSuccess: '',
-      multiviewer: this.$constants.MOLOCH_MULTIVIEWER,
       spiviewFieldTransition: ''
     };
   },
@@ -475,6 +487,14 @@ export default {
     },
     fields: function () {
       return this.$store.state.fieldsArr;
+    },
+    disabledAggregations: function () {
+      return this.$store.state.disabledAggregations;
+    }
+  },
+  watch: {
+    '$store.state.fetchGraphData': function (value) {
+      if (value) { this.fetchGraphData(); }
     }
   },
   mounted: function () {
@@ -491,6 +511,8 @@ export default {
     } else {
       this.issueQueries();
     }
+
+    ConfigService.getFieldActions();
   },
   methods: {
     /* exposed page functions ---------------------------------------------- */
@@ -724,7 +746,7 @@ export default {
         path: '/sessions',
         query: {
           ...this.$route.query,
-          expression: expression
+          expression
         }
       });
 
@@ -749,8 +771,8 @@ export default {
         fields: this.spiQuery
       };
 
-      UserService.createSpiviewFieldConfig(data).then((response) => {
-        data.name = response.name; // update column config name
+      UserService.createLayout('spiview', data).then((response) => {
+        data.name = response.name;
 
         if (!this.fieldConfigs) { this.fieldConfigs = []; }
         this.fieldConfigs.push(data);
@@ -784,7 +806,7 @@ export default {
      * @param {int} index       The index in the array of the spiview fields config to remove
      */
     deleteFieldConfiguration: function (spiName, index) {
-      UserService.deleteSpiviewFieldConfig(spiName).then(() => {
+      UserService.deleteLayout('spiview', spiName).then(() => {
         this.fieldConfigs.splice(index, 1);
         this.fieldConfigError = false;
       }).catch((error) => {
@@ -802,7 +824,7 @@ export default {
         fields: this.spiQuery
       };
 
-      UserService.updateSpiviewFieldConfig(data).then((response) => {
+      UserService.updateLayout('spiview', data).then((response) => {
         this.fieldConfigs[index] = data;
         this.fieldConfigError = false;
         this.fieldConfigSuccess = response.text;
@@ -868,14 +890,16 @@ export default {
     get: function (query) {
       const source = Vue.axios.CancelToken.source();
 
+      Utils.setFacetsQuery(query, 'spiview');
+      // need to reset this because ^ sets it to 1 if forced aggs are on
+      query.facets = newQuery ? '1' : '0';
+
       // set whether map is open on the spiview page
       if (localStorage.getItem('spiview-open-map') === 'true') {
         query.map = true;
       }
-      // set whether vizualizations are open on the spiview page
-      let hideViz = false;
+      // set whether visualizations are open on the spiview page
       if (localStorage.getItem('spiview-hide-viz') === 'true') {
-        hideViz = true;
         query.facets = 0;
       }
 
@@ -891,10 +915,7 @@ export default {
           if (response.data.bsqErr) {
             response.data.error = response.data.bsqErr;
           }
-          if (hideViz) { // always set map/graph data so viz area shows up
-            this.mapData = {};
-            this.graphData = {};
-          }
+
           resolve(response.data);
         }).catch((error) => {
           if (!Vue.axios.isCancel(error)) {
@@ -938,6 +959,19 @@ export default {
       // sorted list of categories for the view
       this.categoryList = Object.keys(this.categoryObjects).sort();
       this.categoryList.splice(this.categoryList.indexOf('general'), 1);
+
+      if (this.$constants.SPIVIEW_CATEGORY_ORDER) {
+        const catOrder = this.$constants.SPIVIEW_CATEGORY_ORDER.split(',');
+        for (let i = catOrder.length - 1; i >= 0; i--) {
+          const cat = catOrder[i];
+          if (this.categoryList.includes(cat)) {
+            this.categoryList.splice(this.categoryList.indexOf(cat), 1);
+            this.categoryList.unshift(cat);
+          }
+        }
+      }
+
+      // general always at the top
       this.categoryList.unshift('general');
 
       this.getSpiData(this.spiQuery); // IMPORTANT: queries for spi data!
@@ -945,15 +979,10 @@ export default {
     getSpiData: function (spiQuery) {
       if (!spiQuery) { return; }
 
-      if (this.multiviewer) {
-        const availableCluster = this.$store.state.esCluster.availableCluster.active;
-        const selection = Utils.checkClusterSelection(this.query.cluster, availableCluster);
-        if (!selection.valid) { // invlaid selection
-          pendingPromise = null;
-          this.error = selection.error;
-          this.dataLoading = false;
-          return;
-        }
+      if (!Utils.checkClusterSelection(this.query.cluster, this.$store.state.esCluster.availableCluster.active, this).valid) {
+        pendingPromise = null;
+        this.dataLoading = false;
+        return;
       }
 
       // reset loading counts for categories
@@ -1086,7 +1115,7 @@ export default {
     },
     /* Gets the current user's custom spiview fields configurations */
     getSpiviewFieldConfigs: function () {
-      UserService.getSpiviewFields().then((response) => {
+      UserService.getLayout('spiview').then((response) => {
         this.fieldConfigs = response;
       }).catch((error) => {
         this.fieldConfigError = error.text;
@@ -1221,7 +1250,7 @@ export default {
       if (!category.spi) { category.spi = {}; }
 
       if (!category.spi[field.dbField]) {
-        Vue.set(category.spi, field.dbField, { field: field });
+        Vue.set(category.spi, field.dbField, { field });
       }
 
       return category;
@@ -1395,6 +1424,10 @@ export default {
 
 /* canel btn */
 .cancel-btn {
+  margin-top: -4px;
   margin-right: 80px;
+}
+.cancel-btn.disabled-aggregations {
+  margin-right: 160px;
 }
 </style>

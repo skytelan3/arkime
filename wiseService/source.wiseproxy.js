@@ -3,21 +3,11 @@
  *
  * Copyright 2012-2016 AOL Inc. All rights reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this Software except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
  */
 'use strict';
 
-const request = require('request');
+const axios = require('axios');
 const WISESource = require('./wiseSource.js');
 
 class WiseProxySource extends WISESource {
@@ -75,7 +65,8 @@ class WiseProxySource extends WISESource {
     const options = {
       url: this.url + '/get',
       method: 'POST',
-      body: this.buffer.slice(0, this.offset)
+      data: this.buffer.slice(0, this.offset),
+      responseType: 'arraybuffer'
     };
 
     const bufferInfo = this.bufferInfo;
@@ -83,43 +74,49 @@ class WiseProxySource extends WISESource {
     this.offset = 0;
 
     let i;
-    request(options, (err, response, body) => {
-      if (err || response.statusCode !== 200) {
-        console.log(this.section, 'error', this.section, err || response);
+    axios(options)
+      .then((response) => {
+        if (response.status !== 200) {
+          console.log(this.section, 'not 200', response.status, response.data);
+          for (i = 0; i < bufferInfo.length; i++) {
+            bufferInfo[i].cb('Error');
+          }
+
+          return;
+        }
+
+        const body = response.data;
+        let offset = 0;
+        const fieldsTS = body.readUInt32BE(offset); offset += 4;
+        if (fieldsTS !== this.fieldsTS) {
+          this.updateInfo();
+        }
+        // const ver = body.readUInt32BE(offset); offset += 4;
+        // eslint-disable-next-line no-unreachable-loop
+        for (i = 0; i < bufferInfo.length; i++) {
+          const num = body[offset]; offset += 1;
+          const bi = bufferInfo[i];
+
+          if (num === 0) {
+            return bi.cb(null, WISESource.emptyResult);
+          }
+
+          const args = [];
+          for (let n = 0; n < num; n++) {
+            const field = body[offset]; offset += 1;
+            const len = body[offset]; offset += 1;
+            const str = body.toString('ascii', offset, offset + len - 1); offset += len;
+            args.push(this.mapping[field], str);
+          }
+          const result = WISESource.encodeResult.apply(null, args);
+          return bi.cb(null, result);
+        }
+      }).catch((err) => {
+        console.log(this.section, 'error', this.section, err);
         for (i = 0; i < bufferInfo.length; i++) {
           bufferInfo[i].cb('Error');
         }
-
-        return;
-      }
-
-      body = Buffer.from(body, 'binary');
-      let offset = 0;
-      const fieldsTS = body.readUInt32BE(offset); offset += 4;
-      if (fieldsTS !== this.fieldsTS) {
-        this.updateInfo();
-      }
-      // const ver = body.readUInt32BE(offset); offset += 4;
-      // eslint-disable-next-line no-unreachable-loop
-      for (i = 0; i < bufferInfo.length; i++) {
-        const num = body[offset]; offset += 1;
-        const bi = bufferInfo[i];
-
-        if (num === 0) {
-          return bi.cb(null, WISESource.emptyResult);
-        }
-
-        const args = [];
-        for (let n = 0; n < num; n++) {
-          const field = body[offset]; offset += 1;
-          const len = body[offset]; offset += 1;
-          const str = body.toString('ascii', offset, offset + len - 1); offset += len;
-          args.push(this.mapping[field], str);
-        }
-        const result = WISESource.encodeResult.apply(null, args);
-        return bi.cb(null, result);
-      }
-    });
+      });
   };
 
   // ----------------------------------------------------------------------------
@@ -127,7 +124,7 @@ class WiseProxySource extends WISESource {
     this.buffer[this.offset] = type; this.offset++;
     this.buffer.writeUInt16BE(item.length, this.offset); this.offset += 2;
     this.buffer.write(item, this.offset); this.offset += item.length;
-    this.bufferInfo.push({ type: type, item: item, cb: cb });
+    this.bufferInfo.push({ type, item, cb });
 
     if (this.bufferInfo.length > 100) {
       this.performQuery();
@@ -136,60 +133,60 @@ class WiseProxySource extends WISESource {
 
   // ----------------------------------------------------------------------------
   updateInfo () {
-    let options = {
+    const fieldOptions = {
       url: this.url + '/fields',
+      method: 'GET',
+      responseType: 'arraybuffer'
+    };
+
+    axios(fieldOptions)
+      .then((response) => {
+        const buf = response.data;
+        let offset = 0;
+        this.fieldsTS = buf.readUInt32BE(offset); offset += 4;
+        // const version = buf.readUInt32BE(offset); offset += 4;
+        offset += 1;
+        for (let i = 0; i < buf[offset]; i++) {
+          offset++;
+          const len = buf[offset]; offset += 1;
+          const str = buf.toString('ascii', offset, offset + len);
+
+          offset += len;
+          this.mapping[i] = this.api.addField(str);
+        }
+      }).catch((err) => {
+        console.log(this.section, 'problem fetching /fields', this.section, err);
+      });
+
+    const viewsOptions = {
+      url: this.url + '/views',
       method: 'GET'
     };
 
-    request(options, (err, response, body) => {
-      if (err) {
-        console.log(this.section, 'problem fetching /fields', this.section, err || response);
-        return;
-      }
-      const buf = Buffer.from(body, 'binary');
-      let offset = 0;
-      this.fieldsTS = buf.readUInt32BE(offset); offset += 4;
-      // const version = buf.readUInt32BE(offset); offset += 4;
-      offset += 1;
-      for (let i = 0; i < buf[offset]; i++) {
-        offset++;
-        const len = buf[offset]; offset += 1;
-        const str = buf.toString('ascii', offset, offset + len);
+    axios(viewsOptions)
+      .then((response) => {
+        const body = response.data;
+        for (const viewName in body) {
+          this.api.addView(viewName, body[viewName]);
+        }
+      }).catch((err) => {
+        console.log(this.section, 'problem fetching /views', this.section, err);
+      });
 
-        offset += len;
-        this.mapping[i] = this.api.addField(str);
-      }
-    });
-
-    options = {
-      url: this.url + '/views',
-      method: 'GET',
-      json: true
+    const vaOptions = {
+      url: this.url + '/valueActions',
+      method: 'GET'
     };
-    request(options, (err, response, body) => {
-      if (err) {
-        console.log(this.section, 'problem fetching /views', this.section, err || response);
-        return;
-      }
-      for (const viewName in body) {
-        this.api.addView(viewName, body[viewName]);
-      }
-    });
 
-    options = {
-      url: this.url + '/rightClicks',
-      method: 'GET',
-      json: true
-    };
-    request(options, (err, response, body) => {
-      if (err) {
-        console.log(this.section, 'problem fetching /rightClicks', this.section, err || response);
-        return;
-      }
-      for (const viewName in body) {
-        this.api.addView(viewName, body[viewName]);
-      }
-    });
+    axios(vaOptions)
+      .then((response) => {
+        const body = response.data;
+        for (const viewName in body) {
+          this.api.addView(viewName, body[viewName]);
+        }
+      }).catch((err) => {
+        console.log(this.section, 'problem fetching /rightClicks', this.section, err);
+      });
   };
 
   // ----------------------------------------------------------------------------

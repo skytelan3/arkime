@@ -1,3 +1,7 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
 
   <div class="info-area vertical-horizontal-center">
@@ -16,7 +20,7 @@
         class="text-theme-primary">
         <br>
         Don't forget! You have a view applied to your search:
-        <strong>{{ view }}</strong>
+        <strong>{{ viewName }}</strong>
       </small>
     </div>
 
@@ -26,8 +30,14 @@
 
 <script>
 export default {
-  name: 'MolochNoResults',
-  props: ['recordsTotal', 'view']
+  name: 'ArkimeNoResults',
+  props: ['recordsTotal', 'view'],
+  computed: {
+    viewName () {
+      const view = this.$store.state.views.find(v => v.id === this.view || v.name === this.view);
+      return view?.name || 'unknown or deleted view';
+    }
+  }
 };
 </script>
 

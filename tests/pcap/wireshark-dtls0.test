@@ -5,16 +5,21 @@
             "@timestamp" : "SET",
             "cert" : [
                {
-                  "hash" : "",
+                  "hash" : "10:99:10:99:fc:73:97:ad:b4:bf:67:fb:19:9a:39:b1:be:d8:97:4c",
                   "issuerCN" : [
                      "snake oil ca"
                   ],
                   "issuerON" : [
                      "Snake Oil, Ltd"
                   ],
+                  "issuerOU" : [
+                     "Certificate Authority"
+                  ],
                   "notAfter" : 1204562865000,
                   "notBefore" : 1046882865000,
-                  "remainingDays" : -1,
+                  "publicAlgorithm" : "rsaEncryption",
+                  "remainingDays" : 630,
+                  "remainingSeconds" : 54441796,
                   "serial" : "01",
                   "subjectCN" : [
                      "www.snakeoil.dom"
@@ -22,7 +27,11 @@
                   "subjectON" : [
                      "Snake Oil, Ltd"
                   ],
-                  "validDays" : 1825
+                  "subjectOU" : [
+                     "Webserver Team"
+                  ],
+                  "validDays" : 1825,
+                  "validSeconds" : 157680000
                }
             ],
             "certCnt" : 1,

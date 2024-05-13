@@ -12,73 +12,152 @@
                "packets" : 1,
                "port" : 53
             },
-            "dns" : {
-               "ASN" : [
-                  "---"
-               ],
-               "GEO" : [
-                  "---"
-               ],
-               "RIR" : [
-                  "ARIN"
-               ],
-               "host" : [
-                  "sentitlement.mobile.att.net"
-               ],
-               "hostCnt" : 1,
-               "ip" : [
-                  "172.26.39.3"
-               ],
-               "ipCnt" : 1,
-               "nameserverASN" : [
-                  "AS7018 AT&T Services, Inc.",
-                  "AS7018 AT&T Services, Inc.",
-                  "AS7018 AT&T Services, Inc.",
-                  "AS7018 AT&T Services, Inc."
-               ],
-               "nameserverGEO" : [
-                  "US",
-                  "US",
-                  "US",
-                  "US"
-               ],
-               "nameserverHost" : [
-                  "macu.ma.mt.np.els-gms.att.net",
-                  "ohcu.oh.mt.np.els-gms.att.net",
-                  "orcu.or.br.np.els-gms.att.net",
-                  "wycu.wy.br.np.els-gms.att.net"
-               ],
-               "nameserverHostCnt" : 4,
-               "nameserverIp" : [
-                  "2001:1890:01ff:09f1:0099:0099:0099:0128",
-                  "2001:1890:01ff:09f1:0099:0099:0099:0130",
-                  "99.99.99.128",
-                  "99.99.99.130"
-               ],
-               "nameserverIpCnt" : 4,
-               "nameserverRIR" : [
-                  "",
-                  "",
-                  "ARIN",
-                  "ARIN"
-               ],
-               "opcode" : [
-                  "QUERY"
-               ],
-               "opcodeCnt" : 1,
-               "qc" : [
-                  "IN"
-               ],
-               "qcCnt" : 1,
-               "qt" : [
-                  "A"
-               ],
-               "qtCnt" : 1,
-               "status" : [
-                  "NOERROR"
-               ],
-               "statusCnt" : 1
-            },
+            "dns" : [
+               {
+                  "ASN" : [
+                     "---"
+                  ],
+                  "GEO" : [
+                     "---"
+                  ],
+                  "RIR" : [
+                     "ARIN"
+                  ],
+                  "answers" : [
+                     {
+                        "class" : "IN",
+                        "ip" : "172.26.39.3",
+                        "name" : "sentitlement.mobile.att.net",
+                        "ttl" : 4159,
+                        "type" : "A"
+                     },
+                     {
+                        "class" : "IN",
+                        "name" : "att.net",
+                        "nameserver" : "ohcu.oh.mt.np.els-gms.att.net",
+                        "ttl" : 172240,
+                        "type" : "NS"
+                     },
+                     {
+                        "class" : "IN",
+                        "name" : "att.net",
+                        "nameserver" : "orcu.or.br.np.els-gms.att.net",
+                        "ttl" : 172240,
+                        "type" : "NS"
+                     },
+                     {
+                        "class" : "IN",
+                        "name" : "att.net",
+                        "nameserver" : "wycu.wy.br.np.els-gms.att.net",
+                        "ttl" : 172240,
+                        "type" : "NS"
+                     },
+                     {
+                        "class" : "IN",
+                        "name" : "att.net",
+                        "nameserver" : "macu.ma.mt.np.els-gms.att.net",
+                        "ttl" : 172240,
+                        "type" : "NS"
+                     },
+                     {
+                        "class" : "IN",
+                        "ip" : "99.99.99.130",
+                        "name" : "macu.ma.mt.np.els-gms.att.net",
+                        "ttl" : 68137,
+                        "type" : "A"
+                     },
+                     {
+                        "class" : "IN",
+                        "ip" : "2001:1890:1ff:9f1:99:99:99:130",
+                        "name" : "macu.ma.mt.np.els-gms.att.net",
+                        "ttl" : 64737,
+                        "type" : "AAAA"
+                     },
+                     {
+                        "class" : "IN",
+                        "ip" : "99.99.99.128",
+                        "name" : "ohcu.oh.mt.np.els-gms.att.net",
+                        "ttl" : 68137,
+                        "type" : "A"
+                     },
+                     {
+                        "class" : "IN",
+                        "ip" : "2001:1890:1ff:9f1:99:99:99:128",
+                        "name" : "ohcu.oh.mt.np.els-gms.att.net",
+                        "ttl" : 64737,
+                        "type" : "AAAA"
+                     }
+                  ],
+                  "answersCnt" : 9,
+                  "headerFlags" : [
+                     "RA",
+                     "RD"
+                  ],
+                  "host" : [
+                     "sentitlement.mobile.att.net"
+                  ],
+                  "hostCnt" : 1,
+                  "ip" : [
+                     "172.26.39.3"
+                  ],
+                  "ipCnt" : 1,
+                  "nameserverASN" : [
+                     "AS7018 AT&T Services, Inc.",
+                     "AS7018 AT&T Services, Inc.",
+                     "AS7018 AT&T Services, Inc.",
+                     "AS7018 AT&T Services, Inc."
+                  ],
+                  "nameserverGEO" : [
+                     "US",
+                     "US",
+                     "US",
+                     "US"
+                  ],
+                  "nameserverHost" : [
+                     "macu.ma.mt.np.els-gms.att.net",
+                     "ohcu.oh.mt.np.els-gms.att.net",
+                     "orcu.or.br.np.els-gms.att.net",
+                     "wycu.wy.br.np.els-gms.att.net"
+                  ],
+                  "nameserverHostCnt" : 4,
+                  "nameserverIp" : [
+                     "2001:1890:01ff:09f1:0099:0099:0099:0128",
+                     "2001:1890:01ff:09f1:0099:0099:0099:0130",
+                     "99.99.99.128",
+                     "99.99.99.130"
+                  ],
+                  "nameserverIpCnt" : 4,
+                  "nameserverRIR" : [
+                     "",
+                     "",
+                     "ARIN",
+                     "ARIN"
+                  ],
+                  "opcode" : "QUERY",
+                  "qc" : "IN",
+                  "qt" : "A",
+                  "queryHost" : "sentitlement.mobile.att.net",
+                  "status" : "NOERROR"
+               }
+            ],
+            "dnsCnt" : 1,
+            "dstOuterASN" : [
+               "---",
+               "---"
+            ],
+            "dstOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "dstOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "dstOuterIpCnt" : 2,
+            "dstOuterRIR" : [
+               "",
+               ""
+            ],
             "dstPayload8" : "d333818000010001",
             "dstRIR" : "ARIN",
             "fileId" : [],
@@ -116,6 +195,23 @@
                "packets" : 1,
                "port" : 57801
             },
+            "srcOuterASN" : [
+               "---",
+               "---"
+            ],
+            "srcOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "srcOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "srcOuterIpCnt" : 2,
+            "srcOuterRIR" : [
+               "",
+               ""
+            ],
             "srcPayload8" : "d333010000010000",
             "srcRIR" : "ARIN",
             "totDataBytes" : 299
@@ -138,6 +234,19 @@
                "packets" : 0,
                "port" : 0
             },
+            "dstOuterASN" : [
+               "---"
+            ],
+            "dstOuterGEO" : [
+               "---"
+            ],
+            "dstOuterIp" : [
+               "127.0.1.100"
+            ],
+            "dstOuterIpCnt" : 1,
+            "dstOuterRIR" : [
+               ""
+            ],
             "fileId" : [],
             "firstPacket" : 1415985409932,
             "icmp" : {
@@ -153,6 +262,7 @@
             "length" : 0,
             "network" : {
                "bytes" : 100,
+               "community_id" : "1:ZSqdzCvRkWsggi2OBdL85sNCb6Q=",
                "packets" : 1
             },
             "node" : "test",
@@ -177,6 +287,19 @@
                "packets" : 1,
                "port" : 0
             },
+            "srcOuterASN" : [
+               "---"
+            ],
+            "srcOuterGEO" : [
+               "---"
+            ],
+            "srcOuterIp" : [
+               "127.0.1.1"
+            ],
+            "srcOuterIpCnt" : 1,
+            "srcOuterRIR" : [
+               ""
+            ],
             "totDataBytes" : 8
          },
          "header" : {
@@ -197,6 +320,19 @@
                "packets" : 0,
                "port" : 0
             },
+            "dstOuterASN" : [
+               "---"
+            ],
+            "dstOuterGEO" : [
+               "---"
+            ],
+            "dstOuterIp" : [
+               "127.0.1.1"
+            ],
+            "dstOuterIpCnt" : 1,
+            "dstOuterRIR" : [
+               ""
+            ],
             "fileId" : [],
             "firstPacket" : 1415985409932,
             "icmp" : {
@@ -212,6 +348,7 @@
             "length" : 0,
             "network" : {
                "bytes" : 140,
+               "community_id" : "1:FqYeaO+Hxs1BIIB9o8cVa0q5VNs=",
                "packets" : 1
             },
             "node" : "test",
@@ -236,6 +373,19 @@
                "packets" : 1,
                "port" : 0
             },
+            "srcOuterASN" : [
+               "---"
+            ],
+            "srcOuterGEO" : [
+               "---"
+            ],
+            "srcOuterIp" : [
+               "127.0.1.100"
+            ],
+            "srcOuterIpCnt" : 1,
+            "srcOuterRIR" : [
+               ""
+            ],
             "totDataBytes" : 48
          },
          "header" : {
@@ -256,73 +406,152 @@
                "packets" : 1,
                "port" : 53
             },
-            "dns" : {
-               "ASN" : [
-                  "---"
-               ],
-               "GEO" : [
-                  "---"
-               ],
-               "RIR" : [
-                  "ARIN"
-               ],
-               "host" : [
-                  "sentitlement.mobile.att.net"
-               ],
-               "hostCnt" : 1,
-               "ip" : [
-                  "172.26.39.3"
-               ],
-               "ipCnt" : 1,
-               "nameserverASN" : [
-                  "AS7018 AT&T Services, Inc.",
-                  "AS7018 AT&T Services, Inc.",
-                  "AS7018 AT&T Services, Inc.",
-                  "AS7018 AT&T Services, Inc."
-               ],
-               "nameserverGEO" : [
-                  "US",
-                  "US",
-                  "US",
-                  "US"
-               ],
-               "nameserverHost" : [
-                  "macu.ma.mt.np.els-gms.att.net",
-                  "ohcu.oh.mt.np.els-gms.att.net",
-                  "orcu.or.br.np.els-gms.att.net",
-                  "wycu.wy.br.np.els-gms.att.net"
-               ],
-               "nameserverHostCnt" : 4,
-               "nameserverIp" : [
-                  "2001:1890:01ff:09f1:0099:0099:0099:0128",
-                  "2001:1890:01ff:09f1:0099:0099:0099:0130",
-                  "99.99.99.128",
-                  "99.99.99.130"
-               ],
-               "nameserverIpCnt" : 4,
-               "nameserverRIR" : [
-                  "",
-                  "",
-                  "ARIN",
-                  "ARIN"
-               ],
-               "opcode" : [
-                  "QUERY"
-               ],
-               "opcodeCnt" : 1,
-               "qc" : [
-                  "IN"
-               ],
-               "qcCnt" : 1,
-               "qt" : [
-                  "A"
-               ],
-               "qtCnt" : 1,
-               "status" : [
-                  "NOERROR"
-               ],
-               "statusCnt" : 1
-            },
+            "dns" : [
+               {
+                  "ASN" : [
+                     "---"
+                  ],
+                  "GEO" : [
+                     "---"
+                  ],
+                  "RIR" : [
+                     "ARIN"
+                  ],
+                  "answers" : [
+                     {
+                        "class" : "IN",
+                        "ip" : "172.26.39.3",
+                        "name" : "sentitlement.mobile.att.net",
+                        "ttl" : 4158,
+                        "type" : "A"
+                     },
+                     {
+                        "class" : "IN",
+                        "name" : "att.net",
+                        "nameserver" : "macu.ma.mt.np.els-gms.att.net",
+                        "ttl" : 172239,
+                        "type" : "NS"
+                     },
+                     {
+                        "class" : "IN",
+                        "name" : "att.net",
+                        "nameserver" : "ohcu.oh.mt.np.els-gms.att.net",
+                        "ttl" : 172239,
+                        "type" : "NS"
+                     },
+                     {
+                        "class" : "IN",
+                        "name" : "att.net",
+                        "nameserver" : "orcu.or.br.np.els-gms.att.net",
+                        "ttl" : 172239,
+                        "type" : "NS"
+                     },
+                     {
+                        "class" : "IN",
+                        "name" : "att.net",
+                        "nameserver" : "wycu.wy.br.np.els-gms.att.net",
+                        "ttl" : 172239,
+                        "type" : "NS"
+                     },
+                     {
+                        "class" : "IN",
+                        "ip" : "99.99.99.130",
+                        "name" : "macu.ma.mt.np.els-gms.att.net",
+                        "ttl" : 68136,
+                        "type" : "A"
+                     },
+                     {
+                        "class" : "IN",
+                        "ip" : "2001:1890:1ff:9f1:99:99:99:130",
+                        "name" : "macu.ma.mt.np.els-gms.att.net",
+                        "ttl" : 64736,
+                        "type" : "AAAA"
+                     },
+                     {
+                        "class" : "IN",
+                        "ip" : "99.99.99.128",
+                        "name" : "ohcu.oh.mt.np.els-gms.att.net",
+                        "ttl" : 68136,
+                        "type" : "A"
+                     },
+                     {
+                        "class" : "IN",
+                        "ip" : "2001:1890:1ff:9f1:99:99:99:128",
+                        "name" : "ohcu.oh.mt.np.els-gms.att.net",
+                        "ttl" : 64736,
+                        "type" : "AAAA"
+                     }
+                  ],
+                  "answersCnt" : 9,
+                  "headerFlags" : [
+                     "RA",
+                     "RD"
+                  ],
+                  "host" : [
+                     "sentitlement.mobile.att.net"
+                  ],
+                  "hostCnt" : 1,
+                  "ip" : [
+                     "172.26.39.3"
+                  ],
+                  "ipCnt" : 1,
+                  "nameserverASN" : [
+                     "AS7018 AT&T Services, Inc.",
+                     "AS7018 AT&T Services, Inc.",
+                     "AS7018 AT&T Services, Inc.",
+                     "AS7018 AT&T Services, Inc."
+                  ],
+                  "nameserverGEO" : [
+                     "US",
+                     "US",
+                     "US",
+                     "US"
+                  ],
+                  "nameserverHost" : [
+                     "macu.ma.mt.np.els-gms.att.net",
+                     "ohcu.oh.mt.np.els-gms.att.net",
+                     "orcu.or.br.np.els-gms.att.net",
+                     "wycu.wy.br.np.els-gms.att.net"
+                  ],
+                  "nameserverHostCnt" : 4,
+                  "nameserverIp" : [
+                     "2001:1890:01ff:09f1:0099:0099:0099:0128",
+                     "2001:1890:01ff:09f1:0099:0099:0099:0130",
+                     "99.99.99.128",
+                     "99.99.99.130"
+                  ],
+                  "nameserverIpCnt" : 4,
+                  "nameserverRIR" : [
+                     "",
+                     "",
+                     "ARIN",
+                     "ARIN"
+                  ],
+                  "opcode" : "QUERY",
+                  "qc" : "IN",
+                  "qt" : "A",
+                  "queryHost" : "sentitlement.mobile.att.net",
+                  "status" : "NOERROR"
+               }
+            ],
+            "dnsCnt" : 1,
+            "dstOuterASN" : [
+               "---",
+               "---"
+            ],
+            "dstOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "dstOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "dstOuterIpCnt" : 2,
+            "dstOuterRIR" : [
+               "",
+               ""
+            ],
             "dstPayload8" : "7442818000010001",
             "dstRIR" : "ARIN",
             "fileId" : [],
@@ -360,6 +589,23 @@
                "packets" : 1,
                "port" : 58364
             },
+            "srcOuterASN" : [
+               "---",
+               "---"
+            ],
+            "srcOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "srcOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "srcOuterIpCnt" : 2,
+            "srcOuterRIR" : [
+               "",
+               ""
+            ],
             "srcPayload8" : "7442010000010000",
             "srcRIR" : "ARIN",
             "totDataBytes" : 299
@@ -382,6 +628,19 @@
                "packets" : 0,
                "port" : 0
             },
+            "dstOuterASN" : [
+               "---"
+            ],
+            "dstOuterGEO" : [
+               "---"
+            ],
+            "dstOuterIp" : [
+               "127.0.1.100"
+            ],
+            "dstOuterIpCnt" : 1,
+            "dstOuterRIR" : [
+               ""
+            ],
             "dstRIR" : "ARIN",
             "fileId" : [],
             "firstPacket" : 1415985410172,
@@ -398,6 +657,7 @@
             "length" : 0,
             "network" : {
                "bytes" : 108,
+               "community_id" : "1:lB4egS/Qun/GwHeSFBDGvr1G/IU=",
                "packets" : 1
             },
             "node" : "test",
@@ -422,6 +682,19 @@
                "packets" : 1,
                "port" : 0
             },
+            "srcOuterASN" : [
+               "---"
+            ],
+            "srcOuterGEO" : [
+               "---"
+            ],
+            "srcOuterIp" : [
+               "127.0.1.1"
+            ],
+            "srcOuterIpCnt" : 1,
+            "srcOuterRIR" : [
+               ""
+            ],
             "srcRIR" : "ARIN",
             "totDataBytes" : 36
          },
@@ -443,6 +716,19 @@
                "packets" : 0,
                "port" : 0
             },
+            "dstOuterASN" : [
+               "---"
+            ],
+            "dstOuterGEO" : [
+               "---"
+            ],
+            "dstOuterIp" : [
+               "127.0.1.100"
+            ],
+            "dstOuterIpCnt" : 1,
+            "dstOuterRIR" : [
+               ""
+            ],
             "fileId" : [],
             "firstPacket" : 1415985411060,
             "icmp" : {
@@ -458,6 +744,7 @@
             "length" : 3040,
             "network" : {
                "bytes" : 376,
+               "community_id" : "1:d7cy7xMNX0/8Mwn5xmwtmFSTQ/k=",
                "packets" : 2
             },
             "node" : "test",
@@ -484,6 +771,25 @@
                "packets" : 2,
                "port" : 0
             },
+            "srcOuterASN" : [
+               "---"
+            ],
+            "srcOuterGEO" : [
+               "---"
+            ],
+            "srcOuterIp" : [
+               "127.0.1.1"
+            ],
+            "srcOuterIpCnt" : 1,
+            "srcOuterRIR" : [
+               ""
+            ],
+            "tags" : [
+               "not-src-0-not-dst-1",
+               "src-2-dst-0",
+               "src-2-not-dst-1"
+            ],
+            "tagsCnt" : 3,
             "totDataBytes" : 176
          },
          "header" : {
@@ -504,17 +810,34 @@
                "packets" : 5,
                "port" : 5060
             },
+            "dstOuterASN" : [
+               "---",
+               "---"
+            ],
+            "dstOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "dstOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "dstOuterIpCnt" : 2,
+            "dstOuterRIR" : [
+               "",
+               ""
+            ],
             "dstPayload8" : "5349502f322e3020",
             "fileId" : [],
             "firstPacket" : 1415985412100,
             "initRTT" : 15,
             "ipProtocol" : 6,
-            "lastPacket" : 1415985444983,
-            "length" : 32883,
+            "lastPacket" : 1415985412532,
+            "length" : 432,
             "network" : {
-               "bytes" : 4030,
+               "bytes" : 3894,
                "community_id" : "1:LfVtLs2VX3xOzzzdeOeVLCh7SOw=",
-               "packets" : 13
+               "packets" : 12
             },
             "node" : "test",
             "packetLen" : [
@@ -529,8 +852,7 @@
                140,
                140,
                140,
-               140,
-               152
+               140
             ],
             "packetPos" : [
                1606,
@@ -544,8 +866,7 @@
                5132,
                5272,
                5412,
-               5552,
-               5896
+               5552
             ],
             "protocol" : [
                "gtp",
@@ -558,11 +879,28 @@
                "bytes" : 689
             },
             "source" : {
-               "bytes" : 2713,
+               "bytes" : 2577,
                "ip" : "fd00:183:1:1:1886:9040:8605:32b8",
-               "packets" : 8,
+               "packets" : 7,
                "port" : 5060
             },
+            "srcOuterASN" : [
+               "---",
+               "---"
+            ],
+            "srcOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "srcOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "srcOuterIpCnt" : 2,
+            "srcOuterRIR" : [
+               "",
+               ""
+            ],
             "srcPayload8" : "5245474953544552",
             "tcpflags" : {
                "ack" : 6,
@@ -571,7 +909,7 @@
                "psh" : 2,
                "rst" : 0,
                "srcZero" : 0,
-               "syn" : 2,
+               "syn" : 1,
                "syn-ack" : 1,
                "urg" : 0
             },
@@ -595,12 +933,30 @@
                "packets" : 5,
                "port" : 5060
             },
+            "dstOuterASN" : [
+               "---",
+               "---"
+            ],
+            "dstOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "dstOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "dstOuterIpCnt" : 2,
+            "dstOuterRIR" : [
+               "",
+               ""
+            ],
             "dstPayload8" : "5349502f322e3020",
             "fileId" : [],
-            "firstPacket" : 1415985444984,
+            "firstPacket" : 1415985444983,
+            "initRTT" : 16,
             "ipProtocol" : 6,
-            "lastPacket" : 1415985484900,
-            "length" : 39917,
+            "lastPacket" : 1415985446023,
+            "length" : 1041,
             "network" : {
                "bytes" : 4033,
                "community_id" : "1:LfVtLs2VX3xOzzzdeOeVLCh7SOw=",
@@ -608,6 +964,7 @@
             },
             "node" : "test",
             "packetLen" : [
+               152,
                148,
                140,
                1478,
@@ -618,10 +975,10 @@
                140,
                140,
                140,
-               140,
-               152
+               140
             ],
             "packetPos" : [
+               5896,
                6048,
                6196,
                6336,
@@ -632,8 +989,7 @@
                9561,
                10575,
                10715,
-               11405,
-               11545
+               11405
             ],
             "protocol" : [
                "gtp",
@@ -651,6 +1007,23 @@
                "packets" : 7,
                "port" : 5060
             },
+            "srcOuterASN" : [
+               "---",
+               "---"
+            ],
+            "srcOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "srcOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "srcOuterIpCnt" : 2,
+            "srcOuterRIR" : [
+               "",
+               ""
+            ],
             "srcPayload8" : "5245474953544552",
             "tcpflags" : {
                "ack" : 6,
@@ -683,6 +1056,23 @@
                "packets" : 2,
                "port" : 5060
             },
+            "dstOuterASN" : [
+               "---",
+               "---"
+            ],
+            "dstOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "dstOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "dstOuterIpCnt" : 2,
+            "dstOuterRIR" : [
+               "",
+               ""
+            ],
             "dstPayload8" : "5349502f322e3020",
             "fileId" : [],
             "firstPacket" : 1415985445984,
@@ -723,6 +1113,23 @@
                "packets" : 2,
                "port" : 5060
             },
+            "srcOuterASN" : [
+               "---",
+               "---"
+            ],
+            "srcOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "srcOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "srcOuterIpCnt" : 2,
+            "srcOuterRIR" : [
+               "",
+               ""
+            ],
             "srcPayload8" : "5355425343524942",
             "totDataBytes" : 2332
          },
@@ -744,12 +1151,30 @@
                "packets" : 10,
                "port" : 5060
             },
+            "dstOuterASN" : [
+               "---",
+               "---"
+            ],
+            "dstOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "dstOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "dstOuterIpCnt" : 2,
+            "dstOuterRIR" : [
+               "",
+               ""
+            ],
             "dstPayload8" : "5349502f322e3020",
             "fileId" : [],
             "firstPacket" : 1415985484900,
+            "initRTT" : 20,
             "ipProtocol" : 6,
-            "lastPacket" : 1415985559780,
-            "length" : 74880,
+            "lastPacket" : 1415985533136,
+            "length" : 48237,
             "network" : {
                "bytes" : 7565,
                "community_id" : "1:LfVtLs2VX3xOzzzdeOeVLCh7SOw=",
@@ -757,6 +1182,7 @@
             },
             "node" : "test",
             "packetLen" : [
+               152,
                148,
                140,
                1478,
@@ -777,10 +1203,10 @@
                140,
                140,
                140,
-               140,
-               152
+               140
             ],
             "packetPos" : [
+               11545,
                11697,
                11845,
                11985,
@@ -801,8 +1227,7 @@
                24379,
                26209,
                26349,
-               26489,
-               26629
+               26489
             ],
             "protocol" : [
                "gtp",
@@ -820,6 +1245,23 @@
                "packets" : 12,
                "port" : 5060
             },
+            "srcOuterASN" : [
+               "---",
+               "---"
+            ],
+            "srcOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "srcOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "srcOuterIpCnt" : 2,
+            "srcOuterRIR" : [
+               "",
+               ""
+            ],
             "srcPayload8" : "494e564954452074",
             "tcpflags" : {
                "ack" : 11,
@@ -852,6 +1294,23 @@
                "packets" : 13,
                "port" : 49120
             },
+            "dstOuterASN" : [
+               "---",
+               "---"
+            ],
+            "dstOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "dstOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "dstOuterIpCnt" : 2,
+            "dstOuterRIR" : [
+               "",
+               ""
+            ],
             "dstPayload8" : "80660000000000a0",
             "fileId" : [],
             "firstPacket" : 1415985490121,
@@ -937,6 +1396,23 @@
                "packets" : 14,
                "port" : 19956
             },
+            "srcOuterASN" : [
+               "---",
+               "---"
+            ],
+            "srcOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "srcOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "srcOuterIpCnt" : 2,
+            "srcOuterRIR" : [
+               "",
+               ""
+            ],
             "srcPayload8" : "80e652d84bcad9ca",
             "totDataBytes" : 1138
          },
@@ -958,73 +1434,152 @@
                "packets" : 1,
                "port" : 53
             },
-            "dns" : {
-               "ASN" : [
-                  "---"
-               ],
-               "GEO" : [
-                  "---"
-               ],
-               "RIR" : [
-                  "ARIN"
-               ],
-               "host" : [
-                  "sentitlement.mobile.att.net"
-               ],
-               "hostCnt" : 1,
-               "ip" : [
-                  "172.26.39.3"
-               ],
-               "ipCnt" : 1,
-               "nameserverASN" : [
-                  "AS7018 AT&T Services, Inc.",
-                  "AS7018 AT&T Services, Inc.",
-                  "AS7018 AT&T Services, Inc.",
-                  "AS7018 AT&T Services, Inc."
-               ],
-               "nameserverGEO" : [
-                  "US",
-                  "US",
-                  "US",
-                  "US"
-               ],
-               "nameserverHost" : [
-                  "macu.ma.mt.np.els-gms.att.net",
-                  "ohcu.oh.mt.np.els-gms.att.net",
-                  "orcu.or.br.np.els-gms.att.net",
-                  "wycu.wy.br.np.els-gms.att.net"
-               ],
-               "nameserverHostCnt" : 4,
-               "nameserverIp" : [
-                  "2001:1890:01ff:09f1:0099:0099:0099:0128",
-                  "2001:1890:01ff:09f1:0099:0099:0099:0130",
-                  "99.99.99.128",
-                  "99.99.99.130"
-               ],
-               "nameserverIpCnt" : 4,
-               "nameserverRIR" : [
-                  "",
-                  "",
-                  "ARIN",
-                  "ARIN"
-               ],
-               "opcode" : [
-                  "QUERY"
-               ],
-               "opcodeCnt" : 1,
-               "qc" : [
-                  "IN"
-               ],
-               "qcCnt" : 1,
-               "qt" : [
-                  "A"
-               ],
-               "qtCnt" : 1,
-               "status" : [
-                  "NOERROR"
-               ],
-               "statusCnt" : 1
-            },
+            "dns" : [
+               {
+                  "ASN" : [
+                     "---"
+                  ],
+                  "GEO" : [
+                     "---"
+                  ],
+                  "RIR" : [
+                     "ARIN"
+                  ],
+                  "answers" : [
+                     {
+                        "class" : "IN",
+                        "ip" : "172.26.39.3",
+                        "name" : "sentitlement.mobile.att.net",
+                        "ttl" : 4078,
+                        "type" : "A"
+                     },
+                     {
+                        "class" : "IN",
+                        "name" : "att.net",
+                        "nameserver" : "wycu.wy.br.np.els-gms.att.net",
+                        "ttl" : 172159,
+                        "type" : "NS"
+                     },
+                     {
+                        "class" : "IN",
+                        "name" : "att.net",
+                        "nameserver" : "macu.ma.mt.np.els-gms.att.net",
+                        "ttl" : 172159,
+                        "type" : "NS"
+                     },
+                     {
+                        "class" : "IN",
+                        "name" : "att.net",
+                        "nameserver" : "ohcu.oh.mt.np.els-gms.att.net",
+                        "ttl" : 172159,
+                        "type" : "NS"
+                     },
+                     {
+                        "class" : "IN",
+                        "name" : "att.net",
+                        "nameserver" : "orcu.or.br.np.els-gms.att.net",
+                        "ttl" : 172159,
+                        "type" : "NS"
+                     },
+                     {
+                        "class" : "IN",
+                        "ip" : "99.99.99.130",
+                        "name" : "macu.ma.mt.np.els-gms.att.net",
+                        "ttl" : 68056,
+                        "type" : "A"
+                     },
+                     {
+                        "class" : "IN",
+                        "ip" : "2001:1890:1ff:9f1:99:99:99:130",
+                        "name" : "macu.ma.mt.np.els-gms.att.net",
+                        "ttl" : 64656,
+                        "type" : "AAAA"
+                     },
+                     {
+                        "class" : "IN",
+                        "ip" : "99.99.99.128",
+                        "name" : "ohcu.oh.mt.np.els-gms.att.net",
+                        "ttl" : 68056,
+                        "type" : "A"
+                     },
+                     {
+                        "class" : "IN",
+                        "ip" : "2001:1890:1ff:9f1:99:99:99:128",
+                        "name" : "ohcu.oh.mt.np.els-gms.att.net",
+                        "ttl" : 64656,
+                        "type" : "AAAA"
+                     }
+                  ],
+                  "answersCnt" : 9,
+                  "headerFlags" : [
+                     "RA",
+                     "RD"
+                  ],
+                  "host" : [
+                     "sentitlement.mobile.att.net"
+                  ],
+                  "hostCnt" : 1,
+                  "ip" : [
+                     "172.26.39.3"
+                  ],
+                  "ipCnt" : 1,
+                  "nameserverASN" : [
+                     "AS7018 AT&T Services, Inc.",
+                     "AS7018 AT&T Services, Inc.",
+                     "AS7018 AT&T Services, Inc.",
+                     "AS7018 AT&T Services, Inc."
+                  ],
+                  "nameserverGEO" : [
+                     "US",
+                     "US",
+                     "US",
+                     "US"
+                  ],
+                  "nameserverHost" : [
+                     "macu.ma.mt.np.els-gms.att.net",
+                     "ohcu.oh.mt.np.els-gms.att.net",
+                     "orcu.or.br.np.els-gms.att.net",
+                     "wycu.wy.br.np.els-gms.att.net"
+                  ],
+                  "nameserverHostCnt" : 4,
+                  "nameserverIp" : [
+                     "2001:1890:01ff:09f1:0099:0099:0099:0128",
+                     "2001:1890:01ff:09f1:0099:0099:0099:0130",
+                     "99.99.99.128",
+                     "99.99.99.130"
+                  ],
+                  "nameserverIpCnt" : 4,
+                  "nameserverRIR" : [
+                     "",
+                     "",
+                     "ARIN",
+                     "ARIN"
+                  ],
+                  "opcode" : "QUERY",
+                  "qc" : "IN",
+                  "qt" : "A",
+                  "queryHost" : "sentitlement.mobile.att.net",
+                  "status" : "NOERROR"
+               }
+            ],
+            "dnsCnt" : 1,
+            "dstOuterASN" : [
+               "---",
+               "---"
+            ],
+            "dstOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "dstOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "dstOuterIpCnt" : 2,
+            "dstOuterRIR" : [
+               "",
+               ""
+            ],
             "dstPayload8" : "c2b1818000010001",
             "dstRIR" : "ARIN",
             "fileId" : [],
@@ -1062,6 +1617,23 @@
                "packets" : 1,
                "port" : 60716
             },
+            "srcOuterASN" : [
+               "---",
+               "---"
+            ],
+            "srcOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "srcOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "srcOuterIpCnt" : 2,
+            "srcOuterRIR" : [
+               "",
+               ""
+            ],
             "srcPayload8" : "c2b1010000010000",
             "srcRIR" : "ARIN",
             "totDataBytes" : 299
@@ -1084,6 +1656,19 @@
                "packets" : 0,
                "port" : 49121
             },
+            "dstOuterASN" : [
+               "---"
+            ],
+            "dstOuterGEO" : [
+               "---"
+            ],
+            "dstOuterIp" : [
+               "127.0.1.1"
+            ],
+            "dstOuterIpCnt" : 1,
+            "dstOuterRIR" : [
+               ""
+            ],
             "fileId" : [],
             "firstPacket" : 1415985494581,
             "ipProtocol" : 17,
@@ -1120,6 +1705,19 @@
                "packets" : 3,
                "port" : 19957
             },
+            "srcOuterASN" : [
+               "---"
+            ],
+            "srcOuterGEO" : [
+               "---"
+            ],
+            "srcOuterIp" : [
+               "127.0.1.100"
+            ],
+            "srcOuterIpCnt" : 1,
+            "srcOuterRIR" : [
+               ""
+            ],
             "srcPayload8" : "81c8000c6399bbc1",
             "totDataBytes" : 112
          },
@@ -1141,6 +1739,19 @@
                "packets" : 0,
                "port" : 0
             },
+            "dstOuterASN" : [
+               "---"
+            ],
+            "dstOuterGEO" : [
+               "---"
+            ],
+            "dstOuterIp" : [
+               "127.0.1.1"
+            ],
+            "dstOuterIpCnt" : 1,
+            "dstOuterRIR" : [
+               ""
+            ],
             "fileId" : [],
             "firstPacket" : 1415985500740,
             "icmp" : {
@@ -1156,6 +1767,7 @@
             "length" : 79,
             "network" : {
                "bytes" : 526,
+               "community_id" : "1:R7F0MUT6ZV1iG5f3xJ0Pro45tts=",
                "packets" : 3
             },
             "node" : "test",
@@ -1184,6 +1796,19 @@
                "packets" : 3,
                "port" : 0
             },
+            "srcOuterASN" : [
+               "---"
+            ],
+            "srcOuterGEO" : [
+               "---"
+            ],
+            "srcOuterIp" : [
+               "127.0.1.100"
+            ],
+            "srcOuterIpCnt" : 1,
+            "srcOuterRIR" : [
+               ""
+            ],
             "totDataBytes" : 250
          },
          "header" : {
@@ -1204,19 +1829,38 @@
                "packets" : 5,
                "port" : 5060
             },
+            "dstOuterASN" : [
+               "---",
+               "---"
+            ],
+            "dstOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "dstOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "dstOuterIpCnt" : 2,
+            "dstOuterRIR" : [
+               "",
+               ""
+            ],
             "dstPayload8" : "5349502f322e3020",
             "fileId" : [],
             "firstPacket" : 1415985559780,
+            "initRTT" : 19,
             "ipProtocol" : 6,
             "lastPacket" : 1415985559931,
             "length" : 151,
             "network" : {
-               "bytes" : 3550,
+               "bytes" : 3686,
                "community_id" : "1:LfVtLs2VX3xOzzzdeOeVLCh7SOw=",
-               "packets" : 11
+               "packets" : 12
             },
             "node" : "test",
             "packetLen" : [
+               152,
                148,
                140,
                1478,
@@ -1230,6 +1874,7 @@
                140
             ],
             "packetPos" : [
+               26629,
                26781,
                26929,
                27069,
@@ -1253,11 +1898,28 @@
                "bytes" : 425
             },
             "source" : {
-               "bytes" : 2497,
+               "bytes" : 2633,
                "ip" : "fd00:183:1:1:1886:9040:8605:32b8",
-               "packets" : 6,
+               "packets" : 7,
                "port" : 5060
             },
+            "srcOuterASN" : [
+               "---",
+               "---"
+            ],
+            "srcOuterGEO" : [
+               "---",
+               "---"
+            ],
+            "srcOuterIp" : [
+               "127.0.1.1",
+               "127.0.1.100"
+            ],
+            "srcOuterIpCnt" : 2,
+            "srcOuterRIR" : [
+               "",
+               ""
+            ],
             "srcPayload8" : "5245474953544552",
             "tcpflags" : {
                "ack" : 6,
@@ -1266,7 +1928,7 @@
                "psh" : 2,
                "rst" : 0,
                "srcZero" : 0,
-               "syn" : 0,
+               "syn" : 1,
                "syn-ack" : 1,
                "urg" : 0
             },

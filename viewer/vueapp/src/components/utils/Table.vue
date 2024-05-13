@@ -1,3 +1,7 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
 
   <table v-if="computedColumns && computedColumns.length"
@@ -177,7 +181,7 @@
           class="text-danger text-center">
           <span class="fa fa-warning">
           </span>&nbsp;
-          No results match your search
+          {{ noResultsMsg }}
         </td>
       </tr> <!-- /no results -->
     </transition-group>
@@ -212,7 +216,7 @@
 import Sortable from 'sortablejs';
 
 import UserService from '../users/UserService';
-import ToggleBtn from '../utils/ToggleBtn';
+import ToggleBtn from '../../../../../common/vueapp/ToggleBtn';
 
 // column resize variables and functions
 let selectedColElem; // store selected column to watch drag and calculate new column width
@@ -288,7 +292,7 @@ function gripUnclick (e, vueThis) {
  * There is no need to load data in the parent.
  */
 export default {
-  name: 'MolochTable',
+  name: 'ArkimeTable',
   components: { ToggleBtn },
   props: {
     loadData: { // event to fire when the table needs to load data
@@ -359,6 +363,10 @@ export default {
     /* IMPORTANT! 'list' is the only table animation currently available */
     tableAnimation: { // table animation name
       type: String
+    },
+    noResultsMsg: { // message to display when there are no results
+      type: String,
+      default: 'No results match your search'
     }
   },
   data: function () {
@@ -412,13 +420,13 @@ export default {
           if (column.doStats) {
             let totalValue = 0;
             for (const item of this.data) {
-              if (!item.[column.id] && !item[column.sort]) {
+              if (!item[column.id] && !item[column.sort]) {
                 continue;
               }
-              totalValue += parseInt(item[column.id || column.sort]);
+              totalValue += parseInt(item[column.sort || column.id]);
             }
-            this.totalValues[column.id] = totalValue;
-            this.averageValues[column.id] = totalValue / this.data.length;
+            this.totalValues[column.sort || column.id] = totalValue;
+            this.averageValues[column.sort || column.id] = totalValue / this.data.length;
           }
         }
       }
@@ -620,7 +628,7 @@ export default {
       // if it's not a computed field or there's no data return empty immediately
       if (!column.doStats || !this.data || !this.data.length) { return ' '; }
 
-      let value = this.totalValues[column.id];
+      let value = this.totalValues[column.sort || column.id];
       // need to recalculate the value if this column has been zeroed
       if (this.zeroMap[column.id] !== undefined) {
         // subtract all zeroed values for this column
@@ -630,7 +638,7 @@ export default {
       }
 
       const mock = {};
-      mock[column.id] = value;
+      mock[column.sort || column.id] = value;
 
       if (column.avgTotFunction) {
         return column.avgTotFunction(mock);
@@ -645,7 +653,7 @@ export default {
       if (!column.doStats || !this.data || !this.data.length) { return ' '; }
 
       let sum = 0;
-      let value = this.averageValues[column.id];
+      let value = this.averageValues[column.sort || column.id];
       // need to recalculate the value if this column has been zeroed
       if (this.zeroMap[column.id] !== undefined) {
         for (let v = 0; v < this.data.length; v++) {
@@ -658,7 +666,7 @@ export default {
       }
 
       const mock = {};
-      mock[column.id] = value;
+      mock[column.sort || column.id] = value;
 
       if (column.avgTotFunction) {
         return column.avgTotFunction(mock);

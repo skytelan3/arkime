@@ -12,7 +12,7 @@ import ExpressionTypeahead from '../src/components/search/ExpressionTypeahead.vu
 import UserService from '../src/components/users/UserService';
 import FieldService from '../src/components/search/FieldService';
 import countries from '../src/components/search/countries.json';
-const { fields, fieldsMap } = require('./consts');
+const { fields, fieldsMap } = require('../../../common/vueapp/tests/consts');
 
 console.info = jest.fn(); // don't display console.info messages
 
@@ -20,6 +20,10 @@ global.$ = global.jQuery = $;
 
 Vue.use(VueAxios, axios);
 Vue.use(BootstrapVue);
+
+Vue.prototype.$constants = {
+  MULTIVIEWER: false
+};
 
 jest.mock('../src/components/users/UserService');
 jest.mock('../src/components/search/FieldService');
@@ -32,9 +36,13 @@ const store = {
     views: {},
     fieldsMap,
     fieldsArr: fields,
-    fieldhistory: []
+    fieldhistory: [],
+    hideViz: false,
+    stickyViz: false
   },
   mutations: {
+    toggleHideViz: jest.fn(),
+    toggleStickyViz: jest.fn(),
     setFocusSearch: jest.fn(),
     setExpression (state, value) {
       state.expression = value;

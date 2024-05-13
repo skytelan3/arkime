@@ -1,13 +1,24 @@
+/******************************************************************************/
+/* apiConnections.js -- api calls for connections tab
+ *
+ * Copyright Yahoo Inc.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 'use strict';
 
+const Config = require('./config.js');
+const Db = require('./db.js');
 const async = require('async');
 const util = require('util');
+const ArkimeUtil = require('../common/arkimeUtil');
+const ArkimeConfig = require('../common/arkimeConfig');
+const ViewerUtils = require('./viewerUtils');
+const SessionAPIs = require('./apiSessions');
 
 let fieldsMap;
 
-module.exports = (Config, Db, ViewerUtils, sessionAPIs) => {
-  const connectionAPIs = {};
-
+ArkimeConfig.loaded(() => {
   if (!fieldsMap) {
     setTimeout(() => { // make sure db.js loads before fetching fields
       ViewerUtils.loadFields()
@@ -16,7 +27,9 @@ module.exports = (Config, Db, ViewerUtils, sessionAPIs) => {
         });
     });
   }
+});
 
+class ConnectionAPIs {
   // --------------------------------------------------------------------------
   // HELPERS
   // --------------------------------------------------------------------------
@@ -33,13 +46,13 @@ module.exports = (Config, Db, ViewerUtils, sessionAPIs) => {
   //
   // This code was factored out from buildConnections.
   // --------------------------------------------------------------------------
-  function buildConnectionQuery (req, fields, options, fsrc, fdst, dstipport, resultId, cb) {
+  static #buildConnectionQuery (req, fields, options, fsrc, fdst, dstipport, resultId, cb) {
     const result = {
-      resultId: resultId,
+      resultId,
       err: null,
       query: null,
       indices: null,
-      options: options
+      options
     };
 
     // If network graph baseline is enabled (enabled: req.query.baselineDate != 0, disabled:req.query.baselineDate=0 or undefined)
@@ -62,21 +75,23 @@ module.exports = (Config, Db, ViewerUtils, sessionAPIs) => {
     let baselineDate = 0;
     let baselineDateIsMultiplier = false;
 
-    if (((req.query.baselineDate !== undefined) && (req.query.baselineDate.length !== 0) && (String(req.query.baselineDate) !== '0') &&
+    if (req.query.baselineDate !== undefined && !ArkimeUtil.isString(req.query.baselineDate, 0)) {
+      result.err = 'Bad query.baselineDate';
+      return cb([result]);
+    }
+
+    if ((ArkimeUtil.isString(req.query.baselineDate) && (req.query.baselineDate !== '0') &&
           (req.query.date !== '-1') && (req.query.startTime !== undefined) && (req.query.stopTime !== undefined)) ||
         (resultId > 1)) {
       doBaseline = true;
-    }
-
-    if (doBaseline) {
       let baselineDateTmpStr = req.query.baselineDate;
       if (baselineDateTmpStr.endsWith('x')) {
         baselineDateIsMultiplier = true;
         baselineDateTmpStr = baselineDateTmpStr.slice(0, -1);
       }
       baselineDate = parseInt(baselineDateTmpStr, 10);
-      doBaseline = (doBaseline && (baselineDate > 0));
-      baselineDateIsMultiplier = (doBaseline && baselineDateIsMultiplier && (baselineDate > 0));
+      doBaseline = baselineDate > 0;
+      baselineDateIsMultiplier = baselineDateIsMultiplier && (baselineDate > 0);
     }
 
     // use a copy of req.query as we will modify the startTime/stopTime if we are doing a baseline query
@@ -104,7 +119,7 @@ module.exports = (Config, Db, ViewerUtils, sessionAPIs) => {
       }
     } // resultId > 1 (calculating baseline query time frame)
 
-    sessionAPIs.buildSessionQuery(req, (bsqErr, query, indices) => {
+    SessionAPIs.buildSessionQuery(req, (bsqErr, query, indices) => {
       if (bsqErr) {
         console.log('ERROR - buildConnectionQuery -> buildSessionQuery', resultId, util.inspect(bsqErr, false, 50));
         result.err = bsqErr;
@@ -125,7 +140,7 @@ module.exports = (Config, Db, ViewerUtils, sessionAPIs) => {
         result.indices = JSON.parse(JSON.stringify(indices));
 
         if ((resultId === 1) && (doBaseline)) {
-          buildConnectionQuery(req, fields, options, fsrc, fdst, dstipport, resultId + 1, (baselineResult) => {
+          ConnectionAPIs.#buildConnectionQuery(req, fields, options, fsrc, fdst, dstipport, resultId + 1, (baselineResult) => {
             return cb([result].concat(baselineResult));
           });
         } else {
@@ -147,7 +162,7 @@ module.exports = (Config, Db, ViewerUtils, sessionAPIs) => {
   //
   // This code was factored out from buildConnections.
   // --------------------------------------------------------------------------
-  function dbConnectionQuerySearch (connQueries, cb) {
+  static #dbConnectionQuerySearch (connQueries, cb) {
     const resultSet = {
       resultId: null,
       err: null,
@@ -170,7 +185,7 @@ module.exports = (Config, Db, ViewerUtils, sessionAPIs) => {
           }
           resultSet.graph = graph;
           if (connQueries.length > 1) {
-            dbConnectionQuerySearch(connQueries.slice(1), (baselineResultSet) => {
+            ConnectionAPIs.#dbConnectionQuerySearch(connQueries.slice(1), (baselineResultSet) => {
               return cb([resultSet].concat(baselineResultSet));
             });
           } else {
@@ -200,7 +215,7 @@ module.exports = (Config, Db, ViewerUtils, sessionAPIs) => {
   // 4. processResultSets callback - distill nodesHash/connects hashes into
   //                                 nodes/links arrays and return
   // --------------------------------------------------------------------------
-  function buildConnections (req, res, cb) {
+  static #buildConnections (req, res, cb) {
     let dstipport;
     if (req.query.dstField === 'ip.dst:port' || req.query.dstField === 'destination.ip:port') {
       dstipport = true;
@@ -365,7 +380,7 @@ module.exports = (Config, Db, ViewerUtils, sessionAPIs) => {
 
     // ------------------------------------------------------------------------
     // call to build the session query|queries and indices
-    buildConnectionQuery(req, reqFields, options, fsrc, fdst, dstipport, 1, (connQueries) => {
+    ConnectionAPIs.#buildConnectionQuery(req, reqFields, options, fsrc, fdst, dstipport, 1, (connQueries) => {
       if (Config.debug) {
         console.log('buildConnections.connQueries', connQueries.length, JSON.stringify(connQueries, null, 2));
       }
@@ -379,7 +394,7 @@ module.exports = (Config, Db, ViewerUtils, sessionAPIs) => {
 
       // prepare and execute the Db.searchSessions query|queries
       if (connQueries.length > 0) {
-        dbConnectionQuerySearch(connQueries, (connResultSets) => {
+        ConnectionAPIs.#dbConnectionQuerySearch(connQueries, (connResultSets) => {
           if (Config.debug) {
             console.log('buildConnections.connResultSets', connResultSets.length, JSON.stringify(connResultSets, null, 2));
           }
@@ -398,7 +413,7 @@ module.exports = (Config, Db, ViewerUtils, sessionAPIs) => {
             }
 
             let nodeKeys = Object.keys(nodesHash);
-            if (Config.get('regressionTests', false)) {
+            if (ArkimeConfig.regressionTests) {
               nodeKeys = nodeKeys.sort((a, b) => {
                 return nodesHash[a].id.localeCompare(nodesHash[b].id);
               });
@@ -448,7 +463,7 @@ module.exports = (Config, Db, ViewerUtils, sessionAPIs) => {
    *
    * Builds an elasticsearch connections query. Gets a list of nodes and links and returns them to the client.
    * @name /connections
-   * @param {SessionsQuery} query - The request query to filter sessions
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    * @param {string} srcField=ip.src - The source database field name
    * @param {string} dstField=ip.dst:port - The destination database field name
    * @param {number} baselineDate=0 - The baseline date range to compare connections against. Default is 0, disabled. Options include:
@@ -478,32 +493,33 @@ module.exports = (Config, Db, ViewerUtils, sessionAPIs) => {
    * @returns {array} links - The list of links
    * @returns {array} nodes - The list of nodes
    */
-  connectionAPIs.getConnections = (req, res) => {
-    buildConnections(req, res, (err, nodes, links, total) => {
+  static getConnections (req, res) {
+    ConnectionAPIs.#buildConnections(req, res, (err, nodes, links, total) => {
       if (err) { return res.serverError(403, err.toString()); }
       res.send({
-        nodes: nodes,
-        links: links,
+        nodes,
+        links,
         recordsFiltered: total
       });
     });
   };
 
+  // --------------------------------------------------------------------------
   /**
    * POST/GET - /api/connections/csv OR /api/connections.csv
    *
    * Builds an elasticsearch connections query. Gets a list of nodes and links in csv format and returns them to the client.
    * @name /connections/csv
-   * @param {SessionsQuery} query - The request query to filter sessions
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
    * @param {string} srcField=ip.src - The source database field name
    * @param {string} dstField=ip.dst:port - The destination database field name
    * @returns {csv} csv - The csv with the connections requested
    */
-  connectionAPIs.getConnectionsCSV = (req, res) => {
-    ViewerUtils.noCache(req, res, 'text/csv');
+  static getConnectionsCSV (req, res) {
+    ArkimeUtil.noCache(req, res, 'text/csv');
 
     const seperator = req.query.seperator ?? ',';
-    buildConnections(req, res, (err, nodes, links, total) => {
+    ConnectionAPIs.#buildConnections(req, res, (err, nodes, links, total) => {
       if (err) {
         return res.send(err);
       }
@@ -527,8 +543,8 @@ module.exports = (Config, Db, ViewerUtils, sessionAPIs) => {
       res.write('\r\n');
 
       for (let i = 0, ilen = links.length; i < ilen; i++) {
-        res.write('"' + nodes[links[i].source].id.replace('"', '""') + '"' + seperator +
-                  '"' + nodes[links[i].target].id.replace('"', '""') + '"' + seperator +
+        res.write('"' + nodes[links[i].source].id.replaceAll('"', '""') + '"' + seperator +
+                  '"' + nodes[links[i].target].id.replaceAll('"', '""') + '"' + seperator +
                        links[i].value + seperator);
         for (let f = 0, flen = fields.length; f < flen; f++) {
           res.write(links[i][displayFields[fields[f]].dbField].toString());
@@ -540,6 +556,6 @@ module.exports = (Config, Db, ViewerUtils, sessionAPIs) => {
       res.end();
     });
   };
-
-  return connectionAPIs;
 };
+
+module.exports = ConnectionAPIs;

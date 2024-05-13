@@ -1,72 +1,19 @@
-ul.nav.nav-pills.mb-3
-  if (session.rootId)
-    li.nav-item
-      a.nav-link.cursor-pointer(@click='allSessions(' + '"' + session.rootId + '"' + ', ' + session.firstPacket + ')') All Sessions
-    li.nav-item
-      a.nav-link(href=session.node + '/pcap/' + session.id + '.pcap', target="_blank", download=session.id + '-segment.pcap') Download Segment Pcap
-    li.nav-item
-      a.nav-link(href=session.node + '/entirePcap/' + session.rootId + '.pcap', target="_blank", download=session.id + '.pcap') Download Entire Pcap
-  else
-    li.nav-item
-      a.nav-link(href=session.node + '/pcap/' + session.id + '.pcap', target="_blank", v-has-permission="'!disablePcapDownload'", v-b-tooltip.hover.bottom.d300="'Download the PCAP file for this session.'", download=session.id + '.pcap')
-        span.fa.fa-download
-        | &nbsp;Download PCAP
-  li.nav-item
-    a.nav-link(href=session.node + '/raw/' + session.id + '?type=src', target="_blank", v-b-tooltip.hover.bottom.d300="'Download the raw source packets for this session.'", download=session.id + '-src-raw')
-      span.fa.fa-arrow-circle-up
-      | &nbsp;Source Raw
-  li.nav-item
-    a.nav-link(href=session.node + '/raw/' + session.id + '?type=dst', target="_blank", v-b-tooltip.hover.bottom.d300="'Download the raw destination packets for this session.'", download=session.id + '-dst-raw')
-      span.fa.fa-arrow-circle-down
-      | &nbsp;Destination Raw
-  li.nav-item
-    a.nav-link.cursor-pointer(@click="openPermalink", v-b-tooltip.hover.bottom.d300="'Navigate to the sessions page containing just this session. You can use this link to share this session with other users.'")
-      span.fa.fa-link
-      | &nbsp;Link
-  b-dropdown.nav-item(text="Actions", size="sm")
-    b-dropdown-item(@click="exportPCAP", v-has-permission="'!disablePcapDownload'")
-      | Export PCAP
-    b-dropdown-item(@click="addTags")
-      | Add Tags
-    b-dropdown-item(@click="removeTags", v-has-permission="'removeEnabled'")
-      | Remove Tags
-    b-dropdown-item(@click="removeData()", v-has-permission="'removeEnabled'")
-      | Remove Data
-    b-dropdown-item(v-for="(value, key) in molochclusters", key="key", @click="sendSession(key)")
-      | Send Session to {{ value.name }}
-
-div.mb-2
-  moloch-toast(:message="message", :type="messageType", :done="messageDone")
-
-div.mb-2.mr-5
-  - var sessions = [{id: session.id}];
-  div(v-if="form === 'add:tags'")
-    moloch-tag-sessions(:sessions=sessions, :add="true", :done="actionFormDone", :single="true")
-  div(v-if="form === 'remove:tags'")
-    moloch-tag-sessions(:sessions=sessions, :add="false", :done="actionFormDone", :single="true")
-  div(v-if="form === 'export:pcap'")
-    moloch-export-pcap(:sessions=sessions, :done="actionFormDone")
-  div(v-if="form === 'remove:data'")
-    moloch-remove-data(:sessions=sessions, :done="actionFormDone", :single="true")
-  div(v-if="form === 'send:session'")
-    moloch-send-sessions(:sessions=sessions, :done="actionFormDone", :cluster="cluster")
-
+h4.card-title General
 dl
-  dt Id
-  dd
-    +clickableValue('id', Db.sid2Id(session.id))
-    if (session.rootId)
-      strong.ml-4 Root Id:
-      +clickableValue('rootId', session.rootId)
-    if (session.network && session.network.community_id)
-      strong.ml-4 Community Id:
-      +clickableValue('communityId', session.network.community_id)
-
   dt Time
   dd
     +clickableValue('starttime', session.firstPacket)
     strong -&nbsp;
     +clickableValue('stoptime', session.lastPacket)
+
+  dt Id
+  dd
+    +clickableValue('id', Db.sid2Id(session.id))
+
+  +arrayList(session, "rootId", "Root Id", "rootId")
+
+  if (session.network && session.network.community_id)
+    +arrayList(session.network, "community_id", "Community Id", "communityId")
 
   dt
     +clickableLabel('node', 'Node')
@@ -97,6 +44,7 @@ dl
           | Open Src Packets SPI Graph
         b-dropdown-item(@click="fieldExists('packets.src', '==')")
           | Add Src Packets EXISTS! to query
+        +clickableFieldActions('packets.src', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('bytes.src', 0)")
           | Export Unique Src Bytes
@@ -106,6 +54,7 @@ dl
           | Open Src Bytes SPI Graph
         b-dropdown-item(@click="fieldExists('bytes.src', '==')")
           | Add Src Bytes EXISTS! to query
+        +clickableFieldActions('bytes.src', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('databytes.src', 0)")
           | Export Unique Src Databytes
@@ -115,13 +64,17 @@ dl
           | Open Src Databytes SPI Graph
         b-dropdown-item(@click="fieldExists('databytes.src', '==')")
           | Add Src Databytes EXISTS! to query
+        +clickableFieldActions('databytes.src', false)
     dd
-      strong.medium.ml-1 Packets
-      +clickableValue('packets.src', session.source.packets)
-      strong.medium.ml-4 Bytes
-      +clickableValue('bytes.src', session.source.bytes)
-      strong.medium.ml-4 Databytes
-      +clickableValue('databytes.src', session.client.bytes)
+      span.no-wrap
+        strong.ml-1 Packets
+        +clickableValue('packets.src', session.source.packets)
+      span.no-wrap
+        strong.ml-1 Bytes
+        +clickableValue('bytes.src', session.source.bytes)
+      span.no-wrap
+        strong.ml-1 Databytes
+        +clickableValue('databytes.src', session.client.bytes)
 
     dt
       b-dropdown.clickable-label(text="Dst", size="sm", variant="default")
@@ -133,6 +86,7 @@ dl
           | Open Dst Packets SPI Graph
         b-dropdown-item(@click="fieldExists('packets.dst', '==')")
           | Add Dst Packets EXISTS! to query
+        +clickableFieldActions('packets.dst', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('bytes.dst', 0)")
           | Export Unique Dst Bytes
@@ -142,6 +96,7 @@ dl
           | Open Dst Bytes SPI Graph
         b-dropdown-item(@click="fieldExists('bytes.dst', '==')")
           | Add Dst Bytes EXISTS! to query
+        +clickableFieldActions('bytes.dst', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('databytes.dst', 0)")
           | Export Unique Dst Databytes
@@ -151,17 +106,21 @@ dl
           | Open Dst Databytes SPI Graph
         b-dropdown-item(@click="fieldExists('databytes.dst', '==')")
           | Add Dst Databytes EXISTS! to query
+        +clickableFieldActions('databytes.dst', false)
     dd
-      strong.medium.ml-1 Packets
-      +clickableValue('packets.dst', session.destination.packets)
-      strong.medium.ml-4 Bytes
-      +clickableValue('bytes.dst', session.destination.bytes)
-      strong.medium.ml-4 Databytes
-      +clickableValue('databytes.dst', session.server.bytes)
+      span.no-wrap
+        strong.ml-1 Packets
+        +clickableValue('packets.dst', session.destination.packets)
+      span.no-wrap
+        strong.ml-1 Bytes
+        +clickableValue('bytes.dst', session.destination.bytes)
+      span.no-wrap
+        strong.ml-1 Databytes
+        +clickableValue('databytes.dst', session.server.bytes)
 
   if (session.source.mac)
     dt
-      b-dropdown.clickable-label(text="Ethernet", size="sm", variant="default")
+      b-dropdown.clickable-label(text="Src Ethernet", size="sm", variant="default")
         b-dropdown-item(@click="exportUnique('mac.src', 0)")
           | Export Unique Src Mac
         b-dropdown-item(@click="exportUnique('mac.src', 1)")
@@ -170,6 +129,7 @@ dl
           | Open Src Mac SPI Graph
         b-dropdown-item(@click="fieldExists('mac.src', '==')")
           | Add Src Mac EXISTS! to query
+        +clickableFieldActions('mac.src', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('oui.src', 0)")
           | Export Unique Src OUI
@@ -179,7 +139,20 @@ dl
           | Open Src OUI SPI Graph
         b-dropdown-item(@click="fieldExists('oui.src', '==')")
           | Add Src OUI EXISTS! to query
-        b-dropdown-divider
+        +clickableFieldActions('oui.src', false)
+    dd
+      span.no-wrap
+        strong.ml-1 Mac
+        +arrayPrint(session.source, "mac", "mac.src", true)
+
+      if (session.srcOui)
+        span.no-wrap
+          strong OUI
+          +arrayPrint(session, "srcOui", "oui.src", true)
+
+  if (session.destination.mac)
+    dt
+      b-dropdown.clickable-label(text="Dst Ethernet", size="sm", variant="default")
         b-dropdown-item(@click="exportUnique('mac.dst', 0)")
           | Export Unique Dst Mac
         b-dropdown-item(@click="exportUnique('mac.dst', 1)")
@@ -188,6 +161,7 @@ dl
           | Open Dst Mac SPI Graph
         b-dropdown-item(@click="fieldExists('mac.dst', '==')")
           | Add Dst Mac EXISTS! to query
+        +clickableFieldActions('mac.dst', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('oui.dst', 0)")
           | Export Unique Dst OUI
@@ -197,33 +171,106 @@ dl
           | Open Dst OUI SPI Graph
         b-dropdown-item(@click="fieldExists('oui.dst', '==')")
           | Add Dst OUI EXISTS! to query
-        b-dropdown-divider
-        b-dropdown-item(@click="exportUnique('vlan', 0)")
-          | Export Unique VLan
-        b-dropdown-item(@click="exportUnique('vlan', 1)")
-          | Export Unique VLan with counts
-        b-dropdown-item(@click="openSpiGraph('vlan')")
-          | Open VLan SPI Graph
-        b-dropdown-item(@click="fieldExists('vlan', '==')")
-          | Add VLAN EXISTS! to query
+        +clickableFieldActions('oui.dst', false)
     dd
-      strong.medium.ml-1 Src Mac
-      +arrayPrint(session.source, "mac", "mac.src", true)
-
-      if (session.srcOui)
-        strong.medium OUI
-        +arrayPrint(session, "srcOui", "oui.src", true)
-
-      strong.medium.ml-4 Dst Mac
+      strong.ml-1 Mac
       +arrayPrint(session.destination, "mac", "mac.dst", true)
 
       if (session.dstOui)
-        strong.medium OUI
+        strong OUI
         +arrayPrint(session, "dstOui", "oui.dst", true)
 
-      if (session.network.vlan)
-        strong.medium.ml-4 VLan
-        +arrayPrint(session.network.vlan, "id", "vlan")
+  if (session.network.vlan)
+    +arrayList(session.network.vlan, "id", "VLan", "vlan")
+
+  +arrayList(session, "vni", "VNI", "vni")
+
+  if (session.srcOuterMac || session.srcOuterIp )
+    dt
+      b-dropdown.clickable-label(text="Src Outer Layer", size="sm", variant="default")
+        if (session.srcOuterMac)
+          b-dropdown-item(@click="exportUnique('outermac.src', 0)")
+            | Export outer Unique Src Mac
+          b-dropdown-item(@click="exportUnique('outermac.src', 1)")
+            | Export outer Unique Src Mac with counts
+          b-dropdown-item(@click="openSpiGraph('outermac.src')")
+            | Open outer Src Mac SPI Graph
+          b-dropdown-item(@click="fieldExists('outermac.src', '==')")
+            | Add outer Src Mac EXISTS! to query
+          b-dropdown-divider
+        if (session.srcOuterIp)
+          b-dropdown-item(@click="exportUnique('outerip.src', 0)")
+            | Export outer Unique Src IP
+          b-dropdown-item(@click="exportUnique('outerip.src', 1)")
+            | Export outer Unique Src IP with counts
+          b-dropdown-item(@click="openSpiGraph('outerip.src')")
+            | Open outer Src IP SPI Graph
+          b-dropdown-item(@click="fieldExists('outerip.src', '==')")
+            | Add outer Src IP EXISTS! to query
+          b-dropdown-divider
+        if (session.srcOuterOui)
+          b-dropdown-item(@click="exportUnique('outeroui.src', 0)")
+            | Export outer Unique Src Oui
+          b-dropdown-item(@click="exportUnique('outeroui.src', 1)")
+            | Export outer Unique Src Oui with counts
+          b-dropdown-item(@click="openSpiGraph('outeroui.src')")
+            | Open outer Src Oui SPI Graph
+          b-dropdown-item(@click="fieldExists('outeroui.src', '==')")
+            | Add outer Src Oui EXISTS! to query
+          b-dropdown-divider
+    dd
+      if (session.srcOuterMac)
+        strong.ml-1 Mac
+        +arrayPrint(session, "srcOuterMac", "outermac.src", true)
+      if (session.srcOuterOui)
+        strong.ml-1 Oui
+        +arrayPrint(session, "srcOuterOui", "outeroui.src", true)
+      if (session.srcOuterIp)
+        strong.ml-1 IP
+        +arrayPrint(session, "srcOuterIp", "outerip.src", true)
+
+  if (session.dstOuterMac || session.dstOuterIp )
+    dt
+      b-dropdown.clickable-label(text="Dst Outer Layer", size="sm", variant="default")
+        if (session.dstOuterMac)
+          b-dropdown-item(@click="exportUnique('outermac.dst', 0)")
+            | Export outer Unique Dst Mac
+          b-dropdown-item(@click="exportUnique('outermac.dst', 1)")
+            | Export outer Unique Dst Mac with counts
+          b-dropdown-item(@click="openSpiGraph('outermac.dst')")
+            | Open outer Dst Mac SPI Graph
+          b-dropdown-item(@click="fieldExists('outermac.dst', '==')")
+            | Add outer Dst Mac EXISTS! to query
+          b-dropdown-divider
+        if (session.dstOuterIp)
+          b-dropdown-item(@click="exportUnique('outerip.dst', 0)")
+            | Export outer Unique Dst IP
+          b-dropdown-item(@click="exportUnique('outerip.dst', 1)")
+            | Export outer Unique Dst IP with counts
+          b-dropdown-item(@click="openSpiGraph('outerip.dst')")
+            | Open outer Dst IP SPI Graph
+          b-dropdown-item(@click="fieldExists('outerip.dst', '==')")
+            | Add outer Dst IP EXISTS! to query
+          b-dropdown-divider
+        if (session.dstOuterOui)
+          b-dropdown-item(@click="exportUnique('outeroui.dst', 0)")
+            | Export outer Unique Dst Oui
+          b-dropdown-item(@click="exportUnique('outeroui.dst', 1)")
+            | Export outer Unique Dst Oui with counts
+          b-dropdown-item(@click="openSpiGraph('outeroui.dst')")
+            | Open outer Dst Oui SPI Graph
+          b-dropdown-item(@click="fieldExists('outeroui.dst', '==')")
+            | Add outer Dst Oui EXISTS! to query
+    dd
+      if (session.dstOuterMac)
+        strong.ml-1 Mac
+        +arrayPrint(session, "dstOuterMac", "outermac.dst", true)
+      if (session.dstOuterOui)
+        strong.ml-1 Oui
+        +arrayPrint(session, "dstOuterOui", "outeroui.dst", true)
+      if (session.dstOuterIp)
+        strong.ml-1 IP
+        +arrayPrint(session, "dstOuterIp", "outerip.dst", true)
 
   dt
     b-dropdown.clickable-label(text="Src IP/Port", size="sm", variant="default")
@@ -237,6 +284,7 @@ dl
         | Export Unique Src IP#{sep}Port with counts
       b-dropdown-item(@click="openSpiGraph('ip.src')")
         | Open Src IPv6 SPI Graph
+      +clickableFieldActions('ip.src', false)
       b-dropdown-divider
       b-dropdown-item(@click="exportUnique('port.src', 0)")
         | Export Unique Src Port
@@ -244,6 +292,7 @@ dl
         | Export Unique Src Port with counts
       b-dropdown-item(@click="openSpiGraph('port.src')")
         | Open Src Port SPI Graph
+      +clickableFieldActions('port.src', false)
       b-dropdown-divider
       b-dropdown-item(@click="exportUnique('country.src', 0)")
         | Export Unique Src Country
@@ -253,6 +302,7 @@ dl
         | Open Src Country SPI Graph
       b-dropdown-item(@click="fieldExists('country.src', '==')")
         | Add Src Country EXISTS! to query
+      +clickableFieldActions('country.src', false)
       b-dropdown-divider
       b-dropdown-item(@click="exportUnique('source.as.full', 0)")
         | Export Unique Src ASN
@@ -262,6 +312,7 @@ dl
         | Open Src ASN SPI Graph
       b-dropdown-item(@click="fieldExists('source.as.full', '==')")
         | Add Src ASN EXISTS! to query
+      +clickableFieldActions('source.as.full', false)
       b-dropdown-divider
       b-dropdown-item(@click="exportUnique('rir.src', 0)")
         | Export Unique Src RIR
@@ -271,6 +322,7 @@ dl
         | Open Src RIR SPI Graph
       b-dropdown-item(@click="fieldExists('rir.src', '==')")
         | Add Src RIR EXISTS! to query
+      +clickableFieldActions('rir.src', false)
 
   dd
     +ipPrint(session, session.source.ip, session.source.port, session.source.geo.country_iso_code, session.source.as.full, session.srcRIR, "src")
@@ -287,6 +339,7 @@ dl
         | Export Unique Dst IP#{sep}Port with counts
       b-dropdown-item(@click="openSpiGraph('ip.dst')")
         | Open Dst IPv6 SPI Graph
+      +clickableFieldActions('ip.dst', false)
       b-dropdown-divider
       b-dropdown-item(@click="exportUnique('port.dst', 0)")
         | Export Unique Dst Port
@@ -294,6 +347,7 @@ dl
         | Export Unique Dst Port with counts
       b-dropdown-item(@click="openSpiGraph('port.dst')")
         | Open Dst Port SPI Graph
+      +clickableFieldActions('port.dst', false)
       b-dropdown-divider
       b-dropdown-item(@click="exportUnique('country.dst', 0)")
         | Export Unique Dst Country
@@ -303,6 +357,7 @@ dl
         | Open Dst Country SPI Graph
       b-dropdown-item(@click="fieldExists('country.dst', '==')")
         | Add Dst Country EXISTS! to query
+      +clickableFieldActions('country.dst', false)
       b-dropdown-divider
       b-dropdown-item(@click="exportUnique('destination.as.full', 0)")
         | Export Unique Dst ASN
@@ -312,6 +367,7 @@ dl
         | Open Dst ASN SPI Graph
       b-dropdown-item(@click="fieldExists('destination.as.full', '==')")
         | Add Dst ASN EXISTS! to query
+      +clickableFieldActions('destination.as.full', false)
       b-dropdown-divider
       b-dropdown-item(@click="exportUnique('rir.dst', 0)")
         | Export Unique Dst RIR
@@ -321,6 +377,7 @@ dl
         | Open Dst RIR SPI Graph
       b-dropdown-item(@click="fieldExists('rir.dst', '==')")
         | Add Dst RIR EXISTS! to query
+      +clickableFieldActions('rir.dst', false)
 
   dd
     +ipPrint(session, session.destination.ip, session.destination.port, session.destination.geo.country_iso_code, session.destination.as.full, session.dstRIR, "dst")
@@ -336,6 +393,7 @@ dl
           | Open Src Payload8 SPI Graph
         b-dropdown-item(@click="fieldExists('payload8.src.hex', '==')")
           | Add Src Payload8 EXISTS! to query
+        +clickableFieldActions('payload8.src.hex', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('payload8.dst.hex', 0)")
           | Export Unique Dst Payload8
@@ -345,22 +403,25 @@ dl
           | Open Dst Payload8 SPI Graph
         b-dropdown-item(@click="fieldExists('payload8.dst.hex', '==')")
           | Add Dst Payload8 EXISTS! to query
+        +clickableFieldActions('payload8.dst.hex', false)
 
     dd
       - function isprint(char) { return !( /[\x00-\x08\x0E-\x1F\x80-\xFF]/.test(char)); }
       - function printstr(str) { for (let char of str) { if (!isprint(char)) { char = '�'; } } return str; }
       if (session.srcPayload8)
-        strong.medium.ml-1 Src
-        - var srcPayload8a = new Buffer(session.srcPayload8, "hex").toString();
-        +clickableValue('payload8.src.hex', session.srcPayload8)
+        span.no-wrap
+          strong.ml-1 Src
+          - var srcPayload8a = new Buffer(session.srcPayload8, "hex").toString();
+          +clickableValue('payload8.src.hex', session.srcPayload8)
         | ( #{printstr(srcPayload8a)} )
       if (session.dstPayload8)
-        if (session.srcPayload8)
-          strong.medium.ml-4 Dst
-        else
-          strong.medium Dst
-        - var dstPayload8a = new Buffer(session.dstPayload8, "hex").toString();
-        +clickableValue('payload8.dst.hex', session.dstPayload8)
+        span.no-wrap
+          if (session.srcPayload8)
+            strong.ml-1 Dst
+          else
+            strong Dst
+          - var dstPayload8a = new Buffer(session.dstPayload8, "hex").toString();
+          +clickableValue('payload8.dst.hex', session.dstPayload8)
         | ( #{printstr(dstPayload8a)} )
 
   div.tag-list
@@ -392,6 +453,7 @@ dl
           | Open Socks Dst SPI Graph
         b-dropdown-item(@click="fieldExists('ip.socks', '==')")
           | Add Socks Dst EXISTS! to query
+        +clickableFieldActions('ip.socks', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('port.socks', 0)")
           | Export Unique Socks Port
@@ -401,6 +463,7 @@ dl
           | Open Socks Port SPI Graph
         b-dropdown-item(@click="fieldExists('port.socks', '==')")
           | Add Socks Port EXISTS! to query
+        +clickableFieldActions('port.socks', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('country.socks', 0)")
           | Export Unique Socks Country
@@ -410,6 +473,7 @@ dl
           | Open Socks Country SPI Graph
         b-dropdown-item(@click="fieldExists('country.socks', '==')")
           | Add Socks Country EXISTS! to query
+        +clickableFieldActions('country.socks', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('socks.ip', 0)")
           | Export Unique Socks ASN
@@ -419,6 +483,7 @@ dl
           | Open Socks ASN SPI Graph
         b-dropdown-item(@click="fieldExists('socks.ip', '==')")
           | Add Socks ASN EXISTS! to query
+        +clickableFieldActions('socks.ip', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('rir.socks', 0)")
           | Export Unique Socks RIR
@@ -428,6 +493,7 @@ dl
           | Open Socks RIR SPI Graph
         b-dropdown-item(@click="fieldExists('rir.socks', '==')")
           | Add Socks RIR EXISTS! to query
+        +clickableFieldActions('rir.socks', false)
 
     dd
       +ipPrint(session, session.socks.ip, session.socks.port, session.socks.GEO, session.socks.ASN, session.socks.RIR, "socks")
@@ -442,6 +508,7 @@ dl
           | Open Socks Host SPI Graph
         b-dropdown-item(@click="fieldExists('host.socks', '==')")
           | Add Socks Host EXISTS! to query
+        +clickableFieldActions('host.socks', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('port.socks', 0)")
           | Export Unique Socks Port
@@ -451,6 +518,7 @@ dl
           | Open Socks Port SPI Graph
         b-dropdown-item(@click="fieldExists('port.socks', '==')")
           | Add Socks Port EXISTS! to query
+        +clickableFieldActions('port.socks', false)
 
     dd
       +clickableValue('host.socks', session.socks.host)
@@ -463,8 +531,14 @@ dl
       dd
         +clickableValue('socks.user', session.socks.user)
 
-  if (session.gre)
-    +ipArrayList(session.gre.ip, "ip", "GRE IPs", "gre.ip")
+  if (session.greIp)
+    +ipArrayList(session, "greIp", "GRE IPs", "gre.ip")
+
+  if (session.tcp)
+    +arrayList(session.tcp, "ja4l", "JA4l", "tcp.ja4l")
+    +arrayList(session.tcp, "ja4ls", "JA4ls", "tcp.ja4ls")
+    +arrayList(session.tcp, "ja4t", "JA4t", "tcp.ja4t")
+    +arrayList(session.tcp, "ja4ts", "JA4ts", "tcp.ja4ts")
 
   if (session.tcpflags)
     dt
@@ -477,6 +551,7 @@ dl
           | Open SYN SPI Graph
         b-dropdown-item(@click="fieldExists('tcpflags.syn', '==')")
           | Add SYN EXISTS! to query
+        +clickableFieldActions('tcpflags.syn', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('tcpflags.syn-ack', 0)")
           | Export Unique SYN-ACK
@@ -486,6 +561,7 @@ dl
           | Open SYN-ACK SPI Graph
         b-dropdown-item(@click="fieldExists('tcpflags.syn-ack', '==')")
           | Add SYN-ACK EXISTS! to query
+        +clickableFieldActions('tcpflags.syn-ack', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('tcpflags.ack', 0)")
           | Export Unique ACK
@@ -495,6 +571,7 @@ dl
           | Open ACK SPI Graph
         b-dropdown-item(@click="fieldExists('tcpflags.ack', '==')")
           | Add ACK EXISTS! to query
+        +clickableFieldActions('tcpflags.ack', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('tcpflags.psh', 0)")
           | Export Unique PSH
@@ -504,6 +581,7 @@ dl
           | Open PSH SPI Graph
         b-dropdown-item(@click="fieldExists('tcpflags.psh', '==')")
           | Add PSH EXISTS! to query
+        +clickableFieldActions('tcpflags.psh', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('tcpflags.rst', 0)")
           | Export Unique RST
@@ -513,6 +591,7 @@ dl
           | Open RST SPI Graph
         b-dropdown-item(@click="fieldExists('tcpflags.rst', '==')")
           | Add RST EXISTS! to query
+        +clickableFieldActions('tcpflags.rst', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('tcpflags.fin', 0)")
           | Export Unique FIN
@@ -522,6 +601,7 @@ dl
           | Open FIN SPI Graph
         b-dropdown-item(@click="fieldExists('tcpflags.fin', '==')")
           | Add FIN EXISTS! to query
+        +clickableFieldActions('tcpflags.fin', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('tcpflags.urg', 0)")
           | Export Unique URG
@@ -531,21 +611,29 @@ dl
           | Open URG SPI Graph
         b-dropdown-item(@click="fieldExists('tcpflags.urg', '==')")
           | Add URG EXISTS! to query
+        +clickableFieldActions('tcpflags.urg', false)
     dd
-      strong.medium.ml-1 SYN
-      +clickableValue('tcpflags.syn', session.tcpflags.syn)
-      strong.medium.ml-4 SYN-ACK
-      +clickableValue('tcpflags.syn-ack', session.tcpflags['syn-ack'])
-      strong.medium.ml-4 ACK
-      +clickableValue('tcpflags.ack', session.tcpflags.ack)
-      strong.medium.ml-4 PSH
-      +clickableValue('tcpflags.psh', session.tcpflags.psh)
-      strong.medium.ml-4 RST
-      +clickableValue('tcpflags.rst', session.tcpflags.rst)
-      strong.medium.ml-4 FIN
-      +clickableValue('tcpflags.fin', session.tcpflags.fin)
-      strong.medium.ml-4 URG
-      +clickableValue('tcpflags.urg', session.tcpflags.urg)
+      span.no-wrap
+        strong.ml-1 SYN
+        +clickableValue('tcpflags.syn', session.tcpflags.syn)
+      span.no-wrap
+        strong.ml-1 SYN-ACK
+        +clickableValue('tcpflags.syn-ack', session.tcpflags['syn-ack'])
+      span.no-wrap
+        strong.ml-1 ACK
+        +clickableValue('tcpflags.ack', session.tcpflags.ack)
+      span.no-wrap
+        strong.ml-1 PSH
+        +clickableValue('tcpflags.psh', session.tcpflags.psh)
+      span.no-wrap
+        strong.ml-1 RST
+        +clickableValue('tcpflags.rst', session.tcpflags.rst)
+      span.no-wrap
+        strong.ml-1 FIN
+        +clickableValue('tcpflags.fin', session.tcpflags.fin)
+      span.no-wrap
+        strong.ml-1 URG
+        +clickableValue('tcpflags.urg', session.tcpflags.urg)
 
   if (session.icmp)
     dt
@@ -556,6 +644,7 @@ dl
           | Export Unique ICMP Type with counts
         b-dropdown-item(@click="fieldExists('icmp.type', '==')")
           | Add ICMP Type EXISTS! to query
+        +clickableFieldActions('icmp.type', false)
         b-dropdown-divider
         b-dropdown-item(@click="exportUnique('icmp.code', 0)")
           | Export Unique ICMP Code
@@ -563,10 +652,11 @@ dl
           | Export Unique ICMP Code with counts
         b-dropdown-item(@click="fieldExists('icmp.code', '==')")
           | Add ICMP Code EXISTS! to query
+        +clickableFieldActions('icmp.code', false)
     dd
-      strong.medium.ml-1 Type
+      strong.ml-1 Type
       +arrayPrint(session.icmp, "type", "icmp.type")
-      strong.medium.ml-4 Code
+      strong.ml-1 Code
       +arrayPrint(session.icmp, "code", "icmp.code")
 
   if (session.srcDscp || session.dstDscp)
@@ -577,15 +667,17 @@ dl
             | Export Unique DSCP Src
           b-dropdown-item(@click="exportUnique('dscp.src', 1)")
             | Export Unique DSCP Src with counts
+          +clickableFieldActions('dscp.src', false)
         if (session.dstDscp)
           b-dropdown-item(@click="exportUnique('dscp.dst', 0)")
             | Export Unique DSCP Dst
           b-dropdown-item(@click="exportUnique('dscp.dst', 1)")
             | Export Unique DSCP Dst with counts
+          +clickableFieldActions('dscp.dst', false)
     dd
       if (session.srcDscp)
-        strong.medium.ml-1 Src
+        strong.ml-1 Src
         +arrayPrint(session, "srcDscp", "dscp.src")
       if (session.dstDscp)
-        strong.medium.ml-4 Dst
+        strong.ml-1 Dst
         +arrayPrint(session, "dstDscp", "dscp.dst")

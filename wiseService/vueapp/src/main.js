@@ -7,7 +7,7 @@ import store from './store';
 import { BootstrapVue, IconsPlugin } from 'bootstrap-vue';
 import 'bootstrap/dist/css/bootstrap.css';
 import 'bootstrap-vue/dist/bootstrap-vue.css';
-import '../../../common.css';
+import '../../../common/common.css';
 
 Vue.config.productionTip = false;
 
@@ -21,5 +21,15 @@ new Vue({
   store,
   router,
   components: { App },
-  template: '<App/>'
+  template: '<App/>',
+  created: function () {
+    // define app constants
+    /* eslint-disable no-undef */
+    Vue.prototype.$constants = {
+      VERSION,
+      LOGOUT_URL,
+      BUILD_DATE, // from webpack.DefinePlugin
+      BUILD_VERSION // from webpack.DefinePlugin
+    };
+  }
 });

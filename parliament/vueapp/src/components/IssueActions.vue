@@ -1,6 +1,10 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
 
-  <div>
+  <div v-if="isUser">
     <!-- (un)ignore until dropdown -->
     <b-dropdown right
       size="sm"
@@ -78,16 +82,21 @@ export default {
       required: true
     },
     groupId: {
-      type: Number,
+      type: String,
       default: function () {
         return this.issue.groupId;
       }
     },
     clusterId: {
-      type: Number,
+      type: String,
       default: function () {
         return this.issue.clusterId;
       }
+    }
+  },
+  computed: {
+    isUser: function () {
+      return this.$store.state.isUser;
     }
   },
   methods: {
@@ -148,8 +157,8 @@ export default {
     /* helper functions ---------------------------------------------------- */
     updateIssue: function (success, message, issue) {
       const emit = {
-        success: success,
-        message: message,
+        success,
+        message,
         groupId: this.groupId,
         clusterId: this.clusterId
       };

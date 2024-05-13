@@ -1,4 +1,6 @@
 #!/usr/bin/perl -I.
+#
+# SPDX-License-Identifier: Apache-2.0
 
 use strict;
 use HTTP::Request::Common;
@@ -10,37 +12,38 @@ use Test::Differences;
 use Cwd;
 use URI::Escape;
 use TAP::Harness;
-use MolochTest;
+use ArkimeTest;
 use Socket6 qw(AF_INET6 inet_pton);
 
 $main::userAgent = LWP::UserAgent->new(timeout => 20);
 
 my $ELASTICSEARCH = $ENV{ELASTICSEARCH} = "http://127.0.0.1:9200";
-#my $ELASTICSEARCH = $ENV{ELASTICSEARCH} = "http://elastic:changeme\@127.0.0.1:9200";
 
 $ENV{'PERL5LIB'} = getcwd();
 $ENV{'TZ'} = 'US/Eastern';
 my $INSECURE = "";
+my $SCHEME = "";
+my $EXTRA = "";
 
 ################################################################################
 sub doGeo {
     if (! -f "ipv4-address-space.csv") {
-        system("wget https://s3.amazonaws.com/files.molo.ch/testing/ipv4-address-space.csv");
+        system("wget https://raw.githubusercontent.com/arkime/arkime-test-data/main/ipv4-address-space.csv");
     }
 
     if (! -f "oui.txt") {
-        system("wget https://s3.amazonaws.com/files.molo.ch/testing/oui.txt");
+        system("wget https://raw.githubusercontent.com/arkime/arkime-test-data/main/oui.txt");
     }
 
     if (! -f "GeoLite2-Country.mmdb") {
-        system("wget https://s3.amazonaws.com/files.molo.ch/testing/GeoLite2-Country.mmdb");
+        system("wget https://raw.githubusercontent.com/arkime/arkime-test-data/main/GeoLite2-Country.mmdb");
     }
 
     if (! -f "GeoLite2-ASN.mmdb") {
-        system("wget https://s3.amazonaws.com/files.molo.ch/testing/GeoLite2-ASN.mmdb");
+        system("wget https://raw.githubusercontent.com/arkime/arkime-test-data/main/GeoLite2-ASN.mmdb");
     }
 
-    if (! -f "plugins/test.so" || (stat('../capture/moloch.h'))[9] > (stat('plugins/test.so'))[9]) {
+    if (! -f "plugins/test.so" || (stat('../capture/arkime.h'))[9] > (stat('plugins/test.so'))[9]) {
         system("cd plugins ; make");
     }
 }
@@ -48,7 +51,7 @@ sub doGeo {
 sub doFuzz2Pcap {
     my @files = @ARGV;
     foreach my $file (@files) {
-        print "$file\n";;
+        print "$file\n";
         open my $in, '<', "$file" or die "error opening $file: $!";
         open my $out, '>', "$file.pcap" or die "error opening $file.pcap: $!";
         binmode($in);
@@ -59,7 +62,7 @@ sub doFuzz2Pcap {
 
         my $len = length($buf);
 
-        # Pcap header
+        # Pcap file header
         syswrite($out, pack('H*', "d4c3b2a1020004000000000000000000ffff000001000000"));
 
         my $pos = 0;
@@ -78,6 +81,49 @@ sub doFuzz2Pcap {
     }
 }
 ################################################################################
+sub doFuzz2PcapAll {
+    die "<pcapfile> <glob1> [,,<globn>]" if ($#ARGV < 1);
+
+    open my $out, '>', $ARGV[0] or die "error opening $ARGV[0]: $!";
+    binmode($out);
+
+    shift @ARGV;
+
+    # Pcap file header
+    syswrite($out, pack('H*', "d4c3b2a1020004000000000000000000ffff000001000000"));
+
+    my $num = 0;
+
+    foreach my $glob (@ARGV) {
+        print "$glob\n";
+	foreach my $file (glob $glob) {
+	    print " $file\n";
+	    open my $in, '<', "$file" or die "error opening $file: $!";
+	    binmode($in);
+
+	    my $buf;
+	    read($in, $buf, 1000000);
+
+	    my $len = length($buf);
+
+	    my $pos = 0;
+	    while ($pos < $len) {
+		my $ilen = unpack("x${pos}n", $buf);
+		last if ($pos + $ilen + 2 >= $len);
+		$pos += 2;
+		syswrite($out, pack('VH*VV', $num, "00000000", $ilen, $ilen));
+		syswrite($out, $buf, $ilen, $pos);
+		$pos += $ilen;
+		$num++;
+	    }
+
+	    close($in);
+	}
+    }
+    print "$num files\n";
+    close($out);
+}
+################################################################################
 sub sortObj {
     my ($parentkey,$obj) = @_;
     for my $key (keys %{$obj}) {
@@ -85,8 +131,14 @@ sub sortObj {
         if ($r eq "HASH") {
             sortObj($key, $obj->{$key});
         } elsif ($r eq "ARRAY") {
+            if ($key =~ /(dns)/) {
+                for my $dnsObj ( @{$obj->{$key}} ) {
+                    sortObj($key, $dnsObj);
+                }
+            }
             next if (scalar (@{$obj->{$key}}) < 2);
-            next if ($key =~ /(packetPos|packetLen|cert)/);
+            next if ($key =~ /(packetPos|packetLen|cert|dns)/);
+            next if ("$parentkey.$key" =~ /dns.answers/);
             if ("$parentkey.$key" =~ /vlan.id|http.statuscode|icmp.type|icmp.code/) {
                 my @tmp = sort { $a <=> $b } (@{$obj->{$key}});
                 $obj->{$key} = \@tmp;
@@ -122,7 +174,7 @@ sub doTests {
         my $savedJson = sortJson(from_json($savedData, {relaxed => 1}));
 
 
-        my $cmd = "../capture/capture --tests -c config.test.ini -n test -r $filename.pcap 2>&1 1>/dev/null | ./tests.pl --fix";
+        my $cmd = "../capture/capture $SCHEME $EXTRA --tests -c config.test.ini -n test -r $filename.pcap 2>&1 1>/dev/null | ./tests.pl --fix";
 
         if ($main::valgrind) {
             $cmd = "G_SLICE=always-malloc valgrind --leak-check=full --log-file=$filename.val " . $cmd;
@@ -192,33 +244,30 @@ my ($json) = @_;
             $body->{dstIp} = join ":", (unpack("H*", inet_pton(AF_INET6, $body->{dstIp})) =~ m/(....)/g );
         }
 
-        if (exists $body->{dns} && exists $body->{dns}->{ip}) {
-            for (my $i = 0; $i < @{$body->{dns}->{ip}}; $i++) {
-                if ($body->{dns}->{ip}[$i] =~ /:/) {
-                    $body->{dns}->{ip}[$i] = join ":", (unpack("H*", inet_pton(AF_INET6, $body->{dns}->{ip}[$i])) =~ m/(....)/g );
+        if (exists $body->{dns}) {
+            for (my $i; $i < @{$body->{dns}}; $i++) {
+                if (exists $body->{dns}[$i]->{ip}) {
+                    for (my $j = 0; $j < @{$body->{dns}[$i]->{ip}}; $j++) {
+                        if ($body->{dns}[$i]->{ip}[$j] =~ /:/) {
+                            $body->{dns}[$i]->{ip}[$j] = join ":", (unpack("H*", inet_pton(AF_INET6, $body->{dns}[$i]->{ip}[$j])) =~ m/(....)/g );
+                        }
+                    }
                 }
-            }
-        }
-        if (exists $body->{dns} && exists $body->{dns}->{nameserverIp}) {
-            for (my $i = 0; $i < @{$body->{dns}->{nameserverIp}}; $i++) {
-                if ($body->{dns}->{nameserverIp}[$i] =~ /:/) {
-                    $body->{dns}->{nameserverIp}[$i] = join ":", (unpack("H*", inet_pton(AF_INET6, $body->{dns}->{nameserverIp}[$i])) =~ m/(....)/g );
+
+                if (exists $body->{dns}[$i]->{nameserverIp}) {
+                    for (my $j = 0; $j < @{$body->{dns}[$i]->{nameserverIp}}; $j++) {
+                        if ($body->{dns}[$i]->{nameserverIp}[$j] =~ /:/) {
+                            $body->{dns}[$i]->{nameserverIp}[$j] = join ":", (unpack("H*", inet_pton(AF_INET6, $body->{dns}[$i]->{nameserverIp}[$j])) =~ m/(....)/g );
+                        }
+                    }
                 }
-            }
-        }
-        if (exists $body->{dns} && exists $body->{dns}->{mailserverIp}) {
-            for (my $i = 0; $i < @{$body->{dns}->{mailserverIp}}; $i++) {
-                if ($body->{dns}->{mailserverIp}[$i] =~ /:/) {
-                    $body->{dns}->{mailserverIp}[$i] = join ":", (unpack("H*", inet_pton(AF_INET6, $body->{dns}->{mailserverIp}[$i])) =~ m/(....)/g );
-                }
-            }
-        }
-        if (exists $body->{cert}) {
-            for (my $i = 0; $i < @{$body->{cert}}; $i++) {
-                if ($body->{cert}->[$i]->{remainingDays} < 0) {
-                    $body->{cert}->[$i]->{remainingDays} = -1;
-                } elsif ($body->{cert}->[$i]->{remainingDays} > 0) {
-                    $body->{cert}->[$i]->{remainingDays} = 1;
+
+                if (exists $body->{dns}[$i]->{mailserverIp}) {
+                    for (my $j = 0; $j < @{$body->{dns}[$i]->{mailserverIp}}; $j++) {
+                        if ($body->{dns}[$i]->{mailserverIp}[$j] =~ /:/) {
+                            $body->{dns}[$i]->{mailserverIp}[$j] = join ":", (unpack("H*", inet_pton(AF_INET6, $body->{dns}[$i]->{mailserverIp}[$j])) =~ m/(....)/g );
+                        }
+                    }
                 }
             }
         }
@@ -235,9 +284,9 @@ sub doMake {
     foreach my $filename (@ARGV) {
         $filename = substr($filename, 0, -5) if ($filename =~ /\.pcap$/);
         if ($main::debug) {
-          print("../capture/capture --tests -c config.test.ini -n test -r $filename.pcap 2>&1 1>/dev/null | ./tests.pl --fix > $filename.test\n");
+          print("../capture/capture $EXTRA --tests -c config.test.ini -n test -r $filename.pcap 2>&1 1>/dev/null | ./tests.pl --fix > $filename.test\n");
         }
-        system("../capture/capture --tests -c config.test.ini -n test -r $filename.pcap 2>&1 1>/dev/null | ./tests.pl --fix > $filename.test");
+        system("../capture/capture $EXTRA --tests -c config.test.ini -n test -r $filename.pcap 2>&1 1>/dev/null | ./tests.pl --fix > $filename.test");
     }
 }
 ################################################################################
@@ -286,26 +335,36 @@ my ($cmd) = @_;
         }
 
         print ("Loading tagger\n");
-        system("../capture/plugins/taggerUpload.pl $ELASTICSEARCH ip ip.tagger1.json iptaggertest1");
-        system("../capture/plugins/taggerUpload.pl $ELASTICSEARCH host host.tagger1.json hosttaggertest1");
-        system("../capture/plugins/taggerUpload.pl $ELASTICSEARCH md5 md5.tagger1.json md5taggertest1");
-        system("../capture/plugins/taggerUpload.pl $ELASTICSEARCH ip ip.tagger2.json iptaggertest2");
-        system("../capture/plugins/taggerUpload.pl $ELASTICSEARCH host host.tagger2.json hosttaggertest2");
-        system("../capture/plugins/taggerUpload.pl $ELASTICSEARCH md5 md5.tagger2.json md5taggertest2");
-        system("../capture/plugins/taggerUpload.pl $ELASTICSEARCH email email.tagger2.json emailtaggertest2");
-        system("../capture/plugins/taggerUpload.pl $ELASTICSEARCH uri uri.tagger2.json uritaggertest2");
+        print("../capture/plugins/taggerUpload.pl $INSECURE $ELASTICSEARCH ip ip.tagger1.json iptaggertest1\n");
+        system("../capture/plugins/taggerUpload.pl $INSECURE $ELASTICSEARCH ip ip.tagger1.json iptaggertest1");
+        system("../capture/plugins/taggerUpload.pl $INSECURE $ELASTICSEARCH host host.tagger1.json hosttaggertest1");
+        system("../capture/plugins/taggerUpload.pl $INSECURE $ELASTICSEARCH md5 md5.tagger1.json md5taggertest1");
+        system("../capture/plugins/taggerUpload.pl $INSECURE $ELASTICSEARCH ip ip.tagger2.json iptaggertest2");
+        system("../capture/plugins/taggerUpload.pl $INSECURE $ELASTICSEARCH host host.tagger2.json hosttaggertest2");
+        system("../capture/plugins/taggerUpload.pl $INSECURE $ELASTICSEARCH md5 md5.tagger2.json md5taggertest2");
+        system("../capture/plugins/taggerUpload.pl $INSECURE $ELASTICSEARCH email email.tagger2.json emailtaggertest2");
+        system("../capture/plugins/taggerUpload.pl $INSECURE $ELASTICSEARCH uri uri.tagger2.json uritaggertest2");
     }
 
     if ($cmd ne "--viewernostart") {
+        my $wes = "-o 'wiseService.usersElasticsearch=$ELASTICSEARCH'";
         print ("Starting WISE\n");
         if ($main::debug) {
-            system("cd ../wiseService ; $node wiseService.js --regressionTests -c ../tests/config.test.json > /tmp/moloch.wise &");
+            system("cd ../wiseService ; $node wiseService.js $wes $INSECURE --webcode thecode --webconfig --regressionTests -c ../tests/config.test.json > /tmp/arkime.wise &");
         } else {
-            system("cd ../wiseService ; $node wiseService.js --regressionTests -c ../tests/config.test.json > /dev/null &");
+            system("cd ../wiseService ; $node wiseService.js $wes $INSECURE --webcode thecode --webconfig --regressionTests -c ../tests/config.test.json > /dev/null &");
         }
 
-        waitFor($MolochTest::host, 8081, 1);
+        waitFor($ArkimeTest::host, 8081, 1);
     }
+
+    my $es = "-o 'elasticsearch=$ELASTICSEARCH'";
+    my $ces = "-o 'cont3xt.elasticsearch=$ELASTICSEARCH'";
+    my $ues = "-o 'usersElasticsearch=$ELASTICSEARCH'";
+    my $cues = "-o 'cont3xt.usersElasticsearch=$ELASTICSEARCH'";
+    my $pues = "-o 'parliament.usersElasticsearch=$ELASTICSEARCH'";
+    my $mes = "-o 'multiESNodes=$ELASTICSEARCH,prefix:tests,name:test;$ELASTICSEARCH,prefix:tests2_,name:test2'";
+    my $s3 = "-o 's3AccessKeyId=$ENV{s3AccessKeyId}' -o 's3SecretAccessKey=$ENV{s3SecretAccessKey}'";
 
     if ($cmd ne "--viewernostart" && $cmd ne "--viewerstart" && $cmd ne "--viewerhang") {
         $main::userAgent->get("$ELASTICSEARCH/_flush");
@@ -313,16 +372,16 @@ my ($cmd) = @_;
 
         print ("Loading PCAP\n");
 
-        my $mcmd = "../capture/capture $INSECURE $main::copy -c config.test.ini -n test -R pcap --flush";
+        my $mcmd = "../capture/capture $es $INSECURE $SCHEME $main::copy -c config.test.ini -n test -R pcap --flush";
         if (!$main::debug) {
             $mcmd .= " 2>&1 1>/dev/null";
         } else {
-            $mcmd .= " --debug 1>/tmp/moloch.capture 2>&1";
+            $mcmd .= " --debug 1>/tmp/arkime.capture 2>&1";
         }
 
 
         if ($main::valgrind) {
-            $mcmd = "G_SLICE=always-malloc valgrind --leak-check=full --log-file=moloch.val " . $mcmd;
+            $mcmd = "G_SLICE=always-malloc valgrind --leak-check=full --log-file=arkime.val " . $mcmd;
         }
 
         print "$mcmd\n" if ($main::debug);
@@ -336,29 +395,35 @@ my ($cmd) = @_;
     if ($cmd ne "--viewernostart") {
         print ("Starting viewer\n");
         if ($main::debug) {
-            system("cd ../viewer ; $node --trace-warnings multies.js -c ../tests/config.test.ini -n all --debug $INSECURE > /tmp/multies.all &");
-            waitFor($MolochTest::host, 8200, 1);
-            system("cd ../viewer ; $node --trace-warnings viewer.js -c ../tests/config.test.ini -n test --debug $INSECURE > /tmp/moloch.test &");
-            system("cd ../viewer ; $node --trace-warnings viewer.js -c ../tests/config.test.ini -n test2 --debug $INSECURE > /tmp/moloch.test2 &");
-            system("cd ../viewer ; $node --trace-warnings viewer.js -c ../tests/config.test.ini -n test3 --debug $INSECURE > /tmp/moloch.test3 &");
-            system("cd ../viewer ; $node --trace-warnings viewer.js -c ../tests/config.test.ini -n all --debug $INSECURE > /tmp/moloch.all &");
-            system("cd ../parliament ; $node --trace-warnings parliament.js --regressionTests -c /dev/null --debug > /tmp/moloch.parliament 2>&1 &");
+            system("cd ../viewer ; $node --trace-warnings multies.js --regressionTests $mes -c ../tests/config.test.ini -n all --debug $INSECURE > /tmp/arkime.multies &");
+            waitFor($ArkimeTest::host, 8200, 1);
+            system("cd ../viewer ; $node --trace-warnings viewer.js --regressionTests $es $ues -c ../tests/config.test.ini -n test --debug $INSECURE > /tmp/arkime.test &");
+            system("cd ../viewer ; $node --trace-warnings viewer.js --regressionTests $es $ues -c ../tests/config.test.ini -n test2 --debug $INSECURE $s3 > /tmp/arkime.test2 &");
+            system("cd ../viewer ; $node --trace-warnings viewer.js --regressionTests $es $ues -c ../tests/config.test.ini -n test3 --debug -o s2sRegressionTests=true $INSECURE > /tmp/arkime.test3 &");
+            system("cd ../viewer ; $node --trace-warnings viewer.js --regressionTests $ues -c ../tests/config.test.ini -n all --debug $INSECURE > /tmp/arkime.all &");
+            system("cd ../parliament ; $node --trace-warnings parliament.js --regressionTests $pues -c ../tests/parliament.tests.ini -n parliamenttest --debug $INSECURE > /tmp/arkime.parliament 2>&1 &");
+            system("cd ../cont3xt ; $node --trace-warnings cont3xt.js $ces $cues --regressionTests -c ../tests/cont3xt.tests.ini --debug $INSECURE > /tmp/arkime.cont3xt 2>&1 &");
+            system("cd ../viewer ; $node --trace-warnings esProxy.js --regressionTests $es -c ../tests/config.test.ini -n esproxy --debug $INSECURE > /tmp/arkime.esproxy &");
         } else {
-            system("cd ../viewer ; $node multies.js -c ../tests/config.test.ini -n all $INSECURE > /dev/null &");
-            waitFor($MolochTest::host, 8200, 1);
-            system("cd ../viewer ; $node viewer.js -c ../tests/config.test.ini -n test $INSECURE > /dev/null &");
-            system("cd ../viewer ; $node viewer.js -c ../tests/config.test.ini -n test2 $INSECURE > /dev/null &");
-            system("cd ../viewer ; $node viewer.js -c ../tests/config.test.ini -n test3 $INSECURE > /dev/null &");
-            system("cd ../viewer ; $node viewer.js -c ../tests/config.test.ini -n all $INSECURE > /dev/null &");
-            system("cd ../parliament ; $node parliament.js --regressionTests -c /dev/null > /dev/null 2>&1 &");
+            system("cd ../viewer ; $node multies.js --regressionTests $mes -c ../tests/config.test.ini -n all $INSECURE > /dev/null &");
+            waitFor($ArkimeTest::host, 8200, 1);
+            system("cd ../viewer ; $node viewer.js --regressionTests $es $ues -c ../tests/config.test.ini -n test $INSECURE > /dev/null &");
+            system("cd ../viewer ; $node viewer.js --regressionTests $es $ues -c ../tests/config.test.ini -n test2 $INSECURE $s3 > /dev/null &");
+            system("cd ../viewer ; $node viewer.js --regressionTests $es $ues -c ../tests/config.test.ini -n test3 -o s2sRegressionTests=true $INSECURE > /dev/null &");
+            system("cd ../viewer ; $node viewer.js --regressionTests $ues -c ../tests/config.test.ini -n all $INSECURE > /dev/null &");
+            system("cd ../parliament ; $node parliament.js --regressionTests $pues -c ../tests/parliament.tests.ini -n parliamenttest $INSECURE > /dev/null 2>&1 &");
+            system("cd ../cont3xt ; $node cont3xt.js $ces $cues --regressionTests -c ../tests/cont3xt.tests.ini $INSECURE > /dev/null 2>&1 &");
+            system("cd ../viewer ; $node --trace-warnings esProxy.js --regressionTests $es -c ../tests/config.test.ini -n esproxy --debug $INSECURE >> /dev/null 2>&1 &");
         }
         sleep (10000) if ($cmd eq "--viewerhang");
     }
 
-    waitFor($MolochTest::host, 8123);
-    waitFor($MolochTest::host, 8124);
-    waitFor($MolochTest::host, 8125);
-    waitFor($MolochTest::host, 8008);
+    waitFor($ArkimeTest::host, 8123);
+    waitFor($ArkimeTest::host, 8124);
+    waitFor($ArkimeTest::host, 8125);
+    waitFor($ArkimeTest::host, 8008);
+    waitFor($ArkimeTest::host, 3218);
+    waitFor($ArkimeTest::host, 7200);
     sleep 1;
 
     $main::userAgent->get("$ELASTICSEARCH/_flush");
@@ -380,6 +445,8 @@ my ($cmd) = @_;
         $main::userAgent->post("http://localhost:8200/regressionTests/shutdown");
         $main::userAgent->post("http://localhost:8081/regressionTests/shutdown");
         $main::userAgent->post("http://localhost:8008/regressionTests/shutdown");
+        $main::userAgent->post("http://localhost:3218/regressionTests/shutdown");
+        $main::userAgent->post("http://localhost:7200/regressionTests/shutdown");
     }
 
 # Coverage
@@ -387,6 +454,7 @@ my ($cmd) = @_;
         system("cd ../viewer ; c8 report");
         system("cd ../wiseService ; c8 report");
         system("cd ../parliament ; c8 report");
+        system("cd ../cont3xt ; c8 report");
     }
 
     exit(1) if ( $parser->has_errors );
@@ -402,23 +470,39 @@ while (scalar (@ARGV) > 0) {
     if ($ARGV[0] eq "--debug") {
         $main::debug = 1;
         shift @ARGV;
+    } elsif ($ARGV[0] eq "--elasticsearch") {
+        shift @ARGV;
+        $ArkimeTest::elasticsearch = $ELASTICSEARCH = $ENV{ELASTICSEARCH} = $ARGV[0];
+        shift @ARGV;
     } elsif ($ARGV[0] eq "--c8") {
         $main::c8 = 1;
         $main::debug = 1;
         system("rm -rf ../viewer/coverage");
         system("rm -rf ../wiseService/coverage");
         system("rm -rf ../parliament/coverage");
+        system("rm -rf ../cont3xt/coverage");
+        shift @ARGV;
+    } elsif ($ARGV[0] eq "--extra") {
+        shift @ARGV;
+        $EXTRA = $ARGV[0];
         shift @ARGV;
     } elsif ($ARGV[0] eq "--insecure") {
-        $INSECURE = "--insecure";
+        $ArkimeTest::userAgent->ssl_opts(
+            SSL_verify_mode => 0,
+            verify_hostname=> 0
+        );
+        $ENV{INSECURE} = $INSECURE = "--insecure";
         shift @ARGV;
     } elsif ($ARGV[0] eq "--valgrind") {
         $main::valgrind = 1;
         shift @ARGV;
+    } elsif ($ARGV[0] eq "--scheme") {
+        $ENV{SCHEME} = $SCHEME = "--scheme";
+        shift @ARGV;
     } elsif ($ARGV[0] eq "--copy") {
         $main::copy = "--copy";
         shift @ARGV;
-    } elsif ($ARGV[0] =~ /^--(viewer|fix|make|capture|viewernostart|viewerstart|viewerhang|viewerload|help|reip|fuzz|fuzz2pcap)$/) {
+    } elsif ($ARGV[0] =~ /^--(viewer|fix|make|capture|viewernostart|viewerstart|viewerhang|viewerload|help|reip|fuzz|fuzz2pcap|fuzz2pcapAll)$/) {
         $main::cmd = $ARGV[0];
         shift @ARGV;
     } elsif ($ARGV[0] =~ /^--/) {
@@ -443,22 +527,26 @@ if ($main::cmd eq "--fix") {
     system($cmd);
 } elsif ($main::cmd eq "--fuzz2pcap") {
     doFuzz2Pcap();
+} elsif ($main::cmd eq "--fuzz2pcapAll") {
+    doFuzz2PcapAll();
 } elsif ($main::cmd eq "--help") {
     print "$ARGV[0] [OPTIONS] [COMMAND] <pcap> files\n";
     print "Options:\n";
-    print "  --debug       Turn on debuggin\n";
-    print "  --valgrind    Use valgrind on capture\n";
+    print "  --elasticsearch <url>  Set elasticsearch URL\n";
+    print "  --debug                Turn on debuggin\n";
+    print "  --valgrind             Use valgrind on capture\n";
     print "\n";
     print "Commands:\n";
-    print "  --help                This help\n";
-    print "  --make                Create a .test file for each .pcap file on command line\n";
-    print "  --reip file ip newip  Create file.tmp, replace ip with newip\n";
-    print "  --viewer              viewer tests\n";
-    print "                        This will init local ES, import data, start a viewer, run tests\n";
-    print "  --viewerstart         Viewer tests without reloading pcap\n";
-    print "  --fuzz [fuzzoptions]  Run fuzzloch\n";
-    print "  --fuzz2pcap           Convert a fuzzloch crash file into a pcap file\n";
-    print " [default] [pcap files] Run each .pcap (default pcap/*.pcap) file thru ../capture/capture and compare to .test file\n";
+    print "  --help                 This help\n";
+    print "  --make                 Create a .test file for each .pcap file on command line\n";
+    print "  --reip file ip newip   Create file.tmp, replace ip with newip\n";
+    print "  --viewer               viewer tests\n";
+    print "                         This will init local ES, import data, start a viewer, run tests\n";
+    print "  --viewerstart          Viewer tests without reloading pcap\n";
+    print "  --fuzz [fuzzoptions]   Run fuzzloch\n";
+    print "  --fuzz2pcap            Convert list of fuzzloch crash file into matching pcap file\n";
+    print "  --fuzz2pcapAll <f> <g> Convert list of fuzzloch crash file into all.pcap file\n";
+    print " [default] [pcap files]  Run each .pcap (default pcap/*.pcap) file thru ../capture/capture and compare to .test file\n";
 } elsif ($main::cmd =~ "^--viewer") {
     doGeo();
     setpgrp $$, 0;

@@ -1,3 +1,7 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <span :class="{
     'hide-tool-bars': !showToolBars,
@@ -40,7 +44,7 @@
 
         <b-navbar-nav>
           <template v-for="item of menuOrder">
-            <template v-if="user && menu[item] && menu[item].hasPermission">
+            <template v-if="user && menu[item] && menu[item].hasPermission && menu[item].hasRole">
               <b-nav-item
                 :key="menu[item].link"
                 class="cursor-pointer"
@@ -63,11 +67,8 @@
 
         <b-navbar-nav
           class="ml-auto">
-          <small
-            :title="buildInfo"
-            v-b-tooltip.hover="buildInfo"
-            class="navbar-text mr-2 text-right cursor-help">
-            v{{ molochVersion }}
+          <small>
+            <Version :timezone="timezone" />
           </small>
           <router-link
             :to="{ path: helpLink.href, query: helpLink.query, params: { nav: true } }">
@@ -94,6 +95,7 @@
         </div>
 
       </b-collapse>
+      <Logout size="sm" :base-path="path" />
     </b-navbar>
     <div class="navbarOffset" />
   </span>
@@ -104,28 +106,26 @@ import qs from 'qs';
 import { mapMutations } from 'vuex';
 
 import ESHealth from './ESHealth';
+import Logout from '../../../../../common/vueapp/Logout';
+import Version from '../../../../../common/vueapp/Version';
 
 export default {
-  name: 'MolochNavbar',
-  components: { ESHealth },
+  name: 'ArkimeNavbar',
+  components: {
+    Logout,
+    Version,
+    ESHealth
+  },
   data: function () {
     return {
-      buildDate: this.$constants.BUILD_DATE,
-      buildVersion: this.$constants.BUILD_VERSION,
-      molochVersion: this.$constants.MOLOCH_VERSION,
+      path: this.$constants.PATH,
       menuOrder: [
         'sessions', 'spiview', 'spigraph', 'connections', 'hunt',
-        'files', 'stats', 'history', 'upload', 'settings', 'users'
+        'files', 'stats', 'history', 'upload', 'settings', 'users', 'roles'
       ]
     };
   },
   computed: {
-    buildInfo: function () {
-      const dateMs = new Date(this.buildDate).getTime();
-      const tz = this.$store.state?.user?.settings?.timezone || 'gmt';
-      const date = this.$options.filters.timezoneDateString(dateMs, tz);
-      return `${this.buildVersion}${!isNaN(dateMs) ? ' @ ' + date : ''}`;
-    },
     userLogo: function () {
       if (this.user && this.user.settings.logo && this.user.settings.logo) {
         return this.user.settings.logo;
@@ -140,17 +140,18 @@ export default {
         connections: { title: 'Connections', link: 'connections', hotkey: ['Connections'] },
         files: { title: 'Files', link: 'files', permission: 'hideFiles', reverse: true },
         stats: { title: 'Stats', link: 'stats', permission: 'hideStats', reverse: true },
-        upload: { title: 'Upload', link: 'upload', permission: 'canUpload' }
+        upload: { title: 'Upload', link: 'upload', permission: 'canUpload' },
+        roles: { title: 'Roles', link: 'roles', permission: 'canAssignRoles' }
       };
 
-      if (!this.$constants.MOLOCH_MULTIVIEWER) {
+      if (!this.$constants.MULTIVIEWER) {
         menu.hunt = { title: 'Hunt', link: 'hunt', permission: 'packetSearch', hotkey: ['H', 'unt'] };
       }
 
-      if (!this.$constants.MOLOCH_DEMO_MODE) {
+      if (!this.$constants.DEMO_MODE) {
         menu.history = { title: 'History', link: 'history' };
         menu.settings = { title: 'Settings', link: 'settings' };
-        menu.users = { title: 'Users', link: 'users', permission: 'createEnabled' };
+        menu.users = { title: 'Users', link: 'users', role: 'usersAdmin' };
       }
 
       // preserve url query parameters
@@ -179,6 +180,7 @@ export default {
           item.hasPermission = !item.permission ||
             (this.user[item.permission] !== undefined && this.user[item.permission] && !item.reverse) ||
             (this.user[item.permission] === undefined || (!this.user[item.permission] && item.reverse));
+          item.hasRole = !item.role || this.user.roles.includes(item.role);
         }
       }
 
@@ -228,6 +230,9 @@ export default {
     },
     stickySessionsBtn: function () {
       return this.$store.state.stickySessionsBtn;
+    },
+    timezone: function () {
+      return this.$store.state?.user?.settings?.timezone || 'gmt';
     }
   },
   methods: {

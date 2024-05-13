@@ -1,7 +1,7 @@
-use Test::More tests => 685;
+use Test::More tests => 711;
 use Cwd;
 use URI::Escape;
-use MolochTest;
+use ArkimeTest;
 use strict;
 
 my $pwd = "*/pcap";
@@ -344,6 +344,12 @@ if (0) {
 }
 
 # vlan tests
+    countTest(2, "date=-1&expression=" . uri_escape("(file=$pwd/vxlan.pcap||file=$pwd/dns-dnskey.pcap)&&vni=123"));
+    countTest(2, "date=-1&expression=" . uri_escape("(file=$pwd/vxlan.pcap||file=$pwd/dns-dnskey.pcap)&&vni.cnt=1"));
+    countTest(2, "date=-1&expression=" . uri_escape("(file=$pwd/vxlan.pcap||file=$pwd/dns-dnskey.pcap)&&vni<124"));
+    countTest(0, "date=-1&expression=" . uri_escape("(file=$pwd/vxlan.pcap||file=$pwd/dns-dnskey.pcap)&&vni>124"));
+
+# vni tests
     countTest(2, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/dns-dnskey.pcap)&&vlan=500"));
     countTest(2, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/dns-dnskey.pcap)&&vlan.cnt=1"));
     countTest(2, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/dns-dnskey.pcap)&&vlan<501"));
@@ -397,10 +403,21 @@ if (0) {
     countTest(2, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/socks5-reverse.pcap)&&stoptime<=\"2014/02/26 10:27:57\""));
 
 #gre
-    countTest(6, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/gre-sample.pcap)&&gre.ip==172.27.1.66"));
-    countTest(6, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/gre-sample.pcap)&&gre.ip.cnt==2"));
-    countTest(0, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/gre-sample.pcap)&&gre.ip.cnt==1"));
-    countTest(6, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/gre-sample.pcap)&&gre.ip.rir==ARIN"));
+    countTest(6, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/gre-sample.pcap)&&outerip.src==172.27.1.66"));
+    countTest(5, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/gre-sample.pcap)&&outerip.dst==172.27.1.66"));
+
+    countTest(5, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/gre-sample.pcap)&&outerip.src==66.59.109.137"));
+    countTest(6, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/gre-sample.pcap)&&outerip.dst==66.59.109.137"));
+
+    countTest(5, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/gre-sample.pcap)&&outerip.src.cnt==2"));
+    countTest(1, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/gre-sample.pcap)&&outerip.src.cnt==1"));
+    countTest(6, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/gre-sample.pcap)&&outerip.src.rir==ARIN"));
+
+    countTest(1, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/gre-erspan-vxlan.pcap)&&outerip.src.rir==ARIN"));
+    countTest(1, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/gre-erspan-vxlan.pcap)&&outerip.src==172.16.27.131"));
+    countTest(1, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/gre-erspan-vxlan.pcap)&&outerip.dst==172.16.27.121"));
+    countTest(1, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/gre-erspan-vxlan.pcap)&&outermac.dst==ee:ee:ee:ee:ee:e1"));
+    countTest(1, "date=-1&expression=" . uri_escape("(file=$pwd/dns-flags0110.pcap||file=$pwd/gre-erspan-vxlan.pcap)&&outermac.src==ff:dd:ff:ff:ff:f1"));
 
 #tcpflags
     countTest(9, "date=-1&expression=" . uri_escape("(file=$pwd/socks-http-pass.pcap||file=$pwd/gre-sample.pcap)"));
@@ -419,6 +436,9 @@ if (0) {
 # Check sorting when no mapping
     countTest(1, "startTime=1387256793&stopTime=1387258118&order=tls.ja3:desc&expression=" . uri_escape("file=$pwd/bt-udp.pcap"));
     countTest(1, "startTime=1387256793&stopTime=1387258118&order=tls.ja3:asc&expression=" . uri_escape("file=$pwd/bt-udp.pcap"));
+
+# ja4
+    countTest(1, "date=-1&expression=" . uri_escape("(file=$pwd/bt-udp.pcap||file=$pwd/smtp-starttls.pcap)&&tls.ja4==t10i290100_cdba58456bdf_e78b541c01a9"));
 
 # communityId
     countTest(1, "date=-1&expression=" . uri_escape("(file=$pwd/socks-http-pass.pcap||file=$pwd/gre-sample.pcap)&&communityId=\"1:eMRxQSkNuVRbgi0elxmjkFvRujg=\""));

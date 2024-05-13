@@ -1,0 +1,369 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
+<template>
+  <div>
+    <!-- search -->
+    <div class="mb-1"
+      v-if="data.length > 1">
+      <b-input-group size="sm">
+        <template #prepend>
+          <b-input-group-text>
+            <span class="fa fa-search" />
+          </b-input-group-text>
+          <b-dropdown
+            size="sm"
+            variant="outline-secondary"
+            :text="`Searching ${!selectedFields.length || selectedFields.length === searchableFields.length ? 'all' : selectedFields.join(', ')} field${selectedFields.length === 1 ? '' : 's'}`">
+            <b-dropdown-item
+              class="small"
+              @click.native.capture.stop.prevent="toggleAllFields(true)">
+              Select All
+            </b-dropdown-item>
+            <b-dropdown-item
+              class="small"
+              @click.native.capture.stop.prevent="toggleAllFields(false)">
+              Unselect All
+            </b-dropdown-item>
+            <b-dropdown-divider />
+            <b-dropdown-form>
+              <b-form-checkbox-group
+                stacked
+                v-model="selectedFields">
+                <template
+                  v-for="field in searchableFields">
+                  <b-form-checkbox
+                    :key="field.label"
+                    :value="field.label">
+                    {{ field.label }}
+                  </b-form-checkbox>
+                </template>
+              </b-form-checkbox-group>
+            </b-dropdown-form>
+          </b-dropdown>
+        </template>
+        <b-form-input
+          debounce="400"
+          v-model="searchTerm"
+          placeholder="Search table values"
+        />
+      </b-input-group>
+    </div> <!-- /search -->
+    <!-- data -->
+    <table class="table table-sm table-striped table-bordered small">
+      <tr>
+        <th
+          @click="sortBy(field, true)"
+          v-for="field in fields"
+          :key="`${field.label}-header`"
+          :class="{'cursor-pointer':isSortable(field)}">
+          {{ field.label }}
+          <template v-if="isSortable(field)">
+            <span
+              class="fa fa-sort"
+              v-if="sortField !== field.label"
+              :data-testid="`sort-${field.label}`"
+            />
+            <span
+              class="fa fa-sort-desc"
+              :data-testid="`sort-desc-${field.label}`"
+              v-else-if="sortField === field.label && desc"
+            />
+            <span
+              class="fa fa-sort-asc"
+              :data-testid="`sort-asc-${field.label}`"
+              v-else-if="sortField === field.label && !desc"
+            />
+          </template>
+        </th>
+      </tr>
+      <tr
+        :key="index"
+        v-for="index in (Math.max(tableLen, 0))">
+        <td class="break-all"
+          v-for="(field, columnIndex) in fields"
+          :key="`${field.label}-${index}-cell`">
+          <integration-value
+            :field="field"
+            :truncate="true"
+            :hide-label="true"
+            v-if="filteredData[index - 1]"
+            :data="filteredData[index - 1]"
+            :highlights="highlightData ? highlightData[index - 1][columnIndex] : null"
+          />
+        </td>
+      </tr>
+      <tr v-if="filteredData.length > tableLen || tableLen > size">
+        <td :colspan="fields.length">
+          <div class="d-flex justify-content-between">
+            <a
+              @click="showLess"
+              class="btn btn-link btn-xs"
+              :class="{'disabled':tableLen <= size}">
+              show less...
+            </a>
+            <a
+              @click="showAll"
+              class="btn btn-link btn-xs"
+              :class="{'disabled':tableLen >= filteredData.length}">
+              show ALL
+              <span v-if="filteredData.length > 2000">
+                (careful)
+              </span>
+            </a>
+            <a
+              @click="showMore"
+              class="btn btn-link btn-xs"
+              :class="{'disabled':tableLen >= filteredData.length}">
+              show more...
+            </a>
+          </div>
+        </td>
+      </tr>
+    </table> <!-- /data -->
+  </div>
+</template>
+
+<script>
+import { formatPostProcessedValue } from '@/utils/formatValue';
+
+export default {
+  name: 'IntegrationCardTable',
+  components: {
+    // NOTE: need async import here because there's a circular dependency
+    // between IntegrationValue and IntegrationTable
+    // see: vuejs.org/v2/guide/components.html#Circular-References-Between-Components
+    IntegrationValue: () => import('@/components/integrations/IntegrationValue')
+  },
+  props: {
+    fields: { // the list of fields to display in the table (populates the
+      type: Array, // column headers and determines how to access the data)
+      required: true
+    },
+    tableData: { // the data to display in the table
+      type: [Array, Object], // if object, turns the object into an array of length 1
+      required: true
+    },
+    size: { // the rows of data to display initially and increment or
+      type: Number, // decrement thereafter (by clicking more/less)
+      default: 50
+    },
+    defaultSortField: { // the default field to sort the table by
+      type: String // if undefined, the table is not sorted
+    },
+    defaultSortDirection: { // the default sort direction (asc or desc)
+      type: String,
+      default: 'desc'
+    }
+  },
+  data () {
+    return {
+      searchTerm: '',
+      selectedFields: this.getSearchableFields().map(f => f.label), // select all fields to start
+      sortField: this.defaultSortField || undefined,
+      tableLen: Math.min(this.tableData.length || 1, this.size),
+      desc: this.defaultSortDirection && this.defaultSortDirection === 'desc',
+      data: Array.isArray(this.tableData) ? this.tableData : [this.tableData],
+      filteredData: Array.isArray(this.tableData) ? this.tableData : [this.tableData],
+      highlightData: null
+    };
+  },
+  computed: {
+    searchableFields () { return this.getSearchableFields(); }
+  },
+  mounted () {
+    if (this.sortField) {
+      for (const field of this.fields) {
+        if (field.path.includes(this.sortField)) {
+          this.sortBy(field, false);
+          break;
+        }
+      }
+    }
+  },
+  watch: {
+    searchTerm (newValue) {
+      this.updateFilteredData(newValue);
+    },
+    selectedFields () {
+      this.updateFilteredData(this.searchTerm);
+    },
+    tableData (newValue, oldValue) {
+      this.tableLen = Math.min(this.tableData.length || 1, this.size);
+      this.data = Array.isArray(this.tableData) ? this.tableData : [this.tableData];
+      this.filteredData = Array.isArray(this.tableData) ? this.tableData : [this.tableData];
+    }
+  },
+  methods: {
+    /* exposed page functions ---------------------------------------------- */
+    showMore () {
+      this.tableLen = Math.min(this.tableLen + this.size, this.filteredData.length);
+    },
+    showLess () {
+      this.tableLen = Math.max(this.tableLen - this.size, this.size);
+    },
+    showAll () {
+      this.$store.commit('SET_RENDERING_TABLE', true);
+      setTimeout(() => { // need settimeout for rendering to take effect
+        this.tableLen = this.filteredData.length;
+      }, 100);
+    },
+    isSortable (field) {
+      return field.type === 'string' || field.type === 'date';
+    },
+    sortBy (field, toggleSort) {
+      if (!this.isSortable(field)) {
+        return;
+      }
+
+      if (toggleSort) {
+        if (this.sortField === field.label) {
+          this.desc = !this.desc;
+        } else {
+          this.desc = true;
+        }
+      }
+
+      this.sortField = field.label;
+
+      this.filteredData.sort((a, b) => {
+        let valueA = JSON.parse(JSON.stringify(a));
+        let valueB = JSON.parse(JSON.stringify(b));
+
+        for (const p of field.path) {
+          valueA = valueA[p];
+          valueB = valueB[p];
+        }
+
+        if (!valueA) { valueA = ''; }
+        if (!valueB) { valueB = ''; }
+
+        if (field.type === 'string') {
+          if (this.desc) {
+            return valueA.toString().localeCompare(valueB);
+          } else {
+            return valueB.toString().localeCompare(valueA);
+          }
+        } else {
+          valueA = new Date(valueA);
+          valueB = new Date(valueB);
+          if (this.desc) {
+            return valueA.getTime() < valueB.getTime() ? 1 : -1;
+          } else {
+            return valueB.getTime() < valueA.getTime() ? 1 : -1;
+          }
+        }
+      });
+    },
+    toggleAllFields (select) {
+      this.selectedFields = select ? this.searchableFields.map(f => f.label) : [];
+    },
+    updateFilteredData (newSearchTerm) {
+      const syncWithParent = () => {
+        this.$emit('tableFilteredDataChanged', this.filteredData);
+      };
+
+      if (!newSearchTerm) {
+        this.filteredData = this.data;
+        this.highlightData = null;
+        this.setTableLen();
+        syncWithParent();
+        return;
+      }
+
+      /**
+       * @param arr the array to be simultaneously filtered/mapped over
+       * @param checkMapperFunc (arrElement) -> [boolean, outputElement]
+       */
+      const combinedFilterMap = (arr, checkMapperFunc) => {
+        return arr.reduce((accrued, currentElem) => {
+          const [passedFilter, outputElement] = checkMapperFunc(currentElem);
+          return passedFilter ? accrued.push(outputElement) && accrued : accrued;
+        }, []);
+      };
+
+      // filters while mapping to avoid needing to re-match values for highlighting data
+      const filterAndHighlightData = combinedFilterMap(this.data, (row) => {
+        /* helpers ----------- */
+        const cellHighlightDataFromMatch = (matchObj) => {
+          const matchStart = matchObj.index;
+          // create span information for highlighting
+          return [{ start: matchStart, end: matchStart + matchObj[0].length }];
+        };
+        const matchAndCellHighlightDataFromValue = (fullValue, matchRegex) => {
+          let match = false;
+          let cellHighlightData = null;
+
+          if (Array.isArray(fullValue)) {
+            cellHighlightData = [];
+            for (const [index, value] of fullValue.entries()) {
+              const matchObj = matchRegex.exec(value.toString().toLowerCase());
+
+              if (matchObj) {
+                match = true;
+                cellHighlightData[index] = cellHighlightDataFromMatch(matchObj);
+              }
+            }
+          } else {
+            const matchObj = matchRegex.exec(fullValue.toString().toLowerCase());
+            if (matchObj) {
+              match = true;
+              cellHighlightData = cellHighlightDataFromMatch(matchObj);
+            }
+          }
+
+          return { match, cellHighlightData };
+        };
+        /* ------------------- */
+
+        const query = newSearchTerm.toLowerCase();
+        const regex = new RegExp(query);
+
+        const rowHighlightData = [];
+        let matchInRow = false;
+        for (const [columnIndex, field] of this.fields.entries()) {
+          // if no fields selected, search all fields
+          if (this.selectedFields.length && this.selectedFields.indexOf(field.label) < 0) { continue; }
+          for (const c in row) {
+            if (!field.path.includes(c)) { continue; }
+            if (field.noSearch) { continue; }
+            if (!row[c]) { continue; }
+
+            const value = formatPostProcessedValue(row, field);
+
+            if (!value) { continue; }
+
+            const { match, cellHighlightData } = matchAndCellHighlightDataFromValue(value, regex);
+
+            if (match) {
+              matchInRow = true;
+              // add highlighting info if match is found
+              rowHighlightData[columnIndex] = cellHighlightData;
+            }
+          }
+        }
+        return [matchInRow, { filteredDataElement: row, highlightDataElement: rowHighlightData }];
+      });
+
+      this.filteredData = filterAndHighlightData.map(obj => obj.filteredDataElement);
+      this.highlightData = filterAndHighlightData.map(obj => obj.highlightDataElement);
+
+      this.setTableLen();
+      syncWithParent();
+    },
+    // helpers ------------------------------------------------------------- */
+    setTableLen () {
+      this.tableLen = Math.min(this.filteredData.length, this.size);
+    },
+    getSearchableFields () {
+      return this.fields.filter(f => !f.noSearch);
+    }
+  },
+  updated () { // data is rendered
+    this.$nextTick(() => {
+      this.$store.commit('SET_RENDERING_TABLE', false);
+    });
+  }
+};
+</script>

@@ -1,5 +1,7 @@
 import Vue from 'vue';
 
+import Utils from '../utils/utils';
+
 export default {
 
   /* service methods ------------------------------------------------------- */
@@ -11,12 +13,14 @@ export default {
    *                              or rejection of the request.
    */
   get: function (query, cancelToken) {
+    Utils.setFacetsQuery(query, 'spigraph');
+
     return new Promise((resolve, reject) => {
       const options = {
         url: 'api/spigraph',
         method: 'POST',
         data: query,
-        cancelToken: cancelToken
+        cancelToken
       };
 
       Vue.axios(options)
@@ -39,12 +43,14 @@ export default {
    *                              or rejection of the request.
    */
   getHierarchy: function (query, cancelToken) {
+    Utils.setFacetsQuery(query, 'spigraph');
+
     return new Promise((resolve, reject) => {
       const options = {
         url: 'api/spigraphhierarchy',
         method: 'POST',
         data: query,
-        cancelToken: cancelToken
+        cancelToken
       };
 
       Vue.axios(options)

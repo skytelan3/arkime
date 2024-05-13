@@ -1,7 +1,14 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
 
   <!-- session detail -->
-  <div>
+  <div
+    :ref="session.id"
+    :id="`${session.id}-detail`"
+    :class="['session-detail-wrapper', `card-columns-${numCols}`]">
 
     <!-- detail loading -->
     <div v-if="loading"
@@ -93,7 +100,7 @@
     <div v-if="!loadingPackets && !errorPackets && !hidePackets && !user.hidePcap"
       class="inner packet-container mr-1 ml-1"
       v-html="packetHtml"
-      ref="packetContainer"
+      :ref="`${session.id}-packet-container`"
       :class="{'show-ts':params.ts,'hide-src':!params.showSrc,'hide-dst':!params.showDst}">
     </div> <!-- packets -->
 
@@ -132,12 +139,14 @@ import Vue from 'vue';
 import qs from 'qs';
 import sanitizeHtml from 'sanitize-html';
 import SessionsService from './SessionsService';
-import MolochTagSessions from '../sessions/Tags';
-import MolochRemoveData from '../sessions/Remove';
-import MolochSendSessions from '../sessions/Send';
-import MolochExportPcap from '../sessions/ExportPcap';
-import MolochToast from '../utils/Toast';
+import ArkimeTagSessions from '../sessions/Tags';
+import ArkimeRemoveData from '../sessions/Remove';
+import ArkimeSendSessions from '../sessions/Send';
+import ArkimeExportPcap from '../sessions/ExportPcap';
+import ArkimeToast from '../utils/Toast';
 import PacketOptions from './PacketOptions';
+import FieldActions from './FieldActions';
+import UserService from '../users/UserService';
 
 const defaultUserSettings = {
   detailFormat: 'last',
@@ -145,11 +154,87 @@ const defaultUserSettings = {
   showTimestamps: 'last'
 };
 
+// dl resize variables and functions
+let selectedDT; // store selected dt to watch drag and calculate new width
+let dtOffset; // store offset width to calculate new width
+let selectedGrip; // the column resize grip that is currently being dragged
+let siblingDD; // the dd element following the dt element in the dl that is being resized
+
+// fired when a column resize grip is clicked
+// stores values for calculations when the grip is unclicked
+function gripClick (e, div) {
+  e.preventDefault();
+  e.stopPropagation();
+  selectedDT = div.getElementsByTagName('dt')[0];
+  siblingDD = selectedDT.nextElementSibling;
+  dtOffset = selectedDT.offsetWidth - e.pageX;
+  selectedGrip = div.getElementsByClassName('session-detail-grip')[0];
+};
+
+// fired when the column resize grip is dragged
+// styles the grip to show where it's being dragged
+function gripDrag (e) { // move the grip where the user moves their cursor
+  if (selectedDT && selectedGrip) {
+    const newWidth = dtOffset + e.pageX;
+    selectedGrip.style.borderRight = '1px dotted var(--color-gray)';
+    selectedGrip.style.left = `${newWidth}px`;
+  }
+}
+
+// fired when a clicked and dragged grip is dropped
+// updates the column and table width and saves the values
+function gripUnclick (e, vueThis) {
+  if (selectedDT && selectedGrip) {
+    const newWidth = Math.max(dtOffset + e.pageX, 100); // min width is 100px
+    selectedDT.style.width = `${newWidth}px`;
+    siblingDD.style.marginLeft = `${newWidth + 10}px`;
+    selectedGrip.style.left = `${newWidth}px`;
+    selectedGrip.style.borderRight = 'none';
+
+    // update all the dt and dd styles to reflect the new width
+    for (const dt of document.getElementsByTagName('dt')) {
+      dt.style.width = `${newWidth}px`;
+      dt.nextElementSibling.style.marginLeft = `${newWidth + 10}px`;
+    }
+
+    const labelBtns = document.getElementsByClassName('clickable-label');
+    if (labelBtns && labelBtns.length) {
+      const btn = labelBtns[0].getElementsByTagName('button');
+      if (btn && btn.length) {
+        btn[0].style.maxWidth = `${newWidth}px`;
+      }
+    }
+
+    for (const grip of document.getElementsByClassName('session-detail-grip')) {
+      grip.style.left = `${newWidth}px`;
+    }
+
+    // save it as a user configuration
+    vueThis.saveDLWidth(newWidth);
+  }
+
+  selectedGrip = undefined;
+  selectedDT = undefined;
+}
+
+function collapseSection (e) {
+  e.target.classList.toggle('collapsed');
+  e.target.nextElementSibling.classList.toggle('collapse');
+  e.target.parentElement.classList.toggle('collapsed');
+
+  if (localStorage) {
+    const collapsed = JSON.parse(localStorage['arkime-detail-collapsed'] || '{}');
+    collapsed[e.target.innerText.toLowerCase()] = e.target.classList.contains('collapsed');
+    localStorage['arkime-detail-collapsed'] = JSON.stringify(collapsed);
+  }
+}
+
 export default {
-  name: 'MolochSessionDetail',
+  name: 'ArkimeSessionDetail',
   props: [
     'session',
-    'sessionIndex'
+    'sessionIndex',
+    'sessionDetailDlWidth'
   ],
   components: { PacketOptions },
   data () {
@@ -177,7 +262,8 @@ export default {
         showFrames: false,
         showSrc: true,
         showDst: true
-      }
+      },
+      packetContainerRef: `${this.session.id}-packet-container`
     };
   },
   computed: {
@@ -189,6 +275,17 @@ export default {
     },
     cyberChefDstUrl: function () {
       return `cyberchef.html?nodeId=${this.session.node}&sessionId=${this.session.id}&type=dst`;
+    },
+    dlWidth: {
+      get: function () {
+        return this.$store.state.sessionDetailDLWidth || 160;
+      },
+      set: function (newValue) {
+        this.$store.commit('setSessionDetailDLWidth', newValue);
+      }
+    },
+    numCols: function () {
+      return this.$store.state.sessionDetailCols || '';
     }
   },
   created: function () {
@@ -216,6 +313,10 @@ export default {
     },
     toggleShowFrames: function () {
       this.params.showFrames = !this.params.showFrames;
+      if (localStorage) {
+        // update browser saved ts if the user settings is set to last
+        localStorage['moloch-showFrames'] = this.params.showFrames;
+      }
 
       if (this.params.showFrames) {
         // show timestamps and info by default for show frames option
@@ -239,7 +340,7 @@ export default {
     },
     toggleLineNumbers: function () {
       // can only have line numbers in hex mode
-      if (!this.params.base === 'hex') { return; }
+      if (this.params.base !== 'hex') { return; }
       this.params.line = !this.params.line;
       this.getPackets();
     },
@@ -298,16 +399,69 @@ export default {
           propsData: {
             session: this.session,
             fields: this.$store.state.fieldsMap,
-            molochclusters: this.$store.state.remoteclusters
+            remoteclusters: this.$store.state.remoteclusters
           },
-          props: ['session', 'fields', 'molochclusters'],
+          props: ['session', 'fields', 'remoteclusters'],
           data: function () {
             return {
               form: undefined,
               cluster: undefined,
-              message: message,
-              messageType: messageType
+              message,
+              messageType
             };
+          },
+          mounted () {
+            this.$nextTick(() => { // wait for content to render
+              // add grip to each section of the section detail
+              const sessionDetailSection = document.getElementById(`${this.session.id}-detail`);
+              if (!sessionDetailSection) { return; }
+
+              const sessionDetailDL = sessionDetailSection.getElementsByTagName('dl');
+              const dlWidth = this.dlWidth;
+              for (const div of sessionDetailDL) {
+                // set the width of the session detail div based on user setting
+                const grip = document.createElement('div');
+                grip.classList.add('session-detail-grip');
+                grip.style.left = `${dlWidth}px`;
+                div.prepend(grip);
+                grip.addEventListener('mousedown', (e) => gripClick(e, div));
+              }
+
+              const dts = sessionDetailSection.getElementsByTagName('dt');
+              for (const dt of dts) {
+                // set the width of the dt and the margin of the dd based on user setting
+                dt.style.width = `${this.dlWidth}px`;
+                dt.nextElementSibling.style.marginLeft = `${this.dlWidth + 10}px`;
+                const labelBtn = dt.getElementsByClassName('clickable-label');
+                if (labelBtn && labelBtn.length) {
+                  const btn = labelBtn[0].getElementsByTagName('button');
+                  if (btn && btn.length) {
+                    btn[0].style.maxWidth = `${dlWidth}px`;
+                  }
+                }
+              }
+
+              // listen for grip drags
+              document.addEventListener('mousemove', gripDrag);
+              const self = this; // listen for grip unclicks
+              document.addEventListener('mouseup', (e) => gripUnclick(e, self));
+
+              // find all the card titles and add a click listener to toggle the collapse
+              const elementsArray = sessionDetailSection.getElementsByClassName('card-title');
+              for (const elem of elementsArray) {
+                // check if the element was previously collapsed and collapse it
+                if (localStorage && localStorage['arkime-detail-collapsed']) {
+                  const collapsed = JSON.parse(localStorage['arkime-detail-collapsed']);
+                  if (collapsed[elem.innerText.toLowerCase()]) {
+                    elem.classList.add('collapsed');
+                    elem.nextElementSibling.classList.add('collapse');
+                    elem.parentElement.classList.add('collapsed');
+                  }
+                }
+
+                elem.addEventListener('click', collapseSection);
+              }
+            });
           },
           computed: {
             expression: {
@@ -325,9 +479,42 @@ export default {
               set: function (newValue) {
                 this.$store.commit('setTime', { startTime: newValue });
               }
+            },
+            permalink () {
+              const id = this.session.id.split(':');
+              let prefixlessId = id.length > 1 ? id[1] : id[0];
+              if (prefixlessId[1] === '@') {
+                prefixlessId = prefixlessId.substr(2);
+              }
+
+              const params = {
+                expression: `id == ${prefixlessId}`,
+                startTime: Math.floor(this.session.firstPacket / 1000),
+                stopTime: Math.ceil(this.session.lastPacket / 1000),
+                cluster: this.session.cluster,
+                openAll: 1
+              };
+
+              return `sessions?${qs.stringify(params)}`;
+            },
+            dlWidth: {
+              get: function () {
+                return this.$store.state.sessionDetailDLWidth || 160;
+              },
+              set: function (newValue) {
+                this.$store.commit('setSessionDetailDLWidth', newValue);
+              }
             }
           },
           methods: {
+            toggleLayout (numCols) {
+              this.$store.commit('setSessionDetailCols', numCols);
+            },
+            /* Saves the dl widths */
+            saveDLWidth: function (width) {
+              this.dlWidth = width;
+              UserService.saveState({ width }, 'sessionDetailDLWidth');
+            },
             getField: function (expr) {
               if (!this.fields[expr]) {
                 console.log('UNDEFINED', expr);
@@ -368,24 +555,6 @@ export default {
             sendSession: function (cluster) {
               this.form = 'send:session';
               this.cluster = cluster;
-            },
-            openPermalink: function () {
-              const id = this.session.id.split(':');
-              let prefixlessId = id.length > 1 ? id[1] : id[0];
-              if (prefixlessId[1] === '@') {
-                prefixlessId = prefixlessId.substr(2);
-              }
-
-              const params = {
-                expression: `id == ${prefixlessId}`,
-                startTime: Math.floor(this.session.firstPacket / 1000),
-                stopTime: Math.ceil(this.session.lastPacket / 1000),
-                openAll: 1
-              };
-
-              const url = `sessions?${qs.stringify(params)}`;
-
-              window.location = url;
             },
             /**
              * Adds a rootId expression and applies a new start time
@@ -428,7 +597,7 @@ export default {
              */
             showMoreItems: function (e) {
               e.target.style.display = 'none';
-              e.target.previousSibling.style.display = 'inline-block';
+              e.target.previousSibling.style.display = 'inline';
             },
             /**
              * Hides more items in a list of values
@@ -436,7 +605,7 @@ export default {
              */
             showFewerItems: function (e) {
               e.target.parentElement.style.display = 'none';
-              e.target.parentElement.nextElementSibling.style.display = 'inline-block';
+              e.target.parentElement.nextElementSibling.style.display = 'inline';
             },
             /**
              * Toggles a column in the sessions table
@@ -463,11 +632,12 @@ export default {
             }
           },
           components: {
-            MolochTagSessions,
-            MolochRemoveData,
-            MolochSendSessions,
-            MolochExportPcap,
-            MolochToast
+            ArkimeTagSessions,
+            ArkimeRemoveData,
+            ArkimeSendSessions,
+            ArkimeExportPcap,
+            ArkimeToast,
+            FieldActions
           }
         }).$mount();
 
@@ -533,6 +703,9 @@ export default {
         }
         if (localStorage['moloch-image']) {
           this.params.image = JSON.parse(localStorage['moloch-image']);
+        }
+        if (localStorage['moloch-showFrames']) {
+          this.params.showFrames = JSON.parse(localStorage['moloch-showFrames']);
         }
         if (localStorage['moloch-decodings']) {
           this.params.decode = JSON.parse(localStorage['moloch-decodings']);
@@ -607,8 +780,8 @@ export default {
 
           setTimeout(() => { // wait until session packets are rendered
             // tooltips for src/dst byte images
-            if (!this.$refs.packetContainer) { return; }
-            const tss = this.$refs.packetContainer.getElementsByClassName('session-detail-ts');
+            if (!this.$refs[this.packetContainerRef]) { return; }
+            const tss = this.$refs[this.packetContainerRef].getElementsByClassName('session-detail-ts');
             for (let i = 0; i < tss.length; ++i) {
               let timeEl = tss[i];
               const value = timeEl.getAttribute('value');
@@ -624,7 +797,7 @@ export default {
             }
 
             // tooltips for linked images
-            const imgs = this.$refs.packetContainer.getElementsByClassName('imagetag');
+            const imgs = this.$refs[this.packetContainerRef].getElementsByClassName('imagetag');
             for (let i = 0; i < imgs.length; ++i) {
               const img = imgs[i];
               let href = img.href;
@@ -641,12 +814,12 @@ export default {
             }
 
             // add listeners to fetch the src/dst bytes images on mouse enter
-            const srcBytes = this.$refs.packetContainer.getElementsByClassName('srccol');
+            const srcBytes = this.$refs[this.packetContainerRef].getElementsByClassName('srccol');
             if (srcBytes && srcBytes.length) {
               srcBytes[0].addEventListener('mouseenter', this.showSrcBytesImg);
             }
 
-            const dstBytes = this.$refs.packetContainer.getElementsByClassName('dstcol');
+            const dstBytes = this.$refs[this.packetContainerRef].getElementsByClassName('dstcol');
             if (dstBytes && dstBytes.length) {
               dstBytes[0].addEventListener('mouseenter', this.showDstBytesImg);
             }
@@ -661,26 +834,28 @@ export default {
         });
     },
     showSrcBytesImg: function () {
-      this.$refs.packetContainer.getElementsByClassName('src-col-tip')[0].innerHTML = `Source Bytes:
+      const url = `api/session/raw/${this.session.node}/${this.session.id}.png?type=src`;
+      this.$refs[this.packetContainerRef].getElementsByClassName('src-col-tip')[0].innerHTML = `Source Bytes:
         <br>
-        <img src="${this.session.node}/raw/${this.session.id}.png?type=src">
-        <a class="no-decoration download-bytes" href="${this.session.node}/raw/${this.session.id}.png?type=src" download="${this.session.id}-src.png">
+        <img src="${url}">
+        <a class="no-decoration download-bytes" href="${url}" download="${this.session.id}-src.png">
           <span class="fa fa-download"></span>&nbsp;
           Download source bytes image
         </button>
       `;
-      this.$refs.packetContainer.getElementsByClassName('srccol')[0].removeEventListener('mouseenter', this.showSrcBytesImg);
+      this.$refs[this.packetContainerRef].getElementsByClassName('srccol')[0].removeEventListener('mouseenter', this.showSrcBytesImg);
     },
     showDstBytesImg: function () {
-      this.$refs.packetContainer.getElementsByClassName('dst-col-tip')[0].innerHTML = `Destination Bytes:
+      const url = `api/session/raw/${this.session.node}/${this.session.id}.png?type=dst`;
+      this.$refs[this.packetContainerRef].getElementsByClassName('dst-col-tip')[0].innerHTML = `Destination Bytes:
         <br>
-        <img src="${this.session.node}/raw/${this.session.id}.png?type=dst">
-        <a class="no-decoration download-bytes" href="${this.session.node}/raw/${this.session.id}.png?type=dst" download="${this.session.id}-dst.png">
+        <img src="${url}">
+        <a class="no-decoration download-bytes" href="${url}" download="${this.session.id}-dst.png">
           <span class="fa fa-download"></span>&nbsp;
           Download destination bytes image
         </button>
       `;
-      this.$refs.packetContainer.getElementsByClassName('dstcol')[0].removeEventListener('mouseenter', this.showDstBytesImg);
+      this.$refs[this.packetContainerRef].getElementsByClassName('dstcol')[0].removeEventListener('mouseenter', this.showDstBytesImg);
     }
   },
   beforeDestroy: function () {
@@ -688,13 +863,13 @@ export default {
       this.cancelPacketLoad();
     }
 
-    if (this.$refs.packetContainer) {
-      const srcBytes = this.$refs.packetContainer.getElementsByClassName('srccol');
+    if (this.$refs[this.packetContainerRef]) {
+      const srcBytes = this.$refs[this.packetContainerRef].getElementsByClassName('srccol');
       if (srcBytes && srcBytes.length) {
         srcBytes[0].removeEventListener('mouseenter', this.showSrcBytesImg);
       }
 
-      const dstBytes = this.$refs.packetContainer.getElementsByClassName('dstcol');
+      const dstBytes = this.$refs[this.packetContainerRef].getElementsByClassName('dstcol');
       if (dstBytes && dstBytes.length) {
         dstBytes[0].removeEventListener('mouseenter', this.showDstBytesImg);
       }
@@ -708,11 +883,6 @@ export default {
   display: block;
   margin-left: var(--px-md);
   margin-right: var(--px-md);
-}
-
-.session-detail h4.sessionDetailMeta {
-  padding-top: 10px;
-  border-top: 1px solid var(--color-gray);
 }
 
 .packet-options {
@@ -903,7 +1073,7 @@ export default {
   font-weight: 600;
   line-height: 21px;
   padding: 0 5px 1px 5px;
-  max-width: 160px;
+  max-width: 160px; /* this gets updated by the dl resizing */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -922,5 +1092,98 @@ export default {
 
 .session-detail .clickable-label .dropdown-menu .dropdown-item {
   font-size: 12px;
+}
+
+/* dl resizing */
+.session-detail-grip {
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+  position: absolute;
+  display: inline-block;
+}
+dl:hover > .session-detail-grip {
+  border-right: 1px dotted var(--color-gray) !important;
+}
+
+/* detail card styles */
+.session-detail-wrapper .card-columns { /* default */
+  column-count: 2;
+  -moz-column-count: 2;
+}
+.session-detail-wrapper.card-columns-1 .card-columns {
+  column-count: 1;
+  -moz-column-count: 1;
+}
+.session-detail-wrapper.card-columns-3 .card-columns {
+  column-count: 3;
+  -moz-column-count: 3;
+}
+@media (max-width: 1350px) {
+  .session-detail-wrapper .card-columns {
+    column-count: 1;
+    -moz-column-count: 1;
+  }
+}
+.session-detail .card > .card-body > .card-title {
+  cursor: pointer;
+  padding: 0.5rem;
+  margin: -1.25rem;
+  margin-bottom: 1.25rem;
+  border-radius: 4px 4px 0 0;
+  background-color: var(--color-gray);
+  color: var(--color-background, #333);
+}
+.session-detail .card > .card-body > dl .card-title {
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0.25rem;
+  margin-top: 0.3rem;
+  position: relative;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  color: var(--color-foreground, #333);
+  background-color: var(--color-gray-light);
+}
+
+.session-detail .card > .card-body dl {
+  margin-bottom: 0rem;
+  margin-top: -0.75rem;
+  position:relative;
+}
+
+.session-detail .card > .card-body > dl > dt:hover + dd,
+.session-detail .card > .card-body > dl > dd:hover {
+  border-radius: 10px;
+  background-color: var(--color-gray-lighter);
+}
+
+.session-detail .card > .card-body dt,
+.session-detail .card > .card-body dd {
+  line-height: 1.7;
+  margin-bottom: 0.2rem !important;
+}
+
+/* detail card collapse/expand */
+.session-detail .card h4:after {
+  float: right;
+  content: "\f078";
+  font-family: FontAwesome;
+}
+.session-detail .card h4.collapsed:after {
+  float: right;
+  content: "\f077";
+  font-family: FontAwesome;
+}
+
+.session-detail .card > .card-body.collapsed {
+  padding-bottom: 0;
+}
+.session-detail .card > .card-body.collapsed > h4 {
+  margin-bottom: 0;
+  border-radius: 4px;
+}
+.session-detail .card > .card-body > dl > h4.collapsed {
+  margin-bottom: 0;
 }
 </style>

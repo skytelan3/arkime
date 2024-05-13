@@ -4,7 +4,7 @@ import { render, fireEvent, waitFor } from '@testing-library/vue';
 import FieldTypeahead from '../src/components/utils/FieldTypeahead.vue';
 import UserService from '../src/components/users/UserService';
 import '../src/filters.js';
-const { fields } = require('./consts');
+const { fields } = require('../../../common/vueapp/tests/consts');
 
 console.info = jest.fn(); // don't display console.info messages
 
@@ -29,7 +29,7 @@ const renderOptions = {
   mocks: { $route },
   props: {
     dropup: false,
-    fields: fields,
+    fields,
     page: 'testpage',
     initialValue: 'Src IP',
     queryParam: 'queryParam'
@@ -155,7 +155,7 @@ test('field typeahead can add field to history', async () => {
   await fireEvent.click(dropdownItem);
 
   await waitFor(async () => {
-    expect(getAllByText('All IP fields').length).toBe(2);
+    expect(getAllByText('All IP fields')).toHaveLength(2);
   });
 });
 

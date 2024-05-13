@@ -8,7 +8,7 @@ import { render, fireEvent } from '@testing-library/vue';
 import userEvent from '@testing-library/user-event';
 import Time from '../src/components/search/Time.vue';
 import '../src/filters.js';
-const { userWithSettings } = require('./consts');
+const { userWithSettings } = require('../../../common/vueapp/tests/consts');
 
 console.info = jest.fn(); // don't display console.info messages
 console.warn = jest.fn(); // don't display console.warn messages
@@ -54,6 +54,24 @@ const store = {
     }
   }
 };
+
+Vue.prototype.$constants = {
+  DEFAULT_TIME_RANGE: 1234
+};
+
+test('default time range', () => {
+  const $route = { query: {}, path: '/sessions' };
+  const $router = { push: jest.fn() };
+
+  render(Time, {
+    store,
+    mocks: { $route, $router },
+    props: { timezone: 'gmt' } // use gmt/utc! who knows where this is being run
+  });
+
+  // the default time range should be added to the url parameters
+  expect(window.location.href).toBe('http://localhost/sessions?date=1234');
+});
 
 test('search time', async () => {
   const $route = { query: { date: timeRange, stopTime, startTime } };

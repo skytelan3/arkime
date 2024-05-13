@@ -61,16 +61,48 @@ rules:
 
   - name: "ip test"
     when: "fieldSet"
+    log: true
     fields:
       ip.src:
         - 10.44.100.0/24
         - 2001:06f8::/32
       port.dst:
-        - 443
-        - 5353
+        - 400-500
+        - 5353-5354
+      port.dst:
+        - 5300-5400
+        - 50509-50510
       protocols.cnt: 1
     ops:
       "protocols": "iprulztest"
+      _maxPacketsToSave: ">100"
+
+  - name: "0 test"
+    when: "beforeFinalSave"
+    fields:
+      packets.src: 2
+      packets.dst: 0
+      databytes.src: 176
+    ops:
+      tags: "src-2-dst-0"
+
+  - name: "not 1 test"
+    when: "beforeFinalSave"
+    fields:
+      packets.src: 2
+      "!packets.dst": 1
+      databytes.src: 176
+    ops:
+      tags: "src-2-not-dst-1"
+
+  - name: "not 0 test"
+    when: "beforeFinalSave"
+    fields:
+      "!packets.src": 0
+      "!packets.dst": 1
+      databytes.src: 176
+    ops:
+      tags: "not-src-0-not-dst-1"
 
   - name: "only syn"
     when: "beforeFinalSave"
@@ -80,3 +112,35 @@ rules:
       packets.dst: 0
     ops:
       _dontSaveSPI: 1
+
+  - name: "communityId"
+    when: "beforeFinalSave"
+    fields:
+      communityId: "FuiRMncy2mhAkCJ4mYumMiRK0uw="
+    ops:
+      "tags": "communityidTest"
+
+  - name: "cert.alt"
+    when: "fieldSet"
+    log: true
+    fields:
+      cert.alt: "bad.curveballtest.com"
+      communityId: "YzavRzM2u5v8TNEv4SuCDe3OgWg="
+      ip.dst: 54.226.182.138
+      ip.src: 172.130.128.76
+      protocols.cnt: 2
+    ops:
+      "tags": "cert.alt test"
+
+  - name: "not rule"
+    when: "beforeFinalSave"
+    fields:
+      "!communityId": "FuiRMncy2mhAkCJ4mYumMiRK0uw="
+      "!protocols":
+        - tcp
+        - http
+        - dns
+      ip.src: 10.0.0.2
+      ip.dst: 10.0.0.1
+    ops:
+      "tags": "communityId not test"

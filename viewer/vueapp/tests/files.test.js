@@ -9,7 +9,8 @@ import Files from '../src/components/files/Files.vue';
 import FileService from '../src/components/files/FileService';
 import UserService from '../src/components/users/UserService';
 import '../src/filters.js';
-const { files, userWithSettings } = require('./consts');
+import '../../../common/vueapp/vueFilters';
+const { files, userWithSettings } = require('../../../common/vueapp/tests/consts');
 
 console.info = jest.fn(); // ignore tooltip warnings
 
@@ -17,12 +18,23 @@ global.$ = global.jQuery = $;
 
 Vue.use(BootstrapVue);
 
+Vue.prototype.$constants = {
+  MULTIVIEWER: false
+};
+
 jest.mock('../src/components/files/FileService');
 jest.mock('../src/components/users/UserService');
 
 const store = {
   state: {
-    user: userWithSettings
+    user: userWithSettings,
+    esCluster: {
+      availableCluster: {
+        active: [],
+        inactive: []
+      },
+      selectedCluster: []
+    }
   }
 };
 
@@ -44,7 +56,7 @@ test('file page no results', async () => {
   });
 
   await waitFor(() => { // displays no results
-    getByText('No results match your search');
+    getByText('No results match your search.');
   });
 });
 

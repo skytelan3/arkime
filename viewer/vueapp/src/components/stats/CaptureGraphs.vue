@@ -1,13 +1,17 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
 
   <div class="container-fluid">
 
-    <moloch-loading v-if="initialLoading && !error">
-    </moloch-loading>
+    <arkime-loading v-if="initialLoading && !error">
+    </arkime-loading>
 
-    <moloch-error v-if="error"
+    <arkime-error v-if="error"
       :message="error">
-    </moloch-error>
+    </arkime-error>
 
     <div v-show="!error">
 
@@ -16,15 +20,31 @@
         title="HINT: These graphs are 1440 pixels wide. Expand your browser window to at least 1500 pixels wide for best viewing.">
       </span>
 
-      <moloch-paging v-if="stats"
+      <arkime-paging v-if="stats"
         class="mt-1"
         :records-total="stats.recordsTotal"
         :records-filtered="stats.recordsFiltered"
         v-on:changePaging="changePaging"
         length-default=200>
-      </moloch-paging>
+      </arkime-paging>
 
-      <div id="statsGraph" style="width:1440px;"></div>
+      <div id="statsGraph"
+        style="width:1440px;"
+        v-show="stats && stats.recordsFiltered">
+      </div>
+
+      <div class="text-center" v-if="!stats || !stats.recordsFiltered">
+        <h3>
+          <span class="fa fa-folder-open fa-2x text-muted" />
+        </h3>
+        <h5 class="lead">
+          No data.
+          <template v-if="cluster">
+            <br>
+            Try selecting a different cluster.
+          </template>
+        </h5>
+      </div>
 
     </div>
 
@@ -34,9 +54,10 @@
 
 <script>
 import '../../cubismoverrides.css';
-import MolochPaging from '../utils/Pagination';
-import MolochError from '../utils/Error';
-import MolochLoading from '../utils/Loading';
+import Utils from '../utils/utils';
+import ArkimePaging from '../utils/Pagination';
+import ArkimeError from '../utils/Error';
+import ArkimeLoading from '../utils/Loading';
 
 let oldD3, cubism; // lazy load old d3 and cubism
 
@@ -52,9 +73,10 @@ export default {
     'graphHide',
     'graphSort',
     'searchTerm',
-    'refreshData'
+    'refreshData',
+    'cluster'
   ],
-  components: { MolochPaging, MolochError, MolochLoading },
+  components: { ArkimePaging, ArkimeError, ArkimeLoading },
   data: function () {
     return {
       error: '',
@@ -66,7 +88,8 @@ export default {
         start: 0,
         filter: this.searchTerm || undefined,
         desc: this.graphSort === 'desc',
-        hide: this.graphHide || 'none'
+        hide: this.graphHide || 'none',
+        cluster: this.cluster || undefined
       }
     };
   },
@@ -112,6 +135,11 @@ export default {
       this.query.desc = this.graphSort === 'desc';
       this.loadData();
     },
+    cluster: function () {
+      initialized = false;
+      this.query.cluster = this.cluster;
+      this.loadData();
+    },
     refreshData: function () {
       if (this.refreshData) {
         this.loadData();
@@ -150,6 +178,10 @@ export default {
     },
     /* helper functions ---------------------------------------------------- */
     loadData: function () {
+      if (!Utils.checkClusterSelection(this.query.cluster, this.$store.state.esCluster.availableCluster.active, this).valid) {
+        return;
+      }
+
       this.loading = true;
       initialized = false;
 
@@ -209,11 +241,11 @@ export default {
             method: 'GET',
             url: 'api/dstats',
             params: {
-              nodeName: nodeName,
+              nodeName,
               start: startV / 1000,
               stop: stopV / 1000,
               step: stepV / 1000,
-              interval: interval,
+              interval,
               name: metricName
             }
           };

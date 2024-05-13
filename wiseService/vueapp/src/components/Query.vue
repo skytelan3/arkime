@@ -1,3 +1,7 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <!-- container -->
   <div class="container-fluid">
@@ -242,7 +246,7 @@ export default {
       if (timeout) { clearTimeout(timeout); }
       timeout = setTimeout(() => {
         this.sendSearchQuery();
-      }, 400);
+      }, 600);
     },
     loadSourceOptions: function () {
       WiseService.getSources()
@@ -311,7 +315,7 @@ export default {
           this.searchResult = data;
           if (data.length >= 1) {
             this.tableFields = Object.keys(data[0]).map(key => {
-              return { key: key, sortable: true };
+              return { key, sortable: true };
             });
           }
         })

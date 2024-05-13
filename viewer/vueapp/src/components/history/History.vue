@@ -1,7 +1,11 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
 
   <div class="history-page">
-    <MolochCollapsible>
+    <ArkimeCollapsible>
       <span class="fixed-header">
         <!-- search navbar -->
         <form class="history-search">
@@ -10,6 +14,9 @@
               title="Tip: use ? to replace a single character and * to replace zero or more characters in your query"
               v-b-tooltip.hover>
             </span>
+            <Clusters
+              class="pull-right"
+            />
             <button type="button"
               class="btn btn-sm btn-theme-tertiary pull-right ml-1 search-btn"
               @click="loadData">
@@ -41,7 +48,7 @@
                 @input="debounceSearch"
                 class="form-control"
                 v-model="searchTerm"
-                v-focus-input="focusInput"
+                v-focus="focusInput"
                 @blur="onOffFocus"
                 placeholder="Search for history in the table below"
               />
@@ -56,12 +63,12 @@
               </span>
             </div>
             <div class="form-inline mt-1">
-              <moloch-time
+              <arkime-time
                 :timezone="user.settings.timezone"
                 @timeChange="loadData"
                 :hide-bounding="true"
                 :hide-interval="true">
-              </moloch-time>
+              </arkime-time>
             </div>
           </div>
         </form> <!-- /search navbar -->
@@ -69,25 +76,26 @@
         <!-- paging navbar -->
         <form class="history-paging">
           <div class="form-inline">
-            <moloch-paging v-if="history"
+            <arkime-paging v-if="history"
               class="mt-1 ml-1"
               :records-total="recordsTotal"
               :records-filtered="recordsFiltered"
               @changePaging="changePaging"
               length-default=100>
-            </moloch-paging>
-            <moloch-toast
+            </arkime-paging>
+            <arkime-toast
               class="ml-2 mb-3 mt-1"
               :message="msg"
               :type="msgType"
               :done="messageDone">
-            </moloch-toast>
+            </arkime-toast>
           </div>
         </form> <!-- /paging navbar -->
       </span>
-    </MolochCollapsible>
+    </ArkimeCollapsible>
 
-    <table class="table table-sm table-striped small">
+    <table v-if="!error"
+      class="table table-sm table-striped small">
       <thead>
         <tr>
           <th width="100px;">
@@ -99,21 +107,24 @@
               <span class="fa fa-filter"></span>
             </button>
           </th>
-          <th v-for="column of columns"
+          <th
             :key="column.name"
-            :class="`cursor-pointer ${column.classes}`"
             v-b-tooltip.hover
             :title="column.help"
+            v-for="column of columns"
             v-has-permission="column.permission"
-            :style="{'width': `${column.width}%`}">
-            <input type="text"
-              v-if="column.filter && showColFilters"
-              v-has-permission="column.permission"
+            :style="{'width': `${column.width}%`}"
+            v-has-role="{user:user,roles:column.role}"
+            :class="`cursor-pointer ${column.classes}`">
+            <input
+              type="text"
+              @click.stop
+              @keyup="debounceSearch"
               v-model="filters[column.sort]"
+              v-has-permission="column.permission"
+              v-if="column.filter && showColFilters"
               :placeholder="`Filter by ${column.name}`"
               class="form-control form-control-sm input-filter"
-              @keyup="debounceSearch"
-              @click.stop
             />
             <div v-if="column.exists"
               class="mr-1 header-div">
@@ -134,14 +145,18 @@
               </span>
               {{ column.name }}
             </div>
-            <a v-if="filters[column.sort]"
-              v-b-tooltip.hover
-              :title="'The history is being filtered by ' + column.name + '. Click to display the filter.'"
-              @click="showColFilters = true"
-              class="cursor-pointer ml-1">
-              <span class="fa fa-filter">
-              </span>
-            </a>
+            <b-form-checkbox
+              button
+              size="sm"
+              v-model="seeAll"
+              class="ml-1 all-btn"
+              @input="toggleSeeAll"
+              v-b-tooltip.hover.bottom
+              v-if="column.sort == 'userId'"
+              :title="seeAll ? 'Just show your history' : 'See the history for all users (you can because you are an ADMIN!)'">
+              <span class="fa fa-user-circle mr-1" />
+              {{ seeAll ? 'MY' : 'ALL' }}
+            </b-form-checkbox>
           </th>
         </tr>
       </thead>
@@ -170,7 +185,8 @@
                 role="button"
                 title="Delete history"
                 class="btn btn-xs btn-warning"
-                v-has-permission="'createEnabled,removeEnabled'"
+                v-has-role="{user:user,roles:'arkimeAdmin'}"
+                v-has-permission="'removeEnabled'"
                 @click="deleteLog(item, index)">
                 <span class="fa fa-trash-o">
                 </span>
@@ -191,7 +207,7 @@
             <td class="no-wrap text-right">
               {{ item.range*1000 | readableTime }}
             </td>
-            <td v-has-permission="'createEnabled'"
+            <td v-has-role="{user:user,roles:'arkimeAdmin'}"
               class="no-wrap">
               {{ item.userId }}
             </td>
@@ -223,7 +239,7 @@
             <td :colspan="colSpan">
               <dl class="dl-horizontal">
                 <!-- forced expression -->
-                <div v-has-permission="'createEnabled'"
+                <div v-has-role="{user:user,roles:'arkimeAdmin'}"
                   v-if="item.forcedExpression !== undefined"
                   class="mt-1">
                   <span>
@@ -300,7 +316,7 @@
                   </div>
                 </div> <!-- /query params -->
                 <!-- es query -->
-                <div v-has-permission="'createEnabled'">
+                <div v-has-role="{user:user,roles:'arkimeAdmin'}">
                   <div class="mt-3" v-if="item.esQueryIndices">
                     <h5>Elasticsearch Query Indices</h5>
                     <code class="mr-3 ml-3">{{ item.esQueryIndices }}</code>
@@ -318,13 +334,13 @@
     </table>
 
     <!-- loading overlay -->
-    <moloch-loading
+    <arkime-loading
       v-if="loading && !error">
-    </moloch-loading> <!-- /loading overlay -->
+    </arkime-loading> <!-- /loading overlay -->
 
     <!-- error -->
-    <moloch-error
-      v-if="!loading && error"
+    <arkime-error
+      v-if="error"
       :message="error"
     /> <!-- /error -->
 
@@ -339,34 +355,37 @@
 
 <script>
 import qs from 'qs';
-import MolochPaging from '../utils/Pagination';
-import MolochLoading from '../utils/Loading';
-import MolochError from '../utils/Error';
-import ToggleBtn from '../utils/ToggleBtn';
-import MolochTime from '../search/Time';
-import FocusInput from '../utils/FocusInput';
-import MolochToast from '../utils/Toast';
-import MolochCollapsible from '../utils/CollapsibleWrapper';
+import Utils from '../utils/utils';
+import ArkimeTime from '../search/Time';
+import Clusters from '../utils/Clusters';
+import ArkimeToast from '../utils/Toast';
+import ArkimeError from '../utils/Error';
+import ArkimeLoading from '../utils/Loading';
+import ArkimePaging from '../utils/Pagination';
 import HistoryService from './HistoryService';
+import Focus from '../../../../../common/vueapp/Focus';
+import ArkimeCollapsible from '../utils/CollapsibleWrapper';
+import ToggleBtn from '../../../../../common/vueapp/ToggleBtn';
 
 let searchInputTimeout; // timeout to debounce the search input
 
 export default {
   name: 'ArkimeHistory',
   components: {
-    MolochPaging,
-    MolochLoading,
-    MolochError,
-    MolochTime,
+    ArkimePaging,
+    ArkimeLoading,
+    ArkimeError,
+    ArkimeTime,
     ToggleBtn,
-    MolochToast,
-    MolochCollapsible
+    ArkimeToast,
+    ArkimeCollapsible,
+    Clusters
   },
-  directives: { FocusInput },
+  directives: { Focus },
   data: function () {
     return {
       error: '',
-      loading: true,
+      loading: false,
       history: {},
       recordsTotal: 0,
       recordsFiltered: 0,
@@ -379,14 +398,15 @@ export default {
       desc: true,
       msg: '',
       msgType: undefined,
+      seeAll: false,
       columns: [
         { name: 'Time', sort: 'timestamp', nowrap: true, width: 13, help: 'The time of the request' },
         { name: 'Time Range', sort: 'range', nowrap: true, width: 11, classes: 'text-right', help: 'The time range of the request' },
-        { name: 'User ID', sort: 'userId', nowrap: true, width: 8, filter: true, permission: 'createEnabled', help: 'The id of the user that initiated the request' },
+        { name: 'User ID', sort: 'userId', nowrap: true, width: 10, filter: true, classes: 'no-wrap', role: 'arkimeAdmin', help: 'The id of the user that initiated the request' },
         { name: 'Query Time', sort: 'queryTime', nowrap: true, width: 8, classes: 'text-right', help: 'Execution time in MS' },
         { name: 'Method', sort: 'method', nowrap: true, width: 5, help: 'The HTTP request method' },
         { name: 'API', sort: 'api', nowrap: true, width: 13, filter: true, help: 'The API endpoint of the request' },
-        { name: 'Expression', sort: 'expression', nowrap: true, width: 27, exists: false, help: 'The query expression issued with the request' },
+        { name: 'Expression', sort: 'expression', nowrap: true, width: 25, exists: false, help: 'The query expression issued with the request' },
         { name: 'View', sort: 'view.name', nowrap: true, width: 20, exists: false, help: 'The view expression applied to the request' }
       ]
     };
@@ -398,7 +418,8 @@ export default {
         start: 0,
         date: this.$store.state.timeRange,
         startTime: this.$store.state.time.startTime,
-        stopTime: this.$store.state.time.stopTime
+        stopTime: this.$store.state.time.stopTime,
+        cluster: this.$route.query.cluster || undefined
       };
     },
     user: function () {
@@ -422,11 +443,19 @@ export default {
   watch: {
     issueSearch: function (newVal, oldVal) {
       if (newVal) { this.loadData(); }
+    },
+    '$route.query.cluster': {
+      handler: function (newVal, oldVal) {
+        if (newVal !== oldVal) {
+          this.query.cluster = newVal;
+          this.loadData();
+        }
+      }
     }
   },
   created: function () {
     // if the user is an admin, show them all the columns
-    if (this.user.createEnabled) { this.colSpan = 9; }
+    if (this.user.roles.includes('arkimeAdmin')) { this.colSpan = 9; }
     // query for the user requested or the current user
     this.filters.userId = this.$route.query.userId || this.user.userId;
 
@@ -437,6 +466,11 @@ export default {
   },
   methods: {
     /* exposed page functions ------------------------------------ */
+    toggleSeeAll () {
+      this.filters.userId = this.seeAll ? '' : this.user.userId;
+      if (this.seeAll) { this.showColFilters = true; }
+      this.loadData();
+    },
     debounceSearch: function () {
       if (searchInputTimeout) { clearTimeout(searchInputTimeout); }
       // debounce the input so it only issues a request after keyups cease for 400ms
@@ -512,6 +546,11 @@ export default {
     },
     /* helper functions ------------------------------------------ */
     loadData: function () {
+      if (!Utils.checkClusterSelection(this.query.cluster, this.$store.state.esCluster.availableCluster.active, this).valid) {
+        this.history = {};
+        return;
+      }
+
       this.loading = true;
 
       const exists = [];
@@ -617,5 +656,16 @@ export default {
   line-height: 1.5;
   border-radius: 3px;
   margin-top: -2px !important;
+}
+</style>
+
+<style>
+/* shrink all btn */
+.history-page div.all-btn > label {
+  height: 18px;
+  margin-top: -5px;
+  font-size: 0.8rem;
+  line-height: 0.9rem;
+  padding: 0.1rem 0.3rem;
 }
 </style>

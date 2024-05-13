@@ -5,17 +5,7 @@
  *
  * Copyright 2012-2016 AOL Inc. All rights reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this Software except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 'use strict';
@@ -24,26 +14,27 @@ const Db = require('./db.js');
 const cryptoLib = require('crypto');
 const Auth = require('../common/auth');
 const User = require('../common/user');
+const ArkimeConfig = require('../common/arkimeConfig');
 
-const escInfo = Config.getArray('elasticsearch', ',', 'http://localhost:9200');
 function help () {
   console.log('addUser.js [<config options>] <user id> <user friendly name> <password> [<options>]');
   console.log('');
   console.log('Options:');
-  console.log('  --admin               Has admin privileges');
-  console.log('  --apionly             Can only use api, not web pages');
-  console.log('  --email               Can do email searches');
-  console.log('  --expression  <expr>  Forced user expression');
-  console.log('  --remove              Can remove data (scrub, delete tags)');
-  console.log('  --webauth             Can auth using the web auth header or password');
-  console.log('  --webauthonly         Can auth using the web auth header only, password ignored');
-  console.log('  --packetSearch        Can create a packet search job (hunt)');
-  console.log('  --createOnly          Only create the user if it doesn\'t exist');
+  console.log('  --admin                 Has admin privileges');
+  console.log('  --apionly               Can only use api, not web pages');
+  console.log('  --email                 Can do email searches');
+  console.log('  --expression  <expr>    Forced user expression');
+  console.log('  --remove                Can remove data (scrub, delete tags)');
+  console.log('  --webauth               Can auth using the web auth header or password');
+  console.log('  --webauthonly           Can auth using the web auth header only, password ignored');
+  console.log('  --packetSearch          Can create a packet search job (hunt)');
+  console.log('  --createOnly            Only create the user if it doesn\'t exist');
+  console.log('  --roles                 Comma seperated list of roles');
   console.log('');
   console.log('Config Options:');
-  console.log('  -c <config file>      Config file to use');
-  console.log('  -n <node name>        Node name section to use in config file');
-  console.log('  --insecure            Disable certificate verification for https calls');
+  console.log('  -c, --config <file|url> Where to fetch the config file from');
+  console.log('  -n <node name>          Node name section to use in config file');
+  console.log('  --insecure              Disable certificate verification for https calls');
 
   process.exit(0);
 }
@@ -62,18 +53,18 @@ function main () {
     webEnabled: true,
     headerAuthEnabled: false,
     emailSearch: false,
-    createEnabled: false,
     removeEnabled: false,
     packetSearch: false,
     welcomeMsgNum: 0,
     settings: {}
   };
 
+  const roles = new Set();
   for (let i = 5; i < process.argv.length; i++) {
     switch (process.argv[i]) {
     case '--admin':
     case '-admin':
-      nuser.createEnabled = true;
+      roles.add('superAdmin');
       break;
 
     case '--remove':
@@ -89,6 +80,7 @@ function main () {
 
     case '--webauthonly':
     case '-webauthonly':
+      nuser.headerAuthEnabled = true;
       nuser.passStore = Auth.pass2store(process.argv[2], cryptoLib.randomBytes(48));
       break;
 
@@ -118,23 +110,40 @@ function main () {
       nuser._createOnly = true;
       break;
 
+    case '--roles':
+    case '-roles':
+      process.argv[i + 1].split(',').forEach(r => roles.add(r));
+      i++;
+      break;
+
     default:
       console.log('Unknown option', process.argv[i]);
       help();
     }
   }
 
+  if (roles.size === 0) {
+    roles.add('arkimeUser');
+    roles.add('cont3xtUser');
+    roles.add('parliamentUser');
+    roles.add('wiseUser');
+  }
+
+  nuser.roles = [...roles];
+
   User.setUser(process.argv[2], nuser, (err, info) => {
     if (err) {
       if (err.meta.body.error.type === 'version_conflict_engine_exception') {
         console.log('User already exists');
       } else {
-        console.log('Elastic search error', JSON.stringify(err, false, 2));
+        console.log('OpenSearch/Elasticsearch error', JSON.stringify(err, false, 2));
       }
     } else {
       console.log('Added');
     }
-    Db.close();
+    if (Config.nodeName() !== 'cont3xt') {
+      Db.close();
+    }
   });
 }
 
@@ -142,18 +151,45 @@ if (process.argv.length < 5) {
   help();
 }
 
-Db.initialize({
-  host: escInfo,
-  prefix: Config.get('prefix', 'arkime_'),
-  esClientKey: Config.get('esClientKey', null),
-  esClientCert: Config.get('esClientCert', null),
-  esClientKeyPass: Config.get('esClientKeyPass', null),
-  insecure: Config.insecure,
-  ca: Config.getCaTrustCerts(Config.nodeName()),
-  usersHost: Config.getArray('usersElasticsearch', ','),
-  usersPrefix: Config.get('usersPrefix'),
-  esApiKey: Config.get('elasticsearchAPIKey', null),
-  usersEsApiKey: Config.get('usersElasticsearchAPIKey', null),
-  esBasicAuth: Config.get('elasticsearchBasicAuth', null),
-  usersEsBasicAuth: Config.get('usersElasticsearchBasicAuth', null)
-}, main);
+async function premain () {
+  await Config.initialize();
+
+  if (Config.nodeName() === 'cont3xt') {
+    const usersUrl = Config.get('usersUrl');
+    const usersEs = Config.getArray('usersElasticsearch', Config.get('elasticsearch', 'http://localhost:9200'));
+    User.initialize({
+      insecure: ArkimeConfig.isInsecure([usersUrl, usersEs]),
+      requestTimeout: Config.get('elasticsearchTimeout', 300),
+      url: usersUrl,
+      node: usersEs,
+      caTrustFile: Config.get('caTrustFile'),
+      clientKey: Config.get('esClientKey'),
+      clientCert: Config.get('esClientCert'),
+      clientKeyPass: Config.get('esClientKeyPass'),
+      prefix: Config.get('usersPrefix'),
+      apiKey: Config.get('usersElasticsearchAPIKey'),
+      basicAuth: Config.get('usersElasticsearchBasicAuth', Config.get('elasticsearchBasicAuth')),
+      noUsersCheck: true
+    });
+    main();
+  } else {
+    const escInfo = Config.getArray('elasticsearch', 'http://localhost:9200');
+    Db.initialize({
+      host: escInfo,
+      prefix: Config.get('prefix', 'arkime_'),
+      esClientKey: Config.get('esClientKey', null),
+      esClientCert: Config.get('esClientCert', null),
+      esClientKeyPass: Config.get('esClientKeyPass', null),
+      insecure: ArkimeConfig.isInsecure([escInfo, Config.getArray('usersElasticsearch')]),
+      caTrustFile: Config.getFull(Config.nodeName(), 'caTrustFile'),
+      usersHost: Config.getArray('usersElasticsearch'),
+      usersPrefix: Config.get('usersPrefix'),
+      esApiKey: Config.get('elasticsearchAPIKey', null),
+      usersEsApiKey: Config.get('usersElasticsearchAPIKey', null),
+      esBasicAuth: Config.get('elasticsearchBasicAuth', null),
+      usersEsBasicAuth: Config.get('usersElasticsearchBasicAuth', null),
+      noUsersCheck: true
+    }, main);
+  }
+}
+premain();

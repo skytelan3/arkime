@@ -1,35 +1,25 @@
 /* Copyright 2012-2017 AOL Inc. All rights reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this Software except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
  *
  * https://www.chromium.org/quic
  * https://docs.google.com/document/d/1WJvyZflAO2pq77yOLbp9NsGjC1CHetAXV8I0fQe-B_U
  *
  */
-#include "moloch.h"
+#include "arkime.h"
 #include <arpa/inet.h>
 #include <dlfcn.h>
 #include "openssl/evp.h"
 
-extern MolochConfig_t        config;
+extern ArkimeConfig_t        config;
 LOCAL  int hostField;
 LOCAL  int uaField;
 LOCAL  int versionField;
 
 #define FBZERO_MAX_SIZE 4096
 typedef struct {
-    unsigned char  data[FBZERO_MAX_SIZE];
-    int            pos;
+    uint8_t  data[FBZERO_MAX_SIZE];
+    int      pos;
 } FBZeroInfo_t;
 
 typedef struct {
@@ -37,11 +27,14 @@ typedef struct {
     int            which;
 } QUIC5xInfo_t;
 
-/******************************************************************************/
-LOCAL int quic_chlo_parser(MolochSession_t *session, BSB dbsb) {
+LOCAL uint32_t tls_process_client_hello_func;
 
-    guchar   *tag = 0;
-    uint16_t  tagLen = 0;
+/******************************************************************************/
+LOCAL int quic_chlo_parser(ArkimeSession_t *session, BSB dbsb)
+{
+
+    const guchar *tag = 0;
+    uint16_t      tagLen = 0;
 
     BSB_LIMPORT_ptr(dbsb, tag, 4);
     BSB_LIMPORT_u16(dbsb, tagLen);
@@ -51,19 +44,19 @@ LOCAL int quic_chlo_parser(MolochSession_t *session, BSB dbsb) {
         return 0;
     }
 
-    moloch_session_add_protocol(session, "quic");
+    arkime_session_add_protocol(session, "quic");
 
-    if (!tag || memcmp(tag, "CHLO", 4) != 0 || BSB_REMAINING(dbsb) < tagLen*8 + 8) {
+    if (!tag || memcmp(tag, "CHLO", 4) != 0 || BSB_REMAINING(dbsb) < tagLen * 8 + 8) {
         return 0;
     }
 
-    guchar *tagDataStart = dbsb.buf + tagLen*8 + 8;
-    uint32_t dlen = BSB_SIZE(dbsb) - tagLen*8 - 8;
+    guchar *tagDataStart = dbsb.buf + tagLen * 8 + 8;
+    uint32_t dlen = BSB_SIZE(dbsb) - tagLen * 8 - 8;
 
     uint32_t start = 0;
     while (!BSB_IS_ERROR(dbsb) && BSB_REMAINING(dbsb) && tagLen > 0) {
-        guchar   *subTag = 0;
-        uint32_t  endOffset = 0;
+        const guchar *subTag = 0;
+        uint32_t      endOffset = 0;
 
         BSB_LIMPORT_ptr(dbsb, subTag, 4);
         BSB_LIMPORT_u32(dbsb, endOffset);
@@ -76,11 +69,11 @@ LOCAL int quic_chlo_parser(MolochSession_t *session, BSB dbsb) {
             return 1;
 
         if (memcmp(subTag, "SNI\x00", 4) == 0) {
-            moloch_field_string_add(hostField, session, (char *)tagDataStart+start, endOffset-start, TRUE);
+            arkime_field_string_add(hostField, session, (char *)tagDataStart + start, endOffset - start, TRUE);
         } else if (memcmp(subTag, "UAID", 4) == 0) {
-            moloch_field_string_add(uaField, session, (char *)tagDataStart+start, endOffset-start, TRUE);
+            arkime_field_string_add(uaField, session, (char *)tagDataStart + start, endOffset - start, TRUE);
         } else if (memcmp(subTag, "VER\x00", 4) == 0) {
-            moloch_field_string_add(versionField, session, (char *)tagDataStart+start, endOffset-start, TRUE);
+            arkime_field_string_add(versionField, session, (char *)tagDataStart + start, endOffset - start, TRUE);
         } else {
             //LOG("Subtag: %4.4s len: %d %.*s", subTag, endOffset-start, endOffset-start, tagDataStart+start);
         }
@@ -90,10 +83,10 @@ LOCAL int quic_chlo_parser(MolochSession_t *session, BSB dbsb) {
     return 1;
 }
 /******************************************************************************/
-LOCAL int quic_2445_udp_parser(MolochSession_t *session, void *UNUSED(uw), const unsigned char *data, int len, int UNUSED(which))
+LOCAL int quic_2445_udp_parser(ArkimeSession_t *session, void *UNUSED(uw), const uint8_t *data, int len, int UNUSED(which))
 {
-    int version = -1;
-    int offset = 1;
+    uint32_t version = 0;
+    uint32_t offset = 1;
 
     if ( len < 9) {
         return 0;
@@ -109,21 +102,21 @@ LOCAL int quic_2445_udp_parser(MolochSession_t *session, void *UNUSED(uw), const
         offset += 8;
     }
 
-    if ( len < offset+5) {
+    if ( (uint32_t)len < offset + 5) {
         return 0;
     }
 
     // Get version
     if (data[0] & 0x01 && data[offset] == 'Q') {
-        version = (data[offset+1] - '0') * 100 +
-                  (data[offset+2] - '0') * 10 +
-                  (data[offset+3] - '0');
+        version = (data[offset + 1] - '0') * 100 +
+                  (data[offset + 2] - '0') * 10 +
+                  (data[offset + 3] - '0');
         offset += 4;
     }
 
     // Unsupported version
     if (version < 24) {
-        return MOLOCH_PARSER_UNREGISTER;
+        return ARKIME_PARSER_UNREGISTER;
     }
 
     // Diversification only is from server to client, so we can ignore
@@ -142,11 +135,11 @@ LOCAL int quic_2445_udp_parser(MolochSession_t *session, void *UNUSED(uw), const
     if (version < 34)
         offset++;
 
-    if (offset > len)
+    if (offset > (uint32_t)len)
         return 0;
 
     BSB bsb;
-    BSB_INIT(bsb, data+offset, len-offset);
+    BSB_INIT(bsb, data + offset, len - offset);
 
     while (!BSB_IS_ERROR(bsb) && BSB_REMAINING(bsb)) {
         uint8_t type = 0;
@@ -157,7 +150,7 @@ LOCAL int quic_2445_udp_parser(MolochSession_t *session, void *UNUSED(uw), const
             return 0;
         }
 
-        int offsetLen = 0;
+        uint32_t offsetLen = 0;
         if (type & 0x1C) {
             offsetLen = ((type & 0x1C) >> 2) + 1;
         }
@@ -182,7 +175,7 @@ LOCAL int quic_2445_udp_parser(MolochSession_t *session, void *UNUSED(uw), const
         BSB_IMPORT_skip(bsb, dataLen);
 
         quic_chlo_parser(session, dbsb);
-        return MOLOCH_PARSER_UNREGISTER;
+        return ARKIME_PARSER_UNREGISTER;
     }
 
     return 0;
@@ -190,39 +183,38 @@ LOCAL int quic_2445_udp_parser(MolochSession_t *session, void *UNUSED(uw), const
 /******************************************************************************/
 // Couldn't figure out this document, brute force
 // https://docs.google.com/document/d/1FcpCJGTDEMblAs-Bm5TYuqhHyUqeWpqrItw2vkMFsdY/edit
-LOCAL int quic_4648_udp_parser(MolochSession_t *session, void *UNUSED(uw), const unsigned char *data, int len, int UNUSED(which))
+LOCAL int quic_4648_udp_parser(ArkimeSession_t *session, void *UNUSED(uw), const uint8_t *data, int len, int UNUSED(which))
 {
-    int version = -1;
-    int offset = 5;
-
     if (len < 20 || data[1] != 'Q' || (data[0] & 0xc0) != 0xc0) {
-        return MOLOCH_PARSER_UNREGISTER;
+        return ARKIME_PARSER_UNREGISTER;
     }
 
     // Get version
-    version = (data[2] - '0') * 100 +
-              (data[3] - '0') * 10 +
-              (data[4] - '0');
+    uint32_t version = (data[2] - '0') * 100 +
+                       (data[3] - '0') * 10 +
+                       (data[4] - '0');
 
     if (version < 46 || version > 48) {
-        return MOLOCH_PARSER_UNREGISTER;
+        return ARKIME_PARSER_UNREGISTER;
     }
-    for (;offset < len - 20; offset++) {
-        if (data[offset] == 'C' && memcmp(data+offset, "CHLO", 4) == 0) {
+
+    uint32_t offset = 5;
+    for (; offset < (uint32_t)len - 20; offset++) {
+        if (data[offset] == 'C' && memcmp(data + offset, "CHLO", 4) == 0) {
             BSB bsb;
             BSB_INIT(bsb, data + offset, len - offset);
             quic_chlo_parser(session, bsb);
-            return MOLOCH_PARSER_UNREGISTER;
+            return ARKIME_PARSER_UNREGISTER;
         }
     }
     return 0;
 }
 /******************************************************************************/
 // Headers are encrypted?
-LOCAL int quic_5x_udp_parser(MolochSession_t *session, void *uw, const unsigned char *data, int len, int which)
+LOCAL int quic_5x_udp_parser(ArkimeSession_t *session, void *uw, const uint8_t *data, int len, int which)
 {
-    if (len < 20 || memcmp(data+1, "Q05", 3) != 0) {
-        return MOLOCH_PARSER_UNREGISTER;
+    if (len < 20 || memcmp(data + 1, "Q05", 3) != 0) {
+        return ARKIME_PARSER_UNREGISTER;
     }
 
     QUIC5xInfo_t *info = (QUIC5xInfo_t *)uw;
@@ -230,60 +222,60 @@ LOCAL int quic_5x_udp_parser(MolochSession_t *session, void *uw, const unsigned 
     info->which |= (1 << which);
 
     if (info->which == 0x3) {
-        moloch_session_add_protocol(session, "quic");
-        return MOLOCH_PARSER_UNREGISTER;
+        arkime_session_add_protocol(session, "quic");
+        return ARKIME_PARSER_UNREGISTER;
     }
     info->packets++;
     if (info->packets > 20)
-        return MOLOCH_PARSER_UNREGISTER;
+        return ARKIME_PARSER_UNREGISTER;
 
     return 0;
 }
 /******************************************************************************/
-LOCAL void quic_2445_udp_classify(MolochSession_t *session, const unsigned char *data, int len, int UNUSED(which), void *UNUSED(uw))
+LOCAL void quic_2445_udp_classify(ArkimeSession_t *session, const uint8_t *data, int len, int UNUSED(which), void *UNUSED(uw))
 {
     if (len > 100 && (data[0] & 0x83) == 0x01) {
-        moloch_parsers_register(session, quic_2445_udp_parser, 0, 0);
+        arkime_parsers_register(session, quic_2445_udp_parser, 0, 0);
     }
 }
 /******************************************************************************/
-LOCAL void quic_4648_udp_classify(MolochSession_t *session, const unsigned char *data, int len, int UNUSED(which), void *UNUSED(uw))
+LOCAL void quic_4648_udp_classify(ArkimeSession_t *session, const uint8_t *data, int len, int UNUSED(which), void *UNUSED(uw))
 {
     if (len > 100 && (data[0] & 0xc0) == 0xc0) {
-        moloch_parsers_register(session, quic_4648_udp_parser, 0, 0);
+        arkime_parsers_register(session, quic_4648_udp_parser, 0, 0);
     }
 }
 /******************************************************************************/
-LOCAL void quic_5x_free(MolochSession_t UNUSED(*session), void *uw)
+LOCAL void quic_5x_free(ArkimeSession_t UNUSED(*session), void *uw)
 {
     QUIC5xInfo_t            *info          = uw;
 
-    MOLOCH_TYPE_FREE(QUIC5xInfo_t, info);
+    ARKIME_TYPE_FREE(QUIC5xInfo_t, info);
 }
 /******************************************************************************/
-LOCAL void quic_5x_udp_classify(MolochSession_t *session, const unsigned char *data, int len, int UNUSED(which), void *UNUSED(uw))
+LOCAL void quic_5x_udp_classify(ArkimeSession_t *session, const uint8_t *data, int len, int UNUSED(which), void *UNUSED(uw))
 {
     if (len > 100 && (data[0] & 0xc0) == 0xc0) {
-        QUIC5xInfo_t *info = MOLOCH_TYPE_ALLOC(QUIC5xInfo_t);
+        QUIC5xInfo_t *info = ARKIME_TYPE_ALLOC(QUIC5xInfo_t);
         info->packets = 0;
         info->which = 1 << which;
-        moloch_parsers_register(session, quic_5x_udp_parser, info, quic_5x_free);
+        arkime_parsers_register(session, quic_5x_udp_parser, info, quic_5x_free);
     }
 }
 /******************************************************************************/
-LOCAL void quic_add(MolochSession_t *UNUSED(session), const unsigned char *UNUSED(data), int UNUSED(len), int UNUSED(which), void *UNUSED(uw))
+LOCAL void quic_add(ArkimeSession_t *UNUSED(session), const uint8_t *UNUSED(data), int UNUSED(len), int UNUSED(which), void *UNUSED(uw))
 {
-    moloch_session_add_protocol(session, "quic");
+    arkime_session_add_protocol(session, "quic");
 }
 /******************************************************************************/
-LOCAL void quic_fbzero_free(MolochSession_t UNUSED(*session), void *uw)
+LOCAL void quic_fbzero_free(ArkimeSession_t UNUSED(*session), void *uw)
 {
     FBZeroInfo_t            *fbzero          = uw;
 
-    MOLOCH_TYPE_FREE(FBZeroInfo_t, fbzero);
+    ARKIME_TYPE_FREE(FBZeroInfo_t, fbzero);
 }
 /******************************************************************************/
-LOCAL int quic_fb_tcp_parser(MolochSession_t *session, void *uw, const unsigned char *data, int remaining, int which)
+LOCAL int quic_fb_tcp_parser(ArkimeSession_t *session, void *uw, const uint8_t *data, int remaining, int which)
 {
     if (which != 0)
         return 0;
@@ -302,21 +294,21 @@ LOCAL int quic_fb_tcp_parser(MolochSession_t *session, void *uw, const unsigned 
         return 0;
 
     BSB dbsb;
-    BSB_INIT(dbsb, fbzero->data+9, len);
+    BSB_INIT(dbsb, fbzero->data + 9, len);
 
     if (quic_chlo_parser(session, dbsb))
-        moloch_session_add_protocol(session, "fbzero");
+        arkime_session_add_protocol(session, "fbzero");
 
-    return MOLOCH_PARSER_UNREGISTER;
+    return ARKIME_PARSER_UNREGISTER;
 }
 
 /******************************************************************************/
-LOCAL void quic_fb_tcp_classify(MolochSession_t *session, const unsigned char *UNUSED(data), int len, int which, void *UNUSED(uw))
+LOCAL void quic_fb_tcp_classify(ArkimeSession_t *session, const uint8_t *UNUSED(data), int len, int which, void *UNUSED(uw))
 {
     if (which == 0 && len > 13) {
-        FBZeroInfo_t *fbzero = MOLOCH_TYPE_ALLOC(FBZeroInfo_t);
+        FBZeroInfo_t *fbzero = ARKIME_TYPE_ALLOC(FBZeroInfo_t);
         fbzero->pos = 0;
-        moloch_parsers_register(session, quic_fb_tcp_parser, fbzero, quic_fbzero_free);
+        arkime_parsers_register(session, quic_fb_tcp_parser, fbzero, quic_fbzero_free);
     }
 }
 /******************************************************************************/
@@ -350,7 +342,7 @@ LOCAL uint64_t quic_get_number(BSB *bsb)
     return result;
 }
 /******************************************************************************/
-LOCAL void hkdfExpandLabel(uint8_t *secret, int secretLen, char *label, uint8_t *okm, gsize okmLen)
+LOCAL void hkdfExpandLabel(const uint8_t *secret, int secretLen, const char *label, uint8_t *okm, gsize okmLen)
 {
     uint8_t data[100];
     BSB bsb;
@@ -380,19 +372,10 @@ LOCAL void hkdfExpandLabel(uint8_t *secret, int secretLen, char *label, uint8_t 
     g_hmac_unref(hmac);
 }
 /******************************************************************************/
-LOCAL void quic_ietf_udp_classify(MolochSession_t *session, const unsigned char *data, int len, int UNUSED(which), void *UNUSED(uw))
+LOCAL void quic_ietf_udp_classify(ArkimeSession_t *session, const uint8_t *data, int len, int UNUSED(which), void *UNUSED(uw))
 {
 // This is the most obfuscate protocol ever
 // Thank you wireshark/tshark/quicgo and other tools to verify (kindof) implementation
-
-    static int init = 1;
-    static void (*process_client_hello_data)(MolochSession_t *session, const uint8_t *data, int len) = NULL;
-
-    // Do this once. Has to be here since parsers can be loaded in any order
-    if (init) {
-        init = 0;
-        process_client_hello_data = dlsym(RTLD_DEFAULT, "tls_process_client_hello_data");
-    }
 
     // Min length for quic packets because of padding
     if (len < 1200 || len > 3000)
@@ -406,7 +389,7 @@ LOCAL void quic_ietf_udp_classify(MolochSession_t *session, const unsigned char 
     BSB bsb;
     BSB_INIT(bsb, data, len);
 
-  // Decode Header
+    // Decode Header
     uint8_t flags = 0;
     BSB_IMPORT_u08(bsb, flags); // Still partially encrypted
     BSB_IMPORT_skip(bsb, 4); // version
@@ -420,39 +403,42 @@ LOCAL void quic_ietf_udp_classify(MolochSession_t *session, const unsigned char 
     // Source
     int slen = 0;
     BSB_IMPORT_u08(bsb, slen);
-    if (slen != 0)
+    if (slen > 16)
         return;
     BSB_IMPORT_skip(bsb, slen);
 
     // Token
-    int tlen = quic_get_number(&bsb);
+    uint32_t tlen = quic_get_number(&bsb);
     BSB_IMPORT_skip(bsb, tlen);
 
     // Length
-    int packet_len = quic_get_number(&bsb);
-    if (packet_len != BSB_REMAINING(bsb)) {
+    uint32_t packet_len = quic_get_number(&bsb);
+    if (packet_len < 100 || packet_len > BSB_REMAINING(bsb)) {
+        if (!config.debug)
+            return;
+
         char ipStr[200];
-        moloch_session_pretty_string(session, ipStr, sizeof(ipStr));
-        LOG("Couldn't parse header packet len %d remaining %ld %s", packet_len, BSB_REMAINING(bsb), ipStr);
+        arkime_session_pretty_string(session, ipStr, sizeof(ipStr));
+        LOG("Couldn't parse header packet len %u remaining %ld %s", packet_len, (long)BSB_REMAINING(bsb), ipStr);
         return;
     }
 
     if (BSB_IS_ERROR(bsb))
         return;
 
-  // HKDF - HMAC-based Key Derivation Function
-  // https://datatracker.ietf.org/doc/html/rfc5869
+    // HKDF - HMAC-based Key Derivation Function
+    // https://datatracker.ietf.org/doc/html/rfc5869
 
-  // HKDF-Extract(salt, IKM) -> PRK
-    static uint8_t salt[20] = { 0x38, 0x76, 0x2c, 0xf7, 0xf5, 0x59, 0x34, 0xb3, 0x4d, 0x17, 0x9a, 0xe6, 0xa4, 0xc8, 0x0c, 0xad, 0xcc, 0xbb, 0x7f, 0x0a };
+    // HKDF-Extract(salt, IKM) -> PRK
+    static const uint8_t salt[20] = { 0x38, 0x76, 0x2c, 0xf7, 0xf5, 0x59, 0x34, 0xb3, 0x4d, 0x17, 0x9a, 0xe6, 0xa4, 0xc8, 0x0c, 0xad, 0xcc, 0xbb, 0x7f, 0x0a };
     GHmac *hmac = g_hmac_new(G_CHECKSUM_SHA256, salt, 20);
-    g_hmac_update(hmac, (guchar*)did, dlen);
+    g_hmac_update(hmac, (guchar *)did, dlen);
     uint8_t prk[65];
     gsize   prkLen = sizeof(prk);
-    g_hmac_get_digest(hmac, (guchar*)prk, &prkLen);
+    g_hmac_get_digest(hmac, (guchar *)prk, &prkLen);
     g_hmac_unref(hmac);
 
-  // Calculate secrets for later
+    // Calculate secrets for later
     uint8_t clientOkm[32];
     hkdfExpandLabel(prk, prkLen, "tls13 client in", clientOkm, sizeof(clientOkm));
 
@@ -465,7 +451,7 @@ LOCAL void quic_ietf_udp_classify(MolochSession_t *session, const unsigned char 
     uint8_t ivOkm[12];
     hkdfExpandLabel(clientOkm, sizeof(clientOkm), "tls13 quic iv", ivOkm, sizeof(ivOkm));
 
-  // Get mask input data
+    // Get mask input data
     BSB_IMPORT_skip(bsb, 4);
     uint8_t maskInput[16];
     BSB_IMPORT_byte(bsb, maskInput, 16);
@@ -475,7 +461,7 @@ LOCAL void quic_ietf_udp_classify(MolochSession_t *session, const unsigned char 
 
     BSB_IMPORT_rewind(bsb, 20); // Go back
 
-  // Calculate mask for packet number
+    // Calculate mask for packet number
     uint8_t mask[100];
     int     maskLen = sizeof(mask);
 
@@ -493,8 +479,8 @@ LOCAL void quic_ietf_udp_classify(MolochSession_t *session, const unsigned char 
         return;
     }
 
-  // Decrypt Packet Number using mask
-  // https://datatracker.ietf.org/doc/html/draft-ietf-quic-tls-33#section-5.4.1
+    // Decrypt Packet Number using mask
+    // https://datatracker.ietf.org/doc/html/draft-ietf-quic-tls-33#section-5.4.1
     uint8_t packet0 = flags;
     if ((packet0 & 0x80) == 0x80) {
         packet0 ^= mask[0] & 0x0f;
@@ -510,10 +496,10 @@ LOCAL void quic_ietf_udp_classify(MolochSession_t *session, const unsigned char 
     for (int i = 0; pn_length > 0; pn_length--, i++) {
         uint8_t tmp = 0;
         BSB_IMPORT_u08(bsb, tmp);
-        pn |= (tmp ^ mask[i+1]) << (8*(pn_length - 1));
+        pn |= (tmp ^ mask[i + 1]) << (8 * (pn_length - 1));
     }
 
-  // Make copy, with decrypted first byte and packet number
+    // Make copy, with decrypted first byte and packet number
     uint8_t buffer[3100];
     uint16_t headerLen = BSB_POSITION(bsb);
 
@@ -525,13 +511,13 @@ LOCAL void quic_ietf_udp_classify(MolochSession_t *session, const unsigned char 
         buffer[headerLen - 2] = (pn & 0xff) >> 8;
     }
 
-  // Make nonce
+    // Make nonce
     uint8_t nonce[12];
     memcpy(nonce, ivOkm, sizeof(nonce));
     nonce[10] ^= (pn & 0xff) >> 8;
     nonce[11] ^= (pn & 0xff);
 
-  // Decrypt Packet
+    // Decrypt Packet
     EVP_CIPHER_CTX      *pp_cipher_ctx;
     const EVP_CIPHER    *pp_cipher = EVP_aes_128_gcm();
     uint8_t out[3000];
@@ -539,7 +525,7 @@ LOCAL void quic_ietf_udp_classify(MolochSession_t *session, const unsigned char 
 
     pp_cipher_ctx = EVP_CIPHER_CTX_new();
     rc = EVP_DecryptInit(pp_cipher_ctx, pp_cipher, keyOkm, nonce);
-    rc += EVP_DecryptUpdate(pp_cipher_ctx, out, &outLen, BSB_WORK_PTR(bsb), BSB_REMAINING(bsb)-16);
+    rc += EVP_DecryptUpdate(pp_cipher_ctx, out, &outLen, BSB_WORK_PTR(bsb), BSB_REMAINING(bsb) - 16);
     //rc = EVP_DecryptFinal(pp_cipher_ctx, out, &outLen); --> Not sure why this isn't needed
     EVP_CIPHER_CTX_free(pp_cipher_ctx);
     if (rc != 2) {
@@ -561,11 +547,11 @@ LOCAL void quic_ietf_udp_classify(MolochSession_t *session, const unsigned char 
             continue;
 
         if (type == 6) { // CRYPTO
-            moloch_session_add_protocol(session, "quic");
-            int offset = quic_get_number(&bsb);
-            int length = quic_get_number(&bsb);
+            arkime_session_add_protocol(session, "quic");
+            uint32_t offset = quic_get_number(&bsb);
+            uint32_t length = quic_get_number(&bsb);
 
-            if (offset + length < (int)sizeof(cbuf) && BSB_REMAINING(bsb) >= length) {
+            if (offset < sizeof(cbuf) - length && BSB_REMAINING(bsb) >= length) {
                 memcpy(cbuf + offset, BSB_WORK_PTR(bsb), length);
                 clen += length;
             }
@@ -578,47 +564,49 @@ LOCAL void quic_ietf_udp_classify(MolochSession_t *session, const unsigned char 
     }
 
     // Now actually decode the client hello
-    if (clen > 0 && process_client_hello_data) {
-        process_client_hello_data(session, cbuf, clen);
+    if (clen > 0) {
+        arkime_parsers_call_named_func(tls_process_client_hello_func, session, cbuf, clen, NULL);
     }
 }
 /******************************************************************************/
-void moloch_parser_init()
+void arkime_parser_init()
 {
-    moloch_parsers_classifier_register_udp("quic", NULL, 1, (const unsigned char *)"Q05", 3, quic_5x_udp_classify);
-    moloch_parsers_classifier_register_udp("quic", NULL, 1, (const unsigned char *)"Q04", 3, quic_4648_udp_classify);
-    moloch_parsers_classifier_register_udp("quic", NULL, 9, (const unsigned char *)"Q04", 3, quic_2445_udp_classify);
-    moloch_parsers_classifier_register_udp("quic", NULL, 9, (const unsigned char *)"Q03", 3, quic_2445_udp_classify);
-    moloch_parsers_classifier_register_udp("quic", NULL, 9, (const unsigned char *)"Q02", 3, quic_2445_udp_classify);
-    moloch_parsers_classifier_register_tcp("fbzero", NULL, 0, (const unsigned char *)"\x31QTV", 4, quic_fb_tcp_classify);
-    moloch_parsers_classifier_register_udp("quic", NULL, 9, (const unsigned char *)"PRST", 4, quic_add);
+    arkime_parsers_classifier_register_udp("quic", NULL, 1, (const uint8_t *)"Q05", 3, quic_5x_udp_classify);
+    arkime_parsers_classifier_register_udp("quic", NULL, 1, (const uint8_t *)"Q04", 3, quic_4648_udp_classify);
+    arkime_parsers_classifier_register_udp("quic", NULL, 9, (const uint8_t *)"Q04", 3, quic_2445_udp_classify);
+    arkime_parsers_classifier_register_udp("quic", NULL, 9, (const uint8_t *)"Q03", 3, quic_2445_udp_classify);
+    arkime_parsers_classifier_register_udp("quic", NULL, 9, (const uint8_t *)"Q02", 3, quic_2445_udp_classify);
+    arkime_parsers_classifier_register_tcp("fbzero", NULL, 0, (const uint8_t *)"\x31QTV", 4, quic_fb_tcp_classify);
+    arkime_parsers_classifier_register_udp("quic", NULL, 9, (const uint8_t *)"PRST", 4, quic_add);
 
-    moloch_parsers_classifier_register_udp("quic", NULL, 1, (const unsigned char *)"\x00\x00\x00\x01", 1, quic_ietf_udp_classify);
+    arkime_parsers_classifier_register_udp("quic", NULL, 1, (const uint8_t *)"\x00\x00\x00\x01", 1, quic_ietf_udp_classify);
 
-    hostField = moloch_field_define("quic", "lotermfield",
-        "host.quic", "Hostname", "quic.host",
-        "QUIC host header field",
-        MOLOCH_FIELD_TYPE_STR_GHASH,  MOLOCH_FIELD_FLAG_CNT,
-        "category", "host",
-        "aliases", "[\"quic.host\"]",
-        (char *)NULL);
+    hostField = arkime_field_define("quic", "lotermfield",
+                                    "host.quic", "Hostname", "quic.host",
+                                    "QUIC host header field",
+                                    ARKIME_FIELD_TYPE_STR_GHASH,  ARKIME_FIELD_FLAG_CNT,
+                                    "category", "host",
+                                    "aliases", "[\"quic.host\"]",
+                                    (char *)NULL);
 
-    moloch_field_define("quic", "lotextfield",
-        "host.quic.tokens", "Hostname Tokens", "quic.hostTokens",
-        "QUIC host tokens header field",
-        MOLOCH_FIELD_TYPE_STR_GHASH,  MOLOCH_FIELD_FLAG_FAKE,
-        "aliases", "[\"quic.host.tokens\"]",
-        (char *)NULL);
+    arkime_field_define("quic", "lotextfield",
+                        "host.quic.tokens", "Hostname Tokens", "quic.hostTokens",
+                        "QUIC host tokens header field",
+                        ARKIME_FIELD_TYPE_STR_GHASH,  ARKIME_FIELD_FLAG_FAKE,
+                        "aliases", "[\"quic.host.tokens\"]",
+                        (char *)NULL);
 
-    uaField = moloch_field_define("quic", "termfield",
-        "quic.user-agent", "User-Agent", "quic.useragent",
-        "User-Agent",
-        MOLOCH_FIELD_TYPE_STR_GHASH,  MOLOCH_FIELD_FLAG_CNT,
-        (char *)NULL);
+    uaField = arkime_field_define("quic", "termfield",
+                                  "quic.user-agent", "User-Agent", "quic.useragent",
+                                  "User-Agent",
+                                  ARKIME_FIELD_TYPE_STR_GHASH,  ARKIME_FIELD_FLAG_CNT,
+                                  (char *)NULL);
 
-    versionField = moloch_field_define("quic", "termfield",
-        "quic.version", "Version", "quic.version",
-        "QUIC Version",
-        MOLOCH_FIELD_TYPE_STR_GHASH,  MOLOCH_FIELD_FLAG_CNT,
-        (char *)NULL);
+    versionField = arkime_field_define("quic", "termfield",
+                                       "quic.version", "Version", "quic.version",
+                                       "QUIC Version",
+                                       ARKIME_FIELD_TYPE_STR_GHASH,  ARKIME_FIELD_FLAG_CNT,
+                                       (char *)NULL);
+
+    tls_process_client_hello_func = arkime_parsers_get_named_func("tls_process_client_hello");
 }

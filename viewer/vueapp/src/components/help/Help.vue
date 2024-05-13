@@ -1,3 +1,7 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
 
   <div class="help-content">
@@ -20,6 +24,14 @@
         <span class="fa fa-fw fa-search">
         </span>&nbsp;
         Search Bar
+      </a>
+      <a href="help#basic"
+        class="nav-link nested">
+        Basic Query
+      </a>
+      <a href="help#timebounding"
+        class="nav-link nested">
+        Time Range
       </a>
       <a href="help#stringSearch"
         class="nav-link nested">
@@ -100,7 +112,7 @@
         Settings
       </a>
       <a href="help#users"
-        v-has-permission="'createEnabled'"
+        v-has-role="{user:user,roles:'arkimeAdmin'}"
         class="nav-link">
         <span class="fa fa-fw fa-users">
         </span>&nbsp;
@@ -121,7 +133,7 @@
     </div> <!-- End of navbar -->
 
     <!-- Page content -->
-    <div class="mt-5 ml-4 mr-4 navbar-offset">
+    <div class="mt-2 ml-4 mr-4 navbar-offset">
 
       <h3 id="about">
         <span class="fa fa-question-circle"></span>&nbsp;
@@ -132,11 +144,11 @@
         and database system.
       </strong></p>
       <p class="lead">
-        Arkime is not meant to replace Intrusion Detection Systems (IDS).
         Arkime augments your current security infrastructure by storing and
         indexing network traffic in standard PCAP format, while also providing
         fast indexed access. Arkime is built with an intuitive UI/UX which
         reduces the analysis time of suspected incidents.
+        Arkime is not meant to replace Intrusion Detection Systems (IDS), but work with them to provide a more complete picture of network traffic.
       </p>
 
       <hr>
@@ -150,7 +162,7 @@
           <a class="btn btn-link" href="https://arkime.com">Home Page</a> |
           <a class="btn btn-link" href="https://arkime.com/faq">FAQ</a> |
           <a class="btn btn-link" href="https://arkime.com/learn">Docs</a> |
-          <a class="btn btn-link" href="https://github.com/aol/moloch">GitHub</a> |
+          <a class="btn btn-link" href="https://github.com/arkime/arkime">GitHub</a> |
           <a class="btn btn-link" href="https://slackinvite.arkime.com/">Request Slack Invite</a>
         </div>
       </div>
@@ -161,45 +173,72 @@
         <span class="fa fa-search"></span>&nbsp;
         Search Bar
       </h3>
-      <p>
-        Most Arkime tabs have a search bar on the top of the page.
-        Arkime uses a very simple query language for building expressions. It
-        supports grouping using parentheses as well as logical AND and OR statements using
-        <code>&amp;&amp;</code> and <code>||</code> respectively.
-        Fields can be accessed directly using the field names
-        and operators described in the
-        <a href="help#fields" class="no-decoration">table below</a>.
-        Most fields also support a shorthand OR query using square brackets
-        using CSV rules to list possible values (<code>field==[item1,item2,item3]</code>).
-      </p>
-      <p>
-        All queries are bounded by a start and stop time. The bounded start and stop times can be
-        set either by selecting a choice from a quick relative drop down or by entering exact time sections.
-        Since every session has a first packet, last packet, and database timestamp, Arkime offers
-        a choice on how to select the sessions:
-      </p>
-      <dl class="dl-horizontal">
-        <dt>First Packet</dt>
-        <dd>The timestamp of the first packet received for the session.</dd>
-        <dt>Last Packet</dt>
-        <dd>The timestamp of the last packet received for the session.</dd>
-        <dt>Bounded</dt>
-        <dd>Both the first and last packet timestamps for the session must be inside the time window.</dd>
-        <dt>Session Overlaps</dt>
-        <dd>The timestamp of the first packet must be before the end of the time window AND the timestamp of the last packet must be after the start of the time window.</dd>
-        <dt>Database</dt>
-        <dd>The timestamp the session was written to the database.  This can be up to several minutes AFTER the last packet was received.</dd>
-      </dl>
-      <br>
+      <div class="ml-4">
+        <p>
+          Most Arkime tabs have a search bar at the top of the page.
+          Arkime uses a simple query language for building searches.
+        </p>
+        <h6 id="basic">
+          <span class="fa fa-search"></span>&nbsp;
+          Basic Query
+        </h6>
+        <p>
+          Searches are done using field names, operators, and values.
+          This is sometimes also called a search expression. (e.g. <code>ip.src == 1.2.3.4</code>)
+        </p>
+        <dl class="dl-horizontal">
+          <dt>Fields</dt>
+          <dd>See <a href="help#fields" class="no-decoration">table below</a> for list of all fields and operators supported.</dd>
+          <dt>Grouping</dt>
+          <dd>You can use parentheses to group search terms (e.g. <code>field1=value1 &amp;&amp; (field2==value2 || field3==value3)</code>).</dd>
+          <dt>Logical Operators</dt>
+          <dd>Combine search terms using AND (&amp;&amp;) and OR (||).</dd>
+          <dt>OR List Queries</dt>
+          <dd>Search for ANY of the listed values in a field using square brackets and comma-separated values (e.g., <code>field==[value1,value2,value3]</code>).</dd>
+          <dt>AND List Queries</dt>
+          <dd>Search for ALL of the listed values in a field using reversed square brackets (e.g., <code>field==]value1,value2,value3[</code>).</dd>
+        </dl>
+      </div>
+      <div class="ml-4">
+        <h6 id="timebounding">
+          <span class="fa fa-search"></span>&nbsp;
+          Time Range
+        </h6>
+        <p>
+          All queries require a start and stop time range, set from either the relative time drop down or by entering an exact time.
+          Relative times are recalculated for each new query performed.
+          Entering an exact time will automatically switch from a relative time range to a fixed time range.
+          Next to the start/stop entries are buttons that will quickly take you to the start/stop of each day.
+        </p>
+        <p>
+          Since every session has a first packet, last packet, and database timestamp, Arkime offers
+          a choice on how it matches sessions:
+        </p>
+        <dl class="dl-horizontal">
+          <dt>First Packet</dt>
+          <dd>The timestamp of the first packet received for the session.</dd>
+          <dt>Last Packet</dt>
+          <dd>The timestamp of the last packet received for the session.</dd>
+          <dt>Bounded</dt>
+          <dd>Both the first and last packet timestamps for the session must be inside the time window.</dd>
+          <dt>Session Overlaps</dt>
+          <dd>The timestamp of the first packet must be before the end of the time window AND the timestamp of the last packet must be after the start of the time window.</dd>
+          <dt>Database</dt>
+          <dd>The timestamp the session was written to the database.  This can be up to several minutes AFTER the last packet was received.</dd>
+        </dl>
+        <p>
+          The Interval drop down allows you to control how much time each column/point in the graph represents.
+          The auto setting will change the bucket sized based on the time range selected.
+        </p>
+      </div>
       <div class="ml-4">
         <h6 id="stringSearch">
           <span class="fa fa-search"></span>&nbsp;
           String Search
         </h6>
         <p>
-          In Arkime, string fields are special since they can be searched in several different
-          ways. When fields are indexed, their case may or may not be normalized,
-          which is documented in the
+          In Arkime, string fields are special since they can be searched in several different ways.
+          When fields are indexed, their case may or may not be normalized, which is documented in the
           <a href="help#fields" class="no-decoration">fields table below</a>.
           The types of string searches are:
         </p>
@@ -225,12 +264,21 @@
             Lucene regex implementation which doesn't support most PCRE features.
             Check out the ES <a href="https://www.elastic.co/guide/en/elasticsearch/reference/current/regexp-syntax.html">Regexp Syntax</a> guide.
           </dd>
-          <dt>Lists</dt>
+          <dt>OR Lists</dt>
           <dd>
-            In Arkime, lists are used as a shorthand method for doing multiple OR queries. For example
-            <code>protocols == [http,ssh]</code>. This query will search for any sessions containing either http OR ssh.
-            <strong>Note:</strong> A list containing wildcard or regex strings will be processed as normal strings instead
-            of wildcards and regexes.
+            In Arkime, OR Lists are used as a shorthand method for doing multiple OR queries.
+            A list containing wildcard or regex strings will process as wildcard/regexes.
+            For example instead of <code>(protocols == http || protocols == s*)</code> use <code>protocols == [http,s*]</code>.
+            This query will search for any sessions where the protocols field contains either the exact 'http' value OR values starting with 's'.
+            Using an OR List many times can be faster for the system to process than using <code>||</code>.
+          </dd>
+          <dt>AND Lists</dt>
+          <dd>
+            In Arkime, AND Lists are used as a shorthand method for doing multiple AND queries.
+            A list containing wildcard or regex strings will process as wildcard/regexes.
+            For example instead of <code>(protocols == http &amp;&amp; protocols == s*)</code> use <code>protocols == ]http,s*[</code>.
+            This query will search for any sessions where the protocols field contains both the exact 'http' value AND a value starting with 's'.
+            Using an AND List many times can be faster for the system to process than using <code>&amp;&amp;</code>.
           </dd>
         </dl>
         <h6 id="ipSearch">
@@ -243,8 +291,8 @@
           that include a port number, it is possible to follow any of the IP
           representations with a colon (ip4) or dot (ip6) and then the port number to further refine a query. Ports are also
           first class searchable and may be searched for directly. For example:
-          <code>ip == 1.2.3/24:80</code>. This query will search for all sessions which contain an IP address within the 1.2.3/24 CIDR range as well as utilizing port 80 during the session.
-          An IP search can also be done with list of IPs which may be in mixed representations: <code>ip == [1.2.3.4,1.3/16]</code>
+          <code>ip == 1.2.3.0/24:80</code>. This query will search for all sessions which contain an IP address within the 1.2.3.0/24 CIDR range as well as utilizing port 80 during the session.
+          An IP search can also be done with list of IPs which may be in mixed representations, both OR Lists and AND Lists are supported: <code>ip == [1.2.3.4,5.6.7.8,1.3.0.0/16]</code>
           If you only want to find ipv4 or ipv6 traffic, you can search using those tokens: <code>ip.src == ipv6</code>
         </p>
         <h6 id="numericSearch">
@@ -255,7 +303,7 @@
           Numeric fields support simple range operators besides the default equals
           and not equals query types. For example, to show events with bytes transferred being less than 10000,
           use this query: <code>bytes &lt;= 10000</code>.
-          Numeric fields also support lists for a simple OR query. For example, <code>port == [80,443,23]</code>
+          Numeric fields also support both OR Lists and AND Lists. For example, <code>port == [80,443,23]</code>
         </p>
         <h6 id="dateSearch">
           <span class="fa fa-search"></span>&nbsp;
@@ -264,11 +312,14 @@
         <p>
           Date fields support simple range operators besides the default equals
           and not equals. For example: <code>starttime == "2004/07/31 05:33:41"</code>.
-          They also support lists for a simple OR query. For example:
+          They also support both OR Lists and AND Lists for a simple OR/AND queries. For example:
           <code>stoptime == ["2004/07/31 05:33:41","2004/07/31 06:33:41"]</code>.
-          However, it's much easier to use the
+          However, usually it's much easier to use the
           <a href="help#timebounding" class="no-decoration">time bounding</a>
           controls under the search bar.
+          <strong>IMPORTANT</strong>, using starttime or stoptime does <strong>NOT</strong>
+          change the overall <a href="help#timebounding" class="no-decoration">time bounding</a>
+          of the query.
           Finally, relative dates and optional snapping are supported using the
           Splunk syntax:
         </p>
@@ -362,16 +413,7 @@
         <p>
           The magnifying glass ( <span class="fa fa-search"></span> ) in the top left corner indicates the search bar. Enter your query string here and then hit ENTER or click the "Search" button to run your query.
           While typing fieldnames into the query bar predicative typing will overlay with potential fieldname choices based on what has been typed so far.
-          See the <a href="help#search" class="no-decoration">search section</a> for more in depth information.
-        </p>
-        <h6 id="timebounding">
-          <span class="fa fa-fw fa-exchange"></span>&nbsp;
-          Time Bounding
-        </h6>
-        <p>
-          The controls under the search bar contain the time bounding selections. The first element sets relative timing (such as last hour, last day, etc).
-          The Start box allows a start time/date to be selected. The End box allows an end time/date to be selected.
-          The bounding box is used to select where time bounding is applied (last packet, bounded, Session Overlaps, Database)
+          See the <a href="help#search" class="no-decoration">Search Bar section</a> for more in depth information.
         </p>
         <h6>
           <span class="fa fa-fw fa-exchange"></span>&nbsp;
@@ -444,6 +486,8 @@
             <li>Send the selected data to another system for further analysis.</li>
             <li>Scrub packet data by overwriting the packets (if a user has data removal privileges).</li>
             <li>Delete SPI and PCAP data entirely (if a user has data removal privileges).</li>
+            <li>Export an intersection of fields that runs an aggregation of multiple unique fields. This opens a new tab with text results.</li>
+            <li>Create Periodic Query opens a new tab directly to the periodic query section of the settings page.</li>
           </ol>
           Each of these options may be applied to the sessions which have been opened (by clicking the sessions + box),
           any items visible (on the current page), or all items which have matched the query string.
@@ -550,6 +594,10 @@
         as well as deep dive analysis. For example, if you wanted to chart all of the currently recorded http.users within your current time window, select http.user from the SPI Graph selection typeahead.
         Data will be displayed based upon count of observances over the time period. Increasing the Max Elements setting will allow an analyst to see additional items if the investigated SPI type is noisy.
         An analyst can sort by either the noisiest value (graph) or by alphabetical order (name). This page also has the ability to update every X seconds.
+      </p>e name of the hun
+      <p>
+        This page also includes pie, table, and treemap views of the data. This data can be layered similar to the export intersection functionality in the action menu dropdown.
+        This runs an aggregation of multiple unique fields and displays the data in the visualization of your choice.
       </p>
 
       <hr>
@@ -678,6 +726,8 @@
         <dl class="dl-horizontal dl-horizontal-wide">
           <dt>Name</dt>
           <dd>The name of the hunt (multiple hunts can have the same name)</dd>
+          <dt>Description</dt>
+          <dd>The description of the hunt (useful when sharing)</dd>
           <dt>Max number of packets to examine per session</dt>
           <dd>The maximum number of packets that the hunt will search within each session</dd>
           <dt>Notify</dt>
@@ -688,6 +738,8 @@
           <dd>Whether to search source or destination packets, or both. Must select at least one.</dd>
           <dt>Search raw/reassembled packets</dt>
           <dd>Whether to search raw or reassembled packets</dd>
+          <dt>Roles</dt>
+          <dd>The roles that can view the results.</dd>
           <dt>Users</dt>
           <dd>A comma separated list of users to be added to the hunt so they can view the results.</dd>
         </dl>
@@ -1084,7 +1136,6 @@
         </h6>
         <p>
           Here, a user can manage their saved views by updating, deleting, or sharing them.
-          Sharing a view allows all other users to use that view (only admins can edit it).
           A user can also create a new view in this section.
           See the <a href="help#views" class="no-decoration">Views</a> section for more information.
         </p>
@@ -1153,8 +1204,10 @@
           Shortcuts are lists of values that can be used in search queries.
           For example, create a list of IPs and use them in a query
           expression <code>ip.src == $MY_IPS</code>. Users can share
-          shortcuts with users of the same cluster by toggling the "shared"
-          checkbox.
+          shortcuts with specific users by listing each user's userId.
+          Users can share shortcuts with multiple users by sharing to
+          roles. For example, sharing with the "arkimeUser" role will share
+          the shortcut with any user that has access to Arkime.
           <br>
           <strong>Tip:</strong> Use <code>$</code> to autocomplete shortcuts
           in search expressions.
@@ -1172,18 +1225,75 @@
 
       <hr>
 
-      <h3 id="users" v-has-permission="'createEnabled'">
+      <h3 id="users" v-has-role="{user:user,roles:'usersAdmin'}">
         <span class="fa fa-fw fa-users"></span>&nbsp;
         Users
       </h3>
-      <p v-has-permission="'createEnabled'">
-        The Users page, as you may have guessed, is where user options are configured and added to the system. Multiple options for role based access control (RBAC) may be leveraged.
-        These options include: The User ID, The Name of the user, a Forced expression (only allows a user to see data related to the specified expression/query), an Account enabled toggle, an Admin toggle,
-        if the user is allowed access to the web interface, if the user is allowed access to http based Authorization Headers, if the user may search captured email data, if the user may remove data from the system (scrub).
-        This page also allows for the deletion of a previously created user. Clicking on the Settings link will jump to the users <a href="help#settings" class="no-decoration">Settings</a> page.
-      </p>
+      <span v-has-role="{user:user,roles:'arkimeAdmin'}">
+        <p>
+          The Users page is where you can add, modify, and delete both Users and Roles for the entire Arkime ecosystem.
 
-      <hr>
+          Arkime has builtin Roles that control how different subsystems are accessed.
+          You can also create user defined Roles that are used to share different items.
+          Basic inheritance is supported for role, so if you create a 'team' role and assign it the cont3xtUser role,
+          any user assigned the new 'team' role will also have the 'cont3xtUser' role assigned.
+        </p>
+
+        System Roles:
+        <dl class="dl-horizontal dl-horizontal-wide">
+          <dt>superAdmin</dt>
+          <dd>Has all system roles assigned. Can only be assigned by another superAdmin. Users with superAdmin assigned are the only ones that can assign Admin roles to other users.</dd>
+          <dt>usersAdmin</dt>
+          <dd>Can use the Users page to add/modify/delete users, except superAdmin users. Users with usersAdmin assigned can unassign Admin roles, but not assign them to other users.</dd>
+          <dt>arkimeAdmin</dt>
+          <dd>Can perform Arkime configuration, view data for other Arkime users, and automatically assigned the arkimeUser role.</dd>
+          <dt>arkimeUser</dt>
+          <dd>Can use the Arkime viewer application</dd>
+          <dt>cont3xtAdmin</dt>
+          <dd>Can perform cont3xt configuration, view data for other Cont3xt users, and automatically assigned the cont3xtUser role.</dd>
+          <dt>contx3tUser</dt>
+          <dd>Can use the Cont3xt application</dd>
+          <dt>parliamentAdmin</dt>
+          <dd>Can perform parliament configuration, automatically assigned the parliamentUser role.</dd>
+          <dt>parliamentUser</dt>
+          <dd>Can dismiss parliament issues and notifications. Unlike other roles parliament doesn't require a role to be set to use as a dashboard</dd>
+          <dt>wiseAdmin</dt>
+          <dd>Can perform wise configuration, automatically assigned the wiseUser.</dd>
+          <dt>wiseUser</dt>
+          <dd>Can use the WISE UI to do queries and viewer stats</dd>
+        </dl>
+
+        <p>
+        As each user is added you'll need to assign and sometimes change the default permissions
+        </p>
+
+        <dl class="dl-horizontal dl-horizontal-wide">
+          <dt>Enabled</dt>
+          <dd>Can this user/role actually be used</dd>
+          <dt>Web Interface</dt>
+          <dd>Can this user use the web interface, or only API calls</dd>
+          <dt>Web Auth Header</dt>
+          <dd>Can this user be authenticated by the Web Auth Header setting, or only digest</dd>
+          <dt>Disable Arkime Email Search</dt>
+          <dd>Should the user be able to use the email.* search criteria, they will see email field when openning a session</dd>
+          <dt>Disable Arkime Data Removal</dt>
+          <dd>Should the user be able to remove data, such as tags</dd>
+          <dt>Disable Arkime Hunting</dt>
+          <dd>Should the user be able to create new Arkime Hunts</dd>
+          <dt>Hide Arkime stats Page</dt>
+          <dd>Should the user be able to view the Arkime Stats tabs</dd>
+          <dt>Hide Arkime PCAP</dt>
+          <dd>When opening a session, should the user see the PCAP section</dd>
+          <dt>Disable Arkime PCAP Download</dt>
+          <dd>Should the user be able to download PCAP files</dd>
+          <dt>Forced Expression</dt>
+          <dd>This Arkime Expression will be added to all queries the does</dd>
+          <dt>Query Time Limit</dt>
+          <dd>How far back can the user do queries for</dd>
+        </dl>
+      </span>
+
+      <hr v-has-role="{user:user,roles:'arkimeAdmin'}">
 
       <h3 id="hotkeys">
         <span class="fa fa-fw fa-keyboard-o"></span>&nbsp;
@@ -1213,7 +1323,7 @@
         <code>'?'</code> - shows you the keyboard shortcuts help dialog
       </p>
 
-      <hr v-has-permission="'createEnabled'">
+      <hr>
 
       <h3 id="fields">
         <span class="fa fa-fw fa-list"></span>&nbsp;
@@ -1251,7 +1361,7 @@
             </th>
             <th class="cursor-pointer"
               @click="sortFields('exp')">
-              Exp
+              Field
               <span v-show="fieldQuery.sortField === 'exp' && !fieldQuery.desc" class="fa fa-sort-asc"></span>
               <span v-show="fieldQuery.sortField === 'exp' && fieldQuery.desc" class="fa fa-sort-desc"></span>
               <span v-show="fieldQuery.sortField !== 'exp'" class="fa fa-sort"></span>
@@ -1345,14 +1455,17 @@ export default {
       }
     };
   },
-  computed: {
-    fields () {
-      return this.fixFields(this.$store.state.fieldsArr);
-    }
-  },
   watch: {
     searchFields: function (newVal, oldVal) {
       this.debounceGetFilteredFields();
+    }
+  },
+  computed: {
+    user () {
+      return this.$store.state.user;
+    },
+    fields () {
+      return this.fixFields(this.$store.state.fieldsArr);
     }
   },
   created: function () {
@@ -1425,7 +1538,7 @@ export default {
         // scrollBehavior actually triggers on page load
         this.$router.replace({
           ...this.$route,
-          hash: hash
+          hash
         });
       }, 750);
     }

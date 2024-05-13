@@ -3,19 +3,9 @@
  *
  * Copyright 2012-2017 AOL Inc. All rights reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this Software except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
  */
-#include "moloch.h"
+#include "arkime.h"
 #include "arkimeconfig.h"
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -26,6 +16,7 @@
 #include <sys/statvfs.h>
 #include <fcntl.h>
 #include <arpa/inet.h>
+#include <dirent.h>
 #include "patricia.h"
 #include <ctype.h>
 
@@ -33,7 +24,7 @@
 LOCAL MMDB_s           *geoCountry;
 LOCAL MMDB_s           *geoASN;
 
-#define MOLOCH_MIN_DB_VERSION 70
+#define ARKIME_MIN_DB_VERSION 70
 
 extern uint64_t         totalPackets;
 LOCAL  uint64_t         totalSessions = 0;
@@ -50,19 +41,22 @@ extern int              vlanField;
 LOCAL struct timeval    startTime;
 LOCAL char             *rirs[256];
 
-void *                  esServer = 0;
+void                   *esServer = 0;
 
 LOCAL patricia_tree_t  *ipTree4 = 0;
 LOCAL patricia_tree_t  *ipTree6 = 0;
 
+LOCAL patricia_tree_t  *newipTree4 = 0;
+LOCAL patricia_tree_t  *newipTree6 = 0;
+
 LOCAL patricia_tree_t  *ouiTree = 0;
 
-extern char            *moloch_char_to_hex;
-extern unsigned char    moloch_char_to_hexstr[256][3];
-extern unsigned char    moloch_hex_to_char[256][256];
+extern char            *arkime_char_to_hex;
+extern uint8_t          arkime_char_to_hexstr[256][3];
+extern uint8_t          arkime_hex_to_char[256][256];
 
 LOCAL uint32_t          nextFileNum;
-LOCAL MOLOCH_LOCK_DEFINE(nextFileNum);
+LOCAL ARKIME_LOCK_DEFINE(nextFileNum);
 
 LOCAL struct timespec   startHealthCheck;
 LOCAL uint64_t          esHealthMS;
@@ -71,29 +65,30 @@ LOCAL int               dbExit;
 LOCAL char             *esBulkQuery;
 LOCAL int               esBulkQueryLen;
 LOCAL char             *ecsEventProvider;
+LOCAL char             *ecsEventDataset;
 
-extern uint64_t         packetStats[MOLOCH_PACKET_MAX];
-
-/******************************************************************************/
-extern MolochConfig_t        config;
+extern uint64_t         packetStats[ARKIME_PACKET_MAX];
 
 /******************************************************************************/
-void moloch_db_add_local_ip(char *str, MolochIpInfo_t *ii)
+extern ArkimeConfig_t        config;
+
+/******************************************************************************/
+void arkime_db_add_override_ip(char *str, ArkimeIpInfo_t *ii)
 {
     patricia_node_t *node;
-    if (!ipTree4) {
-        ipTree4 = New_Patricia(32);
-        ipTree6 = New_Patricia(128);
+    if (!newipTree4) {
+        newipTree4 = New_Patricia(32);
+        newipTree6 = New_Patricia(128);
     }
     if (strchr(str, '.') != 0) {
-        node = make_and_lookup(ipTree4, str);
+        node = make_and_lookup(newipTree4, str);
     } else {
-        node = make_and_lookup(ipTree6, str);
+        node = make_and_lookup(newipTree6, str);
     }
     node->data = ii;
 }
 /******************************************************************************/
-void moloch_db_free_local_ip(MolochIpInfo_t *ii)
+LOCAL void arkime_db_free_override_ip(ArkimeIpInfo_t *ii)
 {
     if (ii->country)
         g_free(ii->country);
@@ -105,10 +100,30 @@ void moloch_db_free_local_ip(MolochIpInfo_t *ii)
     int i;
     for (i = 0; i < ii->numtags; i++)
         g_free(ii->tagsStr[i]);
-    MOLOCH_TYPE_FREE(MolochIpInfo_t, ii);
+
+    if (ii->ops)
+        arkime_field_ops_free(ii->ops);
+
+    ARKIME_TYPE_FREE(ArkimeIpInfo_t, ii);
 }
 /******************************************************************************/
-LOCAL MolochIpInfo_t *moloch_db_get_local_ip6(MolochSession_t *session, struct in6_addr *ip)
+LOCAL void arkime_db_free_override_ips(patricia_tree_t *tree)
+{
+    Destroy_Patricia(tree, (patricia_fn_data_t)arkime_db_free_override_ip);
+}
+/******************************************************************************/
+void arkime_db_install_override_ip()
+{
+    arkime_free_later(ipTree4, (GDestroyNotify) arkime_db_free_override_ips);
+    ipTree4 = newipTree4;
+    newipTree4 = 0;
+
+    arkime_free_later(ipTree6, (GDestroyNotify) arkime_db_free_override_ips);
+    ipTree6 = newipTree6;
+    newipTree6 = 0;
+}
+/******************************************************************************/
+LOCAL ArkimeIpInfo_t *arkime_db_get_override_ip6(ArkimeSession_t *session, struct in6_addr *ip)
 {
     patricia_node_t *node;
 
@@ -121,22 +136,26 @@ LOCAL MolochIpInfo_t *moloch_db_get_local_ip6(MolochSession_t *session, struct i
     }
 
 
-    MolochIpInfo_t *ii = node->data;
+    ArkimeIpInfo_t *ii = node->data;
     int t;
 
     for (t = 0; t < ii->numtags; t++) {
-        moloch_field_string_add(config.tagsStringField, session, ii->tagsStr[t], -1, TRUE);
+        arkime_field_string_add(config.tagsStringField, session, ii->tagsStr[t], -1, TRUE);
+    }
+
+    if (ii->ops) {
+        arkime_field_ops_run(session, ii->ops);
     }
 
     return ii;
 }
 
 /******************************************************************************/
-LOCAL void moloch_db_js0n_str(BSB * bsb, unsigned char * in, gboolean utf8)
+void arkime_db_js0n_str(BSB *bsb, uint8_t *in, gboolean utf8)
 {
     BSB_EXPORT_u08(*bsb, '"');
     while (*in) {
-        switch(*in) {
+        switch (*in) {
         case '\b':
             BSB_EXPORT_cstr(*bsb, "\\b");
             break;
@@ -162,7 +181,7 @@ LOCAL void moloch_db_js0n_str(BSB * bsb, unsigned char * in, gboolean utf8)
             BSB_EXPORT_cstr(*bsb, "\\/");
             break;
         default:
-            if(*in < 32) {
+            if (*in < 32) {
                 BSB_EXPORT_sprintf(*bsb, "\\u%04x", *in);
             } else if (utf8) {
                 if ((*in & 0xf0) == 0xf0) {
@@ -181,7 +200,7 @@ LOCAL void moloch_db_js0n_str(BSB * bsb, unsigned char * in, gboolean utf8)
                     BSB_EXPORT_u08(*bsb, *in);
                 }
             } else {
-                if(*in & 0x80) {
+                if (*in & 0x80) {
                     BSB_EXPORT_u08(*bsb, (0xc0 | (*in >> 6)));
                     BSB_EXPORT_u08(*bsb, (0x80 | (*in & 0x3f)));
                 } else {
@@ -198,16 +217,16 @@ end:
 }
 
 /******************************************************************************/
-LOCAL void moloch_db_js0n_str_unquoted(BSB * bsb, unsigned char * in, int len, gboolean utf8)
+void arkime_db_js0n_str_unquoted(BSB *bsb, uint8_t *in, int len, gboolean utf8)
 {
 
     if (len == -1)
         len = strlen((char *)in);
 
-    unsigned char *end = in + len;
+    const uint8_t *end = in + len;
 
     while (in < end) {
-        switch(*in) {
+        switch (*in) {
         case '\b':
             BSB_EXPORT_cstr(*bsb, "\\b");
             break;
@@ -233,7 +252,7 @@ LOCAL void moloch_db_js0n_str_unquoted(BSB * bsb, unsigned char * in, int len, g
             BSB_EXPORT_cstr(*bsb, "\\/");
             break;
         default:
-            if(*in < 32) {
+            if (*in < 32) {
                 BSB_EXPORT_sprintf(*bsb, "\\u%04x", *in);
             } else if (utf8) {
                 if ((*in & 0xf0) == 0xf0) {
@@ -252,7 +271,7 @@ LOCAL void moloch_db_js0n_str_unquoted(BSB * bsb, unsigned char * in, int len, g
                     BSB_EXPORT_u08(*bsb, *in);
                 }
             } else {
-                if(*in & 0x80) {
+                if (*in & 0x80) {
                     BSB_EXPORT_u08(*bsb, (0xc0 | (*in >> 6)));
                     BSB_EXPORT_u08(*bsb, (0x80 | (*in & 0x3f)));
                 } else {
@@ -266,13 +285,13 @@ LOCAL void moloch_db_js0n_str_unquoted(BSB * bsb, unsigned char * in, int len, g
 }
 
 /******************************************************************************/
-void moloch_db_geo_lookup6(MolochSession_t *session, struct in6_addr addr, char **g, uint32_t *asNum, char **asStr, int *asLen, char **rir)
+void arkime_db_geo_lookup6(ArkimeSession_t *session, struct in6_addr addr, char **g, uint32_t *asNum, char **asStr, int *asLen, char **rir)
 {
     *g = *asStr = *rir = 0;
 
     if (ipTree4) {
-        MolochIpInfo_t *ii;
-        if ((ii = moloch_db_get_local_ip6(session, &addr))) {
+        ArkimeIpInfo_t *ii;
+        if ((ii = arkime_db_get_override_ip6(session, &addr))) {
             *g = ii->country;
             *asNum = ii->asNum;
             *asStr = ii->asStr;
@@ -281,17 +300,17 @@ void moloch_db_geo_lookup6(MolochSession_t *session, struct in6_addr addr, char 
         }
     }
 
-    struct sockaddr    *sa;
-    struct sockaddr_in  sin;
-    struct sockaddr_in6 sin6;
+    const struct sockaddr    *sa;
+    struct sockaddr_in        sin;
+    struct sockaddr_in6       sin6;
 
     if (IN6_IS_ADDR_V4MAPPED(&addr)) {
         sin.sin_family = AF_INET;
-        sin.sin_addr.s_addr   = MOLOCH_V6_TO_V4(addr);
+        sin.sin_addr.s_addr   = ARKIME_V6_TO_V4(addr);
         sa = (struct sockaddr *)&sin;
 
         if (!*rir) {
-            *rir = rirs[MOLOCH_V6_TO_V4(addr) & 0xff];
+            *rir = rirs[ARKIME_V6_TO_V4(addr) & 0xff];
         }
     } else {
         sin6.sin6_family = AF_INET6;
@@ -334,7 +353,7 @@ void moloch_db_geo_lookup6(MolochSession_t *session, struct in6_addr addr, char 
     }
 }
 /******************************************************************************/
-LOCAL void moloch_db_send_bulk_cb(int code, unsigned char *data, int data_len, gpointer UNUSED(uw))
+LOCAL void arkime_db_send_bulk_cb(int code, uint8_t *data, int data_len, gpointer UNUSED(uw))
 {
     if (code != 200)
         LOG("Bulk issue.  Code: %d\n%.*s", code, data_len, data);
@@ -342,20 +361,32 @@ LOCAL void moloch_db_send_bulk_cb(int code, unsigned char *data, int data_len, g
         LOG("Bulk Reply code:%d :>%.*s<", code, data_len, data);
 }
 /******************************************************************************/
-LOCAL void moloch_db_send_bulk(char *json, int len)
+LOCAL void arkime_db_send_bulk(char *json, int len)
 {
     if (config.debug > 4)
         LOG("Sending Bulk:>%.*s<", len, json);
-    moloch_http_schedule(esServer, "POST", esBulkQuery, esBulkQueryLen, json, len, NULL, MOLOCH_HTTP_PRIORITY_NORMAL, moloch_db_send_bulk_cb, NULL);
+    arkime_http_schedule(esServer, "POST", esBulkQuery, esBulkQueryLen, json, len, NULL, ARKIME_HTTP_PRIORITY_NORMAL, arkime_db_send_bulk_cb, NULL);
 }
-LOCAL MolochDbSendBulkFunc sendBulkFunc = moloch_db_send_bulk;
 /******************************************************************************/
-void moloch_db_set_send_bulk(MolochDbSendBulkFunc func)
+LOCAL ArkimeDbSendBulkFunc sendBulkFunc = arkime_db_send_bulk;
+LOCAL gboolean sendBulkHeader = TRUE;
+LOCAL gboolean sendIndexInDoc = FALSE;
+LOCAL uint16_t sendMaxDocs = 0xffff;
+/******************************************************************************/
+void arkime_db_set_send_bulk(ArkimeDbSendBulkFunc func)
 {
     sendBulkFunc = func;
 }
 /******************************************************************************/
-gchar *moloch_db_community_id(MolochSession_t *session)
+void arkime_db_set_send_bulk2(ArkimeDbSendBulkFunc func, gboolean bulkHeader, gboolean indexInDoc, uint16_t maxDocs)
+{
+    sendBulkFunc = func;
+    sendBulkHeader = bulkHeader;
+    sendIndexInDoc = indexInDoc;
+    sendMaxDocs = maxDocs;
+}
+/******************************************************************************/
+gchar *arkime_db_community_id(ArkimeSession_t *session)
 {
     GChecksum       *checksum = g_checksum_new(G_CHECKSUM_SHA1);
     int              cmp;
@@ -365,41 +396,129 @@ gchar *moloch_db_community_id(MolochSession_t *session)
 
     g_checksum_update(checksum, (guchar *)&seed, 2);
 
-    if (session->sessionId[0] == 37) {
-        cmp = memcmp(session->sessionId+1, session->sessionId+19, 16);
+    if (ARKIME_SESSION_v6(session)) {
+        cmp = memcmp(session->sessionId + 1, session->sessionId + 19, 16);
 
         if (cmp < 0 || (cmp == 0 && session->port1 < session->port2)) {
-            g_checksum_update(checksum, (guchar *)session->sessionId+1, 16);
-            g_checksum_update(checksum, (guchar *)session->sessionId+19, 16);
+            g_checksum_update(checksum, (guchar *)session->sessionId + 1, 16);
+            g_checksum_update(checksum, (guchar *)session->sessionId + 19, 16);
             g_checksum_update(checksum, (guchar *)&session->ipProtocol, 1);
             g_checksum_update(checksum, (guchar *)&zero, 1);
-            g_checksum_update(checksum, (guchar *)session->sessionId+17, 2);
-            g_checksum_update(checksum, (guchar *)session->sessionId+35, 2);
+            g_checksum_update(checksum, (guchar *)session->sessionId + 17, 2);
+            g_checksum_update(checksum, (guchar *)session->sessionId + 35, 2);
         } else {
-            g_checksum_update(checksum, (guchar *)session->sessionId+19, 16);
-            g_checksum_update(checksum, (guchar *)session->sessionId+1, 16);
+            g_checksum_update(checksum, (guchar *)session->sessionId + 19, 16);
+            g_checksum_update(checksum, (guchar *)session->sessionId + 1, 16);
             g_checksum_update(checksum, (guchar *)&session->ipProtocol, 1);
             g_checksum_update(checksum, (guchar *)&zero, 1);
-            g_checksum_update(checksum, (guchar *)session->sessionId+35, 2);
-            g_checksum_update(checksum, (guchar *)session->sessionId+17, 2);
+            g_checksum_update(checksum, (guchar *)session->sessionId + 35, 2);
+            g_checksum_update(checksum, (guchar *)session->sessionId + 17, 2);
         }
     } else {
-        cmp = memcmp(session->sessionId+1, session->sessionId+7, 4);
+        cmp = memcmp(session->sessionId + 1, session->sessionId + 7, 4);
 
         if (cmp < 0 || (cmp == 0 && session->port1 < session->port2)) {
-            g_checksum_update(checksum, (guchar *)session->sessionId+1, 4);
-            g_checksum_update(checksum, (guchar *)session->sessionId+7, 4);
+            g_checksum_update(checksum, (guchar *)session->sessionId + 1, 4);
+            g_checksum_update(checksum, (guchar *)session->sessionId + 7, 4);
             g_checksum_update(checksum, (guchar *)&session->ipProtocol, 1);
             g_checksum_update(checksum, (guchar *)&zero, 1);
-            g_checksum_update(checksum, (guchar *)session->sessionId+5, 2);
-            g_checksum_update(checksum, (guchar *)session->sessionId+11, 2);
+            g_checksum_update(checksum, (guchar *)session->sessionId + 5, 2);
+            g_checksum_update(checksum, (guchar *)session->sessionId + 11, 2);
         }  else {
-            g_checksum_update(checksum, (guchar *)session->sessionId+7, 4);
-            g_checksum_update(checksum, (guchar *)session->sessionId+1, 4);
+            g_checksum_update(checksum, (guchar *)session->sessionId + 7, 4);
+            g_checksum_update(checksum, (guchar *)session->sessionId + 1, 4);
             g_checksum_update(checksum, (guchar *)&session->ipProtocol, 1);
             g_checksum_update(checksum, (guchar *)&zero, 1);
-            g_checksum_update(checksum, (guchar *)session->sessionId+11, 2);
-            g_checksum_update(checksum, (guchar *)session->sessionId+5, 2);
+            g_checksum_update(checksum, (guchar *)session->sessionId + 11, 2);
+            g_checksum_update(checksum, (guchar *)session->sessionId + 5, 2);
+        }
+    }
+
+    guint8 digest[100];
+    gsize  digest_len = 100;
+
+    g_checksum_get_digest(checksum, digest, &digest_len);
+    gchar *b64 = g_base64_encode(digest, digest_len);
+
+    g_checksum_free(checksum);
+    return b64;
+}
+/******************************************************************************/
+// ICMP is a special case, we need to handle it differently
+// It remaps the ports and is kind of a hot mess.
+gchar *arkime_db_community_id_icmp(ArkimeSession_t *session)
+{
+    GChecksum       *checksum = g_checksum_new(G_CHECKSUM_SHA1);
+    int              cmp;
+
+    static uint16_t seed = 0;
+    static uint8_t  zero = 0;
+
+    uint16_t port1;
+    uint16_t port2;
+
+    g_checksum_update(checksum, (guchar *)&seed, 2);
+
+    port1 = session->icmpInfo[0];
+    port2 = session->icmpInfo[1];
+
+    if (ARKIME_SESSION_v6(session)) {
+        static uint8_t port2Mapping[19] = {129, 128, 131, 130, 255, 134, 133, 136, 135, 255,
+                                           255, 140, 139, 255, 255, 255, 145, 145, 255
+                                          };
+
+        if (port1 >= 128 && port1 <= 145 && port2Mapping[port1 - 128] != 255) {
+            port2 = port2Mapping[port1 - 128];
+        }
+        cmp = memcmp(session->addr1.s6_addr, session->addr2.s6_addr, 16);
+
+        if (cmp < 0 || (cmp == 0 && port1 <= port2)) {
+            port1 = htons(port1);
+            port2 = htons(port2);
+            g_checksum_update(checksum, (guchar *)session->addr1.s6_addr, 16);
+            g_checksum_update(checksum, (guchar *)session->addr2.s6_addr, 16);
+            g_checksum_update(checksum, (guchar *)&session->ipProtocol, 1);
+            g_checksum_update(checksum, (guchar *)&zero, 1);
+            g_checksum_update(checksum, (guchar *)&port1, 2);
+            g_checksum_update(checksum, (guchar *)&port2, 2);
+        } else {
+            port1 = htons(port1);
+            port2 = htons(port2);
+            g_checksum_update(checksum, (guchar *)session->addr2.s6_addr, 16);
+            g_checksum_update(checksum, (guchar *)session->addr1.s6_addr, 16);
+            g_checksum_update(checksum, (guchar *)&session->ipProtocol, 1);
+            g_checksum_update(checksum, (guchar *)&zero, 1);
+            g_checksum_update(checksum, (guchar *)&port2, 2);
+            g_checksum_update(checksum, (guchar *)&port1, 2);
+        }
+    } else {
+        static uint8_t port2Mapping[19] = {8, 255, 255, 255, 255, 255, 255, 255, 0, 10,
+                                           9, 255, 255, 14, 13, 16, 15, 18, 17
+                                          };
+
+        if (port1 < 19 && port2Mapping[port1] != 255) {
+            port2 = port2Mapping[port1];
+        }
+        cmp = memcmp(session->addr1.s6_addr + 12, session->addr2.s6_addr + 12, 4);
+
+        if (cmp < 0 || (cmp == 0 && port1 < port2)) {
+            port1 = htons(port1);
+            port2 = htons(port2);
+            g_checksum_update(checksum, (guchar *)session->addr1.s6_addr + 12, 4);
+            g_checksum_update(checksum, (guchar *)session->addr2.s6_addr + 12, 4);
+            g_checksum_update(checksum, (guchar *)&session->ipProtocol, 1);
+            g_checksum_update(checksum, (guchar *)&zero, 1);
+            g_checksum_update(checksum, (guchar *)&port1, 2);
+            g_checksum_update(checksum, (guchar *)&port2, 2);
+        }  else {
+            port1 = htons(port1);
+            port2 = htons(port2);
+            g_checksum_update(checksum, (guchar *)session->addr2.s6_addr + 12, 4);
+            g_checksum_update(checksum, (guchar *)session->addr1.s6_addr + 12, 4);
+            g_checksum_update(checksum, (guchar *)&session->ipProtocol, 1);
+            g_checksum_update(checksum, (guchar *)&zero, 1);
+            g_checksum_update(checksum, (guchar *)&port2, 2);
+            g_checksum_update(checksum, (guchar *)&port1, 2);
         }
     }
 
@@ -414,85 +533,66 @@ gchar *moloch_db_community_id(MolochSession_t *session)
 }
 /******************************************************************************/
 LOCAL struct {
-    char   *json;
-    BSB     bsb;
-    time_t  lastSave;
-    char    prefix[100];
-    time_t  prefixTime;
-    short   sortedFieldsIndex[MOLOCH_FIELDS_DB_MAX];
-    short   sortedFieldsIndexCnt;
-    MOLOCH_LOCK_EXTERN(lock);
-} dbInfo[MOLOCH_MAX_PACKET_THREADS];
+    char    *json;
+    BSB      bsb;
+    time_t   lastSave;
+    char     prefix[100];
+    time_t   prefixTime;
+    short    sortedFieldsIndex[ARKIME_FIELDS_MAX];
+    uint16_t sortedFieldsIndexCnt;
+    uint16_t cnt;
+    ARKIME_LOCK_EXTERN(lock);
+} dbInfo[ARKIME_MAX_PACKET_THREADS];
 
 #define MAX_IPS 2000
 
-LOCAL MOLOCH_LOCK_DEFINE(outputed);
-
-
-#define SAVE_STRING_HEAD(HEAD, STR) \
-if (HEAD.s_count > 0) { \
-    BSB_EXPORT_cstr(jbsb, "\"" STR "\":["); \
-    while (HEAD.s_count > 0) { \
-	DLL_POP_HEAD(s_, &HEAD, string); \
-	moloch_db_js0n_str(&jbsb, (unsigned char *)string->str, string->utf8); \
-	BSB_EXPORT_u08(jbsb, ','); \
-	g_free(string->str); \
-	MOLOCH_TYPE_FREE(MolochString_t, string); \
-    } \
-    BSB_EXPORT_rewind(jbsb, 1); \
-    BSB_EXPORT_u08(jbsb, ']'); \
-    BSB_EXPORT_u08(jbsb, ','); \
-}
-
-#define SAVE_STRING_HEAD_CNT(HEAD, CNT) \
-if (HEAD.s_count > 0) { \
-    BSB_EXPORT_sprintf(jbsb, "\"" CNT "\":%d,", certs->alt.s_count); \
-}
+LOCAL ARKIME_LOCK_DEFINE(outputed);
 
 #define SAVE_FIELD_STR_HASH(POS, FLAGS) \
 do { \
     shash = session->fields[POS]->shash; \
-    if (FLAGS & MOLOCH_FIELD_FLAG_CNT) { \
+    if (FLAGS & ARKIME_FIELD_FLAG_CNT) { \
         BSB_EXPORT_sprintf(jbsb, "\"%sCnt\":%d,", config.fields[POS]->dbField, HASH_COUNT(s_, *shash)); \
     } \
-    if (FLAGS & MOLOCH_FIELD_FLAG_ECS_CNT) { \
+    if (FLAGS & ARKIME_FIELD_FLAG_ECS_CNT) { \
         BSB_EXPORT_sprintf(jbsb, "\"%s-cnt\":%d,", config.fields[POS]->dbField, HASH_COUNT(s_, *shash)); \
     } \
     BSB_EXPORT_sprintf(jbsb, "\"%s\":[", config.fields[POS]->dbField); \
-    HASH_FORALL(s_, *shash, hstring, \
-        moloch_db_js0n_str(&jbsb, (unsigned char *)hstring->str, hstring->utf8 || FLAGS & MOLOCH_FIELD_FLAG_FORCE_UTF8); \
+    HASH_FORALL2(s_, *shash, hstring) { \
+        arkime_db_js0n_str(&jbsb, (uint8_t *)hstring->str, hstring->utf8 || FLAGS & ARKIME_FIELD_FLAG_FORCE_UTF8); \
         BSB_EXPORT_u08(jbsb, ','); \
-    ); \
+    } \
     BSB_EXPORT_rewind(jbsb, 1); /* Remove last comma */ \
     BSB_EXPORT_cstr(jbsb, "],"); \
 } while(0)
 
-int moloch_db_field_sort(const void *a, const void *b) {
+int arkime_db_field_sort(const void *a, const void *b)
+{
     return strcmp(config.fields[*(short *)a]->dbFieldFull, config.fields[*(short *)b]->dbFieldFull);
 }
 
-void moloch_db_save_session(MolochSession_t *session, int final)
+void arkime_db_save_session(ArkimeSession_t *session, int final)
 {
     uint32_t               i;
     char                   id[100];
     uint32_t               id_len;
     uuid_t                 uuid;
-    MolochString_t        *hstring;
-    MolochInt_t           *hint;
-    MolochStringHashStd_t *shash;
-    MolochIntHashStd_t    *ihash;
+    ArkimeString_t        *hstring;
+    ArkimeInt_t           *hint;
+    ArkimeStringHashStd_t *shash;
+    ArkimeIntHashStd_t    *ihash;
     GHashTable            *ghash;
     GHashTableIter         iter;
-    unsigned char         *startPtr;
-    unsigned char         *dataPtr;
+    const uint8_t         *startPtr;
+    const uint8_t         *dataPtr;
     uint32_t               jsonSize;
     gpointer               ikey;
     char                   ipsrc[INET6_ADDRSTRLEN];
     char                   ipdst[INET6_ADDRSTRLEN];
 
     /* Let the plugins finish */
-    if (pluginsCbs & MOLOCH_PLUGIN_SAVE)
-        moloch_plugins_cb_save(session, final);
+    if (pluginsCbs & ARKIME_PLUGIN_SAVE)
+        arkime_plugins_cb_save(session, final);
 
     /* Don't save spi data for session */
     if (session->stopSPI)
@@ -507,14 +607,14 @@ void moloch_db_save_session(MolochSession_t *session, int final)
         return;
     }
 
-    if (moloch_writer_index) {
-        moloch_writer_index(session);
+    if (arkime_writer_index) {
+        arkime_writer_index(session);
     }
 
     /* jsonSize is an estimate of how much space it will take to encode the session */
-    jsonSize = 1300 + session->filePosArray->len*17 + 11*session->fileNumArray->len;
+    jsonSize = 1300 + session->filePosArray->len * 17 + 11 * session->fileNumArray->len;
     if (config.enablePacketLen) {
-        jsonSize += 10*session->fileLenArray->len;
+        jsonSize += 10 * session->fileLenArray->len;
     }
 
     for (int pos = 0; pos < session->maxFields; pos++) {
@@ -523,7 +623,7 @@ void moloch_db_save_session(MolochSession_t *session, int final)
         }
     }
 
-    MOLOCH_THREAD_INCR(totalSessions);
+    ARKIME_THREAD_INCR(totalSessions);
     session->segments++;
 
     const int thread = session->thread;
@@ -533,7 +633,7 @@ void moloch_db_save_session(MolochSession_t *session, int final)
         for (int f = 0; f < session->maxFields; f++) {
             dbInfo[thread].sortedFieldsIndex[f] = f;
         }
-        qsort(&dbInfo[thread].sortedFieldsIndex, session->maxFields, 2, moloch_db_field_sort);
+        qsort(&dbInfo[thread].sortedFieldsIndex, session->maxFields, 2, arkime_db_field_sort);
         dbInfo[thread].sortedFieldsIndexCnt = session->maxFields;
     }
 
@@ -544,36 +644,36 @@ void moloch_db_save_session(MolochSession_t *session, int final)
         struct tm tmp;
         gmtime_r(&dbInfo[thread].prefixTime, &tmp);
 
-        switch(config.rotate) {
-        case MOLOCH_ROTATE_HOURLY:
-            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02dh%02d", tmp.tm_year%100, tmp.tm_mon+1, tmp.tm_mday, tmp.tm_hour);
+        switch (config.rotate) {
+        case ARKIME_ROTATE_HOURLY:
+            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02dh%02d", tmp.tm_year % 100, tmp.tm_mon + 1, tmp.tm_mday, tmp.tm_hour);
             break;
-        case MOLOCH_ROTATE_HOURLY2:
-            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02dh%02d", tmp.tm_year%100, tmp.tm_mon+1, tmp.tm_mday, (tmp.tm_hour/2)*2);
+        case ARKIME_ROTATE_HOURLY2:
+            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02dh%02d", tmp.tm_year % 100, tmp.tm_mon + 1, tmp.tm_mday, (tmp.tm_hour / 2) * 2);
             break;
-        case MOLOCH_ROTATE_HOURLY3:
-            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02dh%02d", tmp.tm_year%100, tmp.tm_mon+1, tmp.tm_mday, (tmp.tm_hour/3)*3);
+        case ARKIME_ROTATE_HOURLY3:
+            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02dh%02d", tmp.tm_year % 100, tmp.tm_mon + 1, tmp.tm_mday, (tmp.tm_hour / 3) * 3);
             break;
-        case MOLOCH_ROTATE_HOURLY4:
-            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02dh%02d", tmp.tm_year%100, tmp.tm_mon+1, tmp.tm_mday, (tmp.tm_hour/4)*4);
+        case ARKIME_ROTATE_HOURLY4:
+            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02dh%02d", tmp.tm_year % 100, tmp.tm_mon + 1, tmp.tm_mday, (tmp.tm_hour / 4) * 4);
             break;
-        case MOLOCH_ROTATE_HOURLY6:
-            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02dh%02d", tmp.tm_year%100, tmp.tm_mon+1, tmp.tm_mday, (tmp.tm_hour/6)*6);
+        case ARKIME_ROTATE_HOURLY6:
+            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02dh%02d", tmp.tm_year % 100, tmp.tm_mon + 1, tmp.tm_mday, (tmp.tm_hour / 6) * 6);
+            break ;
+        case ARKIME_ROTATE_HOURLY8:
+            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02dh%02d", tmp.tm_year % 100, tmp.tm_mon + 1, tmp.tm_mday, (tmp.tm_hour / 8) * 8);
             break;
-        case MOLOCH_ROTATE_HOURLY8:
-            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02dh%02d", tmp.tm_year%100, tmp.tm_mon+1, tmp.tm_mday, (tmp.tm_hour/8)*8);
+        case ARKIME_ROTATE_HOURLY12:
+            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02dh%02d", tmp.tm_year % 100, tmp.tm_mon + 1, tmp.tm_mday, (tmp.tm_hour / 12) * 12);
             break;
-        case MOLOCH_ROTATE_HOURLY12:
-            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02dh%02d", tmp.tm_year%100, tmp.tm_mon+1, tmp.tm_mday, (tmp.tm_hour/12)*12);
+        case ARKIME_ROTATE_DAILY:
+            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02d", tmp.tm_year % 100, tmp.tm_mon + 1, tmp.tm_mday);
             break;
-        case MOLOCH_ROTATE_DAILY:
-            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%04d.%02d.%02d", (tmp.tm_year+1900), tmp.tm_mon+1, tmp.tm_mday);
+        case ARKIME_ROTATE_WEEKLY:
+            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02dw%02d", tmp.tm_year % 100, tmp.tm_yday / 7);
             break;
-        case MOLOCH_ROTATE_WEEKLY:
-            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02dw%02d", tmp.tm_year%100, tmp.tm_yday/7);
-            break;
-        case MOLOCH_ROTATE_MONTHLY:
-            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02dm%02d", tmp.tm_year%100, tmp.tm_mon+1);
+        case ARKIME_ROTATE_MONTHLY:
+            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02dm%02d", tmp.tm_year % 100, tmp.tm_mon + 1);
             break;
         }
     }
@@ -583,7 +683,7 @@ void moloch_db_save_session(MolochSession_t *session, int final)
 
         uuid_generate(uuid);
         gint state = 0, save = 0;
-        id_len += g_base64_encode_step((guchar*)&myPid, 2, FALSE, id + id_len, &state, &save);
+        id_len += g_base64_encode_step((guchar *)&myPid, 2, FALSE, id + id_len, &state, &save);
         id_len += g_base64_encode_step(uuid, sizeof(uuid_t), FALSE, id + id_len, &state, &save);
         id_len += g_base64_encode_close(FALSE, id + id_len, &state, &save);
         id[id_len] = 0;
@@ -593,88 +693,80 @@ void moloch_db_save_session(MolochSession_t *session, int final)
             else if (id[i] == '/') id[i] = '_';
         }
 
-        if (session->rootId == (void*)1L)
+        if (session->rootId == (void * )1L)
             session->rootId = g_strdup(id);
     }
 
     struct timeval currentTime;
     gettimeofday(&currentTime, NULL);
 
-    MOLOCH_LOCK(dbInfo[thread].lock);
+    ARKIME_LOCK(dbInfo[thread].lock);
     /* If no room left to add, send the buffer */
-    if (dbInfo[thread].json && (uint32_t)BSB_REMAINING(dbInfo[thread].bsb) < jsonSize) {
+    if (dbInfo[thread].json && ((uint32_t)BSB_REMAINING(dbInfo[thread].bsb) < jsonSize || dbInfo[thread].cnt >= sendMaxDocs)) {
         if (BSB_LENGTH(dbInfo[thread].bsb) > 0) {
             sendBulkFunc(dbInfo[thread].json, BSB_LENGTH(dbInfo[thread].bsb));
         } else {
-            moloch_http_free_buffer(dbInfo[thread].json);
+            arkime_http_free_buffer(dbInfo[thread].json);
         }
         dbInfo[thread].json = 0;
+        dbInfo[thread].cnt = 0;
         dbInfo[thread].lastSave = currentTime.tv_sec;
     }
+    dbInfo[thread].cnt++;
 
     /* Allocate a new buffer using the max of the bulk size or estimated size. */
     if (!dbInfo[thread].json) {
         const int size = MAX(config.dbBulkSize, jsonSize);
-        dbInfo[thread].json = moloch_http_get_buffer(size);
+        dbInfo[thread].json = arkime_http_get_buffer(size);
         BSB_INIT(dbInfo[thread].bsb, dbInfo[thread].json, size);
     }
 
-    uint32_t timediff = (uint32_t) ((session->lastPacket.tv_sec - session->firstPacket.tv_sec)*1000 +
-                                    (session->lastPacket.tv_usec - session->firstPacket.tv_usec)/1000);
+    uint32_t timediff = (uint32_t) ((session->lastPacket.tv_sec - session->firstPacket.tv_sec) * 1000 +
+                                    (session->lastPacket.tv_usec - session->firstPacket.tv_usec) / 1000);
 
     BSB jbsb = dbInfo[thread].bsb;
 
     startPtr = BSB_WORK_PTR(jbsb);
 
-    if (!config.disableIndexJson)
-    {
+    if (sendBulkHeader) {
         if (config.autoGenerateId) {
-            BSB_EXPORT_sprintf(jbsb, "{\"index\": {\"_index\": \"%ssessions3-%s\"}}\n", config.prefix, dbInfo[thread].prefix);
+            BSB_EXPORT_sprintf(jbsb, "{\"index\":{\"_index\":\"%ssessions3-%s\"}}\n", config.prefix, dbInfo[thread].prefix);
         } else {
-            BSB_EXPORT_sprintf(jbsb, "{\"index\": {\"_index\": \"%ssessions3-%s\", \"_id\": \"%s\"}}\n", config.prefix, dbInfo[thread].prefix, id);
+            BSB_EXPORT_sprintf(jbsb, "{\"index\":{\"_index\":\"%ssessions3-%s\", \"_id\": \"%s\"}}\n", config.prefix, dbInfo[thread].prefix, id);
         }
-
-        dataPtr = BSB_WORK_PTR(jbsb);
-
-        BSB_EXPORT_sprintf(jbsb,
-                        "{\"firstPacket\":%" PRIu64 ","
-                        "\"lastPacket\":%" PRIu64 ","
-                        "\"length\":%u,"
-                        "\"ipProtocol\":%u,",
-                        ((uint64_t)session->firstPacket.tv_sec)*1000 + ((uint64_t)session->firstPacket.tv_usec)/1000,
-                        ((uint64_t)session->lastPacket.tv_sec)*1000 + ((uint64_t)session->lastPacket.tv_usec)/1000,
-                        timediff,
-                        session->ipProtocol);
-        BSB_EXPORT_sprintf(jbsb,
-                "\"@timestamp\":%" PRIu64 ",",
-                ((uint64_t)currentTime.tv_sec)*1000 + ((uint64_t)currentTime.tv_usec)/1000);
     }
-    else
-    {
-        dataPtr = BSB_WORK_PTR(jbsb);
 
-        BSB_EXPORT_sprintf(jbsb,
-                        "{\"firstPacket\":%" PRIu64 ","
-                        "\"lastPacket\":%" PRIu64 ","
-                        "\"length\":%u,"
-                        "\"ipProtocol\":%u,",
-                        ((uint64_t)session->firstPacket.tv_sec)*1000 + ((uint64_t)session->firstPacket.tv_usec)/1000,
-                        ((uint64_t)session->lastPacket.tv_sec)*1000 + ((uint64_t)session->lastPacket.tv_usec)/1000,
-                        timediff,
-                        session->ipProtocol);
-        
-        BSB_EXPORT_sprintf(jbsb,
-                        "\"arkime\": {"
-                        "\"index\": \"%ssessions3-%s\","
-                        "\"id\": \"%s\","
-                        "\"timestamp\":%" PRIu64
-                        "},",
-                        config.prefix,
-                        dbInfo[thread].prefix,
-                        id,
-                        ((uint64_t)currentTime.tv_sec)*1000 + ((uint64_t)currentTime.tv_usec)/1000
-                        );
+    if (session->firstPacket.tv_sec < 10) {
+        session->firstPacket.tv_sec += 10;
+        session->lastPacket.tv_sec += 10;
+    } else if (session->lastPacket.tv_sec < 10) {
+        session->lastPacket.tv_sec += 10;
     }
+
+    dataPtr = BSB_WORK_PTR(jbsb);
+
+    BSB_EXPORT_sprintf(jbsb,
+                    "{\"firstPacket\":%" PRIu64 ","
+                    "\"lastPacket\":%" PRIu64 ","
+                    "\"length\":%u,"
+                    "\"ipProtocol\":%u,",
+                    ((uint64_t)session->firstPacket.tv_sec) * 1000 + ((uint64_t)session->firstPacket.tv_usec) / 1000,
+                    ((uint64_t)session->lastPacket.tv_sec) * 1000 + ((uint64_t)session->lastPacket.tv_usec) / 1000,
+                    timediff,
+                    session->ipProtocol);
+
+    BSB_EXPORT_sprintf(jbsb,
+                    "\"arkime\": {"
+                    "\"index\": \"%ssessions3-%s\","
+                    "\"id\": \"%s\","
+                    "\"timestamp\":%" PRIu64
+                    "},",
+                    config.prefix,
+                    dbInfo[thread].prefix,
+                    id,
+                    ((uint64_t)currentTime.tv_sec)*1000 + ((uint64_t)currentTime.tv_usec)/1000
+                    );
+
     // WatchTek CustomField
     if (config.hostIp)
     {
@@ -694,19 +786,19 @@ void moloch_db_save_session(MolochSession_t *session, int final)
                            "\"srcZero\":%d,"
                            "\"dstZero\":%d"
                            "},",
-                           session->tcpFlagCnt[MOLOCH_TCPFLAG_SYN],
-                           session->tcpFlagCnt[MOLOCH_TCPFLAG_SYN_ACK],
-                           session->tcpFlagCnt[MOLOCH_TCPFLAG_ACK],
-                           session->tcpFlagCnt[MOLOCH_TCPFLAG_PSH],
-                           session->tcpFlagCnt[MOLOCH_TCPFLAG_FIN],
-                           session->tcpFlagCnt[MOLOCH_TCPFLAG_RST],
-                           session->tcpFlagCnt[MOLOCH_TCPFLAG_URG],
-                           session->tcpFlagCnt[MOLOCH_TCPFLAG_SRC_ZERO],
-                           session->tcpFlagCnt[MOLOCH_TCPFLAG_DST_ZERO]
-                           );
+                           session->tcpFlagCnt[ARKIME_TCPFLAG_SYN],
+                           session->tcpFlagCnt[ARKIME_TCPFLAG_SYN_ACK],
+                           session->tcpFlagCnt[ARKIME_TCPFLAG_ACK],
+                           session->tcpFlagCnt[ARKIME_TCPFLAG_PSH],
+                           session->tcpFlagCnt[ARKIME_TCPFLAG_FIN],
+                           session->tcpFlagCnt[ARKIME_TCPFLAG_RST],
+                           session->tcpFlagCnt[ARKIME_TCPFLAG_URG],
+                           session->tcpFlagCnt[ARKIME_TCPFLAG_SRC_ZERO],
+                           session->tcpFlagCnt[ARKIME_TCPFLAG_DST_ZERO]
+                          );
 
         if (session->synTime && session->ackTime) {
-            BSB_EXPORT_sprintf(jbsb, "\"initRTT\":%u,", ((session->ackTime - session->synTime)/2000));
+            BSB_EXPORT_sprintf(jbsb, "\"initRTT\":%u,", ((session->ackTime - session->synTime) / 2000));
         }
 
     }
@@ -714,7 +806,7 @@ void moloch_db_save_session(MolochSession_t *session, int final)
     if (session->firstBytesLen[0] > 0) {
         BSB_EXPORT_cstr(jbsb, "\"srcPayload8\":\"");
         for (i = 0; i < session->firstBytesLen[0]; i++) {
-            BSB_EXPORT_ptr(jbsb, moloch_char_to_hexstr[(unsigned char)session->firstBytes[0][i]], 2);
+            BSB_EXPORT_ptr(jbsb, arkime_char_to_hexstr[(uint8_t)session->firstBytes[0][i]], 2);
         }
         BSB_EXPORT_cstr(jbsb, "\",");
     }
@@ -722,16 +814,16 @@ void moloch_db_save_session(MolochSession_t *session, int final)
     if (session->firstBytesLen[1] > 0) {
         BSB_EXPORT_cstr(jbsb, "\"dstPayload8\":\"");
         for (i = 0; i < session->firstBytesLen[1]; i++) {
-            BSB_EXPORT_ptr(jbsb, moloch_char_to_hexstr[(unsigned char)session->firstBytes[1][i]], 2);
+            BSB_EXPORT_ptr(jbsb, arkime_char_to_hexstr[(uint8_t)session->firstBytes[1][i]], 2);
         }
         BSB_EXPORT_cstr(jbsb, "\",");
     }
 
     if (session->ipProtocol) {
         if (IN6_IS_ADDR_V4MAPPED(&session->addr1)) {
-            uint32_t ip = MOLOCH_V6_TO_V4(session->addr1);
+            uint32_t ip = ARKIME_V6_TO_V4(session->addr1);
             snprintf(ipsrc, sizeof(ipsrc), "%u.%u.%u.%u", ip & 0xff, (ip >> 8) & 0xff, (ip >> 16) & 0xff, (ip >> 24) & 0xff);
-            ip = MOLOCH_V6_TO_V4(session->addr2);
+            ip = ARKIME_V6_TO_V4(session->addr2);
             snprintf(ipdst, sizeof(ipdst), "%u.%u.%u.%u", ip & 0xff, (ip >> 8) & 0xff, (ip >> 16) & 0xff, (ip >> 24) & 0xff);
         } else {
             inet_ntop(AF_INET6, &session->addr1, ipsrc, sizeof(ipsrc));
@@ -742,18 +834,18 @@ void moloch_db_save_session(MolochSession_t *session, int final)
         uint32_t asNum1, asNum2;
         int asLen1, asLen2;
 
-        moloch_db_geo_lookup6(session, session->addr1, &g1, &asNum1, &asStr1, &asLen1, &rir1);
-        moloch_db_geo_lookup6(session, session->addr2, &g2, &asNum2, &asStr2, &asLen2, &rir2);
+        arkime_db_geo_lookup6(session, session->addr1, &g1, &asNum1, &asStr1, &asLen1, &rir1);
+        arkime_db_geo_lookup6(session, session->addr2, &g2, &asNum2, &asStr2, &asLen2, &rir2);
 
         BSB_EXPORT_sprintf(jbsb,
-                          "\"source\":{\"ip\":\"%s\","
-                          "\"port\":%d,"
-                          "\"bytes\":%" PRIu64 ","
-                          "\"packets\":%u,",
-                          ipsrc,
-                          session->port1,
-                          session->bytes[0],
-                          session->packets[0]);
+                           "\"source\":{\"ip\":\"%s\","
+                           "\"port\":%d,"
+                           "\"bytes\":%" PRIu64 ","
+                           "\"packets\":%u,",
+                           ipsrc,
+                           session->port1,
+                           session->bytes[0],
+                           session->packets[0]);
 
         if (g1) {
             BSB_EXPORT_sprintf(jbsb, "\"geo\":{\"country_iso_code\":\"%2.2s\"},", g1);
@@ -761,28 +853,28 @@ void moloch_db_save_session(MolochSession_t *session, int final)
 
         if (asStr1) {
             BSB_EXPORT_sprintf(jbsb, "\"as\":{\"number\":%u,\"full\":\"AS%u ", asNum1, asNum1);
-            moloch_db_js0n_str_unquoted(&jbsb, (unsigned char*)asStr1, asLen1, TRUE);
+            arkime_db_js0n_str_unquoted(&jbsb, (uint8_t *)asStr1, asLen1, TRUE);
             BSB_EXPORT_cstr(jbsb, "\",\"organization\":{\"name\":\"");
-            moloch_db_js0n_str_unquoted(&jbsb, (unsigned char*)asStr1, asLen1, TRUE);
+            arkime_db_js0n_str_unquoted(&jbsb, (uint8_t *)asStr1, asLen1, TRUE);
             BSB_EXPORT_cstr(jbsb, "\"}},");
         }
 
         if (session->fields[mac1Field]) {
-            SAVE_FIELD_STR_HASH(mac1Field, MOLOCH_FIELD_FLAG_ECS_CNT);
+            SAVE_FIELD_STR_HASH(mac1Field, ARKIME_FIELD_FLAG_ECS_CNT);
         }
 
         BSB_EXPORT_rewind(jbsb, 1); // Remove last comma
         BSB_EXPORT_cstr(jbsb, "},"); // Close source
 
         BSB_EXPORT_sprintf(jbsb,
-                          "\"destination\":{\"ip\":\"%s\","
-                          "\"port\":%d,"
-                          "\"bytes\":%" PRIu64 ","
-                          "\"packets\":%u,",
-                          ipdst,
-                          session->port2,
-                          session->bytes[1],
-                          session->packets[1]);
+                           "\"destination\":{\"ip\":\"%s\","
+                           "\"port\":%d,"
+                           "\"bytes\":%" PRIu64 ","
+                           "\"packets\":%u,",
+                           ipdst,
+                           session->port2,
+                           session->bytes[1],
+                           session->packets[1]);
 
         if (g2) {
             BSB_EXPORT_sprintf(jbsb, "\"geo\":{\"country_iso_code\":\"%2.2s\"},", g2);
@@ -790,14 +882,14 @@ void moloch_db_save_session(MolochSession_t *session, int final)
 
         if (asStr2) {
             BSB_EXPORT_sprintf(jbsb, "\"as\":{\"number\":%u,\"full\":\"AS%u ", asNum2, asNum2);
-            moloch_db_js0n_str_unquoted(&jbsb, (unsigned char*)asStr2, asLen2, TRUE);
+            arkime_db_js0n_str_unquoted(&jbsb, (uint8_t *)asStr2, asLen2, TRUE);
             BSB_EXPORT_cstr(jbsb, "\",\"organization\":{\"name\":\"");
-            moloch_db_js0n_str_unquoted(&jbsb, (unsigned char*)asStr2, asLen2, TRUE);
+            arkime_db_js0n_str_unquoted(&jbsb, (uint8_t *)asStr2, asLen2, TRUE);
             BSB_EXPORT_cstr(jbsb, "\"}},");
         }
 
         if (session->fields[mac2Field]) {
-            SAVE_FIELD_STR_HASH(mac2Field, MOLOCH_FIELD_FLAG_ECS_CNT);
+            SAVE_FIELD_STR_HASH(mac2Field, ARKIME_FIELD_FLAG_ECS_CNT);
         }
 
         BSB_EXPORT_rewind(jbsb, 1); // Remove last comma
@@ -810,28 +902,28 @@ void moloch_db_save_session(MolochSession_t *session, int final)
             BSB_EXPORT_sprintf(jbsb, "\"dstRIR\":\"%s\",", rir2);
     } else {/* ipProtocol */
         BSB_EXPORT_sprintf(jbsb,
-                          "\"source\":{"
-                          "\"bytes\":%" PRIu64 ","
-                          "\"packets\":%u,",
-                          session->bytes[0],
-                          session->packets[0]);
+                           "\"source\":{"
+                           "\"bytes\":%" PRIu64 ","
+                           "\"packets\":%u,",
+                           session->bytes[0],
+                           session->packets[0]);
 
         if (session->fields[mac1Field]) {
-            SAVE_FIELD_STR_HASH(mac1Field, MOLOCH_FIELD_FLAG_ECS_CNT);
+            SAVE_FIELD_STR_HASH(mac1Field, ARKIME_FIELD_FLAG_ECS_CNT);
         }
 
         BSB_EXPORT_rewind(jbsb, 1); // Remove last comma
         BSB_EXPORT_cstr(jbsb, "},"); // Close source
 
         BSB_EXPORT_sprintf(jbsb,
-                          "\"destination\":{"
-                          "\"bytes\":%" PRIu64 ","
-                          "\"packets\":%u,",
-                          session->bytes[1],
-                          session->packets[1]);
+                           "\"destination\":{"
+                           "\"bytes\":%" PRIu64 ","
+                           "\"packets\":%u,",
+                           session->bytes[1],
+                           session->packets[1]);
 
         if (session->fields[mac2Field]) {
-            SAVE_FIELD_STR_HASH(mac2Field, MOLOCH_FIELD_FLAG_ECS_CNT);
+            SAVE_FIELD_STR_HASH(mac2Field, ARKIME_FIELD_FLAG_ECS_CNT);
         }
 
         BSB_EXPORT_rewind(jbsb, 1); // Remove last comma
@@ -839,14 +931,18 @@ void moloch_db_save_session(MolochSession_t *session, int final)
     }
 
     BSB_EXPORT_sprintf(jbsb,
-                      "\"network\":{\"packets\":%u,"
-                      "\"bytes\":%" PRIu64,
-                      session->packets[0] + session->packets[1],
-                      session->bytes[0] + session->bytes[1]);
+                       "\"network\":{\"packets\":%u,"
+                       "\"bytes\":%" PRIu64,
+                       session->packets[0] + session->packets[1],
+                       session->bytes[0] + session->bytes[1]);
 
     // Currently don't do communityId for ICMP because it requires magic
-    if (session->ses != SESSION_ICMP && session->ses != SESSION_OTHER) {
-        char *communityId = moloch_db_community_id(session);
+    if (session->ses == SESSION_ICMP) {
+        char *communityId = arkime_db_community_id_icmp(session);
+        BSB_EXPORT_sprintf(jbsb, ",\"community_id\":\"1:%s\"", communityId);
+        g_free(communityId);
+    } else if (session->ses != SESSION_OTHER) {
+        char *communityId = arkime_db_community_id(session);
         BSB_EXPORT_sprintf(jbsb, ",\"community_id\":\"1:%s\"", communityId);
         g_free(communityId);
     }
@@ -868,17 +964,17 @@ void moloch_db_save_session(MolochSession_t *session, int final)
 
 
     BSB_EXPORT_sprintf(jbsb, "\"client\":{\"bytes\":%" PRIu64 "},",
-                      session->databytes[0]);
+                       session->databytes[0]);
     BSB_EXPORT_sprintf(jbsb, "\"server\":{\"bytes\":%" PRIu64 "},",
-                      session->databytes[1]);
+                       session->databytes[1]);
 
     BSB_EXPORT_sprintf(jbsb,
-                      "\"totDataBytes\":%" PRIu64 ","
-                      "\"segmentCnt\":%u,"
-                      "\"node\":\"%s\",",
-                      session->databytes[0] + session->databytes[1],
-                      session->segments,
-                      config.nodeName);
+                       "\"totDataBytes\":%" PRIu64 ","
+                       "\"segmentCnt\":%u,"
+                       "\"node\":\"%s\",",
+                       session->databytes[0] + session->databytes[1],
+                       session->segments,
+                       config.nodeName);
 
     if (session->rootId) {
         BSB_EXPORT_sprintf(jbsb, "\"rootId\":\"%s\",", session->rootId);
@@ -892,7 +988,7 @@ void moloch_db_save_session(MolochSession_t *session, int final)
          */
         int64_t last = 0;
         int64_t lastgap = 0;
-        for(i = 0; i < session->filePosArray->len; i++) {
+        for (i = 0; i < session->filePosArray->len; i++) {
             if (i != 0)
                 BSB_EXPORT_u08(jbsb, ',');
             int64_t fpos = (int64_t)g_array_index(session->filePosArray, int64_t, i);
@@ -912,7 +1008,7 @@ void moloch_db_save_session(MolochSession_t *session, int final)
         }
     } else {
         // Do NOT remove this, S3 and others use this
-        for(i = 0; i < session->filePosArray->len; i++) {
+        for (i = 0; i < session->filePosArray->len; i++) {
             if (i != 0)
                 BSB_EXPORT_u08(jbsb, ',');
             BSB_EXPORT_sprintf(jbsb, "%" PRId64, (int64_t)g_array_index(session->filePosArray, int64_t, i));
@@ -922,7 +1018,7 @@ void moloch_db_save_session(MolochSession_t *session, int final)
 
     if (config.enablePacketLen) {
         BSB_EXPORT_cstr(jbsb, "\"packetLen\":[");
-        for(i = 0; i < session->fileLenArray->len; i++) {
+        for (i = 0; i < session->fileLenArray->len; i++) {
             if (i != 0)
                 BSB_EXPORT_u08(jbsb, ',');
             BSB_EXPORT_sprintf(jbsb, "%u", (uint16_t)g_array_index(session->fileLenArray, uint16_t, i));
@@ -939,8 +1035,12 @@ void moloch_db_save_session(MolochSession_t *session, int final)
     }
     BSB_EXPORT_cstr(jbsb, "],");
 
-    if (ecsEventProvider) {
+    if (ecsEventProvider && ecsEventDataset) {
+        BSB_EXPORT_sprintf(jbsb, "\"event\":{\"provider\":\"%s\", \"dataset\":\"%s\"},", ecsEventProvider, ecsEventDataset);
+    } else if (ecsEventProvider) {
         BSB_EXPORT_sprintf(jbsb, "\"event\":{\"provider\":\"%s\"},", ecsEventProvider);
+    } else if (ecsEventDataset) {
+        BSB_EXPORT_sprintf(jbsb, "\"event\":{\"dataset\":\"%s\"},", ecsEventDataset);
     }
 
     int inGroupNum = 0;
@@ -950,10 +1050,10 @@ void moloch_db_save_session(MolochSession_t *session, int final)
             continue;
 
         const int flags = config.fields[pos]->flags;
-        if (flags & (MOLOCH_FIELD_FLAG_DISABLED | MOLOCH_FIELD_FLAG_NOSAVE))
+        if (flags & (ARKIME_FIELD_FLAG_DISABLED | ARKIME_FIELD_FLAG_NOSAVE))
             continue;
 
-        const int freeField = final || ((flags & MOLOCH_FIELD_FLAG_LINKED_SESSIONS) == 0);
+        const int freeField = final || ((flags & ARKIME_FIELD_FLAG_LINKED_SESSIONS) == 0);
 
         if (inGroupNum != config.fields[pos]->dbGroupNum) {
             if (inGroupNum != 0) {
@@ -967,31 +1067,31 @@ void moloch_db_save_session(MolochSession_t *session, int final)
             }
         }
 
-        switch(config.fields[pos]->type) {
-        case MOLOCH_FIELD_TYPE_INT:
+        switch (config.fields[pos]->type) {
+        case ARKIME_FIELD_TYPE_INT:
             BSB_EXPORT_sprintf(jbsb, "\"%s\":%d", config.fields[pos]->dbField, session->fields[pos]->i);
             BSB_EXPORT_u08(jbsb, ',');
             break;
-        case MOLOCH_FIELD_TYPE_STR:
+        case ARKIME_FIELD_TYPE_STR:
             BSB_EXPORT_sprintf(jbsb, "\"%s\":", config.fields[pos]->dbField);
-            moloch_db_js0n_str(&jbsb,
-                               (unsigned char *)session->fields[pos]->str,
-                               flags & MOLOCH_FIELD_FLAG_FORCE_UTF8);
+            arkime_db_js0n_str(&jbsb,
+                               (uint8_t *)session->fields[pos]->str,
+                               flags & ARKIME_FIELD_FLAG_FORCE_UTF8);
             BSB_EXPORT_u08(jbsb, ',');
             if (freeField) {
                 g_free(session->fields[pos]->str);
             }
             break;
-        case MOLOCH_FIELD_TYPE_FLOAT:
+        case ARKIME_FIELD_TYPE_FLOAT:
             BSB_EXPORT_sprintf(jbsb, "\"%s\":%f", config.fields[pos]->dbField, session->fields[pos]->f);
             BSB_EXPORT_u08(jbsb, ',');
             break;
-        case MOLOCH_FIELD_TYPE_INT_ARRAY:
-            if (flags & MOLOCH_FIELD_FLAG_CNT) {
+        case ARKIME_FIELD_TYPE_INT_ARRAY:
+            if (flags & ARKIME_FIELD_FLAG_CNT) {
                 BSB_EXPORT_sprintf(jbsb, "\"%sCnt\":%u,", config.fields[pos]->dbField, session->fields[pos]->iarray->len);
             }
             BSB_EXPORT_sprintf(jbsb, "\"%s\":[", config.fields[pos]->dbField);
-            for(i = 0; i < session->fields[pos]->iarray->len; i++) {
+            for (i = 0; i < session->fields[pos]->iarray->len; i++) {
                 BSB_EXPORT_sprintf(jbsb, "%u", g_array_index(session->fields[pos]->iarray, uint32_t, i));
                 BSB_EXPORT_u08(jbsb, ',');
             }
@@ -1001,15 +1101,15 @@ void moloch_db_save_session(MolochSession_t *session, int final)
                 g_array_free(session->fields[pos]->iarray, TRUE);
             }
             break;
-        case MOLOCH_FIELD_TYPE_STR_ARRAY:
-            if (flags & MOLOCH_FIELD_FLAG_CNT) {
+        case ARKIME_FIELD_TYPE_STR_ARRAY:
+            if (flags & ARKIME_FIELD_FLAG_CNT) {
                 BSB_EXPORT_sprintf(jbsb, "\"%sCnt\":%u,", config.fields[pos]->dbField, session->fields[pos]->sarray->len);
             }
             BSB_EXPORT_sprintf(jbsb, "\"%s\":[", config.fields[pos]->dbField);
-            for(i = 0; i < session->fields[pos]->sarray->len; i++) {
-                moloch_db_js0n_str(&jbsb,
+            for (i = 0; i < session->fields[pos]->sarray->len; i++) {
+                arkime_db_js0n_str(&jbsb,
                                    g_ptr_array_index(session->fields[pos]->sarray, i),
-                                   flags & MOLOCH_FIELD_FLAG_FORCE_UTF8);
+                                   flags & ARKIME_FIELD_FLAG_FORCE_UTF8);
                 BSB_EXPORT_u08(jbsb, ',');
             }
             BSB_EXPORT_rewind(jbsb, 1); // Remove last comma
@@ -1018,25 +1118,25 @@ void moloch_db_save_session(MolochSession_t *session, int final)
                 g_ptr_array_free(session->fields[pos]->sarray, TRUE);
             }
             break;
-        case MOLOCH_FIELD_TYPE_STR_HASH:
+        case ARKIME_FIELD_TYPE_STR_HASH:
             SAVE_FIELD_STR_HASH(pos, flags);
             if (freeField) {
-                HASH_FORALL_POP_HEAD(s_, *shash, hstring,
+                HASH_FORALL_POP_HEAD2(s_, *shash, hstring) {
                     g_free(hstring->str);
-                    MOLOCH_TYPE_FREE(MolochString_t, hstring);
-                );
-                MOLOCH_TYPE_FREE(MolochStringHashStd_t, shash);
+                    ARKIME_TYPE_FREE(ArkimeString_t, hstring);
+                }
+                ARKIME_TYPE_FREE(ArkimeStringHashStd_t, shash);
             }
             break;
-        case MOLOCH_FIELD_TYPE_STR_GHASH:
+        case ARKIME_FIELD_TYPE_STR_GHASH:
             ghash = session->fields[pos]->ghash;
-            if (flags & MOLOCH_FIELD_FLAG_CNT) {
+            if (flags & ARKIME_FIELD_FLAG_CNT) {
                 BSB_EXPORT_sprintf(jbsb, "\"%sCnt\":%u,", config.fields[pos]->dbField, g_hash_table_size(ghash));
             }
             BSB_EXPORT_sprintf(jbsb, "\"%s\":[", config.fields[pos]->dbField);
             g_hash_table_iter_init (&iter, ghash);
             while (g_hash_table_iter_next (&iter, &ikey, NULL)) {
-                moloch_db_js0n_str(&jbsb, ikey, flags & MOLOCH_FIELD_FLAG_FORCE_UTF8);
+                arkime_db_js0n_str(&jbsb, ikey, flags & ARKIME_FIELD_FLAG_FORCE_UTF8);
                 BSB_EXPORT_u08(jbsb, ',');
             }
 
@@ -1046,28 +1146,28 @@ void moloch_db_save_session(MolochSession_t *session, int final)
             BSB_EXPORT_rewind(jbsb, 1); // Remove last comma
             BSB_EXPORT_cstr(jbsb, "],");
             break;
-        case MOLOCH_FIELD_TYPE_INT_HASH:
+        case ARKIME_FIELD_TYPE_INT_HASH:
             ihash = session->fields[pos]->ihash;
-            if (flags & MOLOCH_FIELD_FLAG_CNT) {
+            if (flags & ARKIME_FIELD_FLAG_CNT) {
                 BSB_EXPORT_sprintf(jbsb, "\"%sCnt\":%d,", config.fields[pos]->dbField, HASH_COUNT(i_, *ihash));
             }
             BSB_EXPORT_sprintf(jbsb, "\"%s\":[", config.fields[pos]->dbField);
-            HASH_FORALL(i_, *ihash, hint,
+            HASH_FORALL2(i_, *ihash, hint) {
                 BSB_EXPORT_sprintf(jbsb, "%u", hint->i_hash);
                 BSB_EXPORT_u08(jbsb, ',');
-            );
+            }
             if (freeField) {
-                HASH_FORALL_POP_HEAD(i_, *ihash, hint,
-                    MOLOCH_TYPE_FREE(MolochInt_t, hint);
-                );
-                MOLOCH_TYPE_FREE(MolochIntHashStd_t, ihash);
+                HASH_FORALL_POP_HEAD2(i_, *ihash, hint) {
+                    ARKIME_TYPE_FREE(ArkimeInt_t, hint);
+                }
+                ARKIME_TYPE_FREE(ArkimeIntHashStd_t, ihash);
             }
             BSB_EXPORT_rewind(jbsb, 1); // Remove last comma
             BSB_EXPORT_cstr(jbsb, "],");
             break;
-        case MOLOCH_FIELD_TYPE_INT_GHASH:
+        case ARKIME_FIELD_TYPE_INT_GHASH:
             ghash = session->fields[pos]->ghash;
-            if (flags & MOLOCH_FIELD_FLAG_CNT) {
+            if (flags & ARKIME_FIELD_FLAG_CNT) {
                 BSB_EXPORT_sprintf(jbsb, "\"%sCnt\":%u,", config.fields[pos]->dbField, g_hash_table_size(ghash));
             }
             BSB_EXPORT_sprintf(jbsb, "\"%s\":[", config.fields[pos]->dbField);
@@ -1083,12 +1183,12 @@ void moloch_db_save_session(MolochSession_t *session, int final)
             BSB_EXPORT_rewind(jbsb, 1); // Remove last comma
             BSB_EXPORT_cstr(jbsb, "],");
             break;
-        case MOLOCH_FIELD_TYPE_FLOAT_ARRAY:
-            if (flags & MOLOCH_FIELD_FLAG_CNT) {
+        case ARKIME_FIELD_TYPE_FLOAT_ARRAY:
+            if (flags & ARKIME_FIELD_FLAG_CNT) {
                 BSB_EXPORT_sprintf(jbsb, "\"%sCnt\":%u,", config.fields[pos]->dbField, session->fields[pos]->farray->len);
             }
             BSB_EXPORT_sprintf(jbsb, "\"%s\":[", config.fields[pos]->dbField);
-            for(i = 0; i < session->fields[pos]->farray->len; i++) {
+            for (i = 0; i < session->fields[pos]->farray->len; i++) {
                 BSB_EXPORT_sprintf(jbsb, "%f", g_array_index(session->fields[pos]->farray, float, i));
                 BSB_EXPORT_u08(jbsb, ',');
             }
@@ -1098,9 +1198,9 @@ void moloch_db_save_session(MolochSession_t *session, int final)
                 g_array_free(session->fields[pos]->farray, TRUE);
             }
             break;
-        case MOLOCH_FIELD_TYPE_FLOAT_GHASH:
+        case ARKIME_FIELD_TYPE_FLOAT_GHASH:
             ghash = session->fields[pos]->ghash;
-            if (flags & MOLOCH_FIELD_FLAG_CNT) {
+            if (flags & ARKIME_FIELD_FLAG_CNT) {
                 BSB_EXPORT_sprintf(jbsb, "\"%sCnt\":%u,", config.fields[pos]->dbField, g_hash_table_size(ghash));
             }
             BSB_EXPORT_sprintf(jbsb, "\"%s\":[", config.fields[pos]->dbField);
@@ -1116,7 +1216,7 @@ void moloch_db_save_session(MolochSession_t *session, int final)
             BSB_EXPORT_rewind(jbsb, 1); // Remove last comma
             BSB_EXPORT_cstr(jbsb, "],");
             break;
-        case MOLOCH_FIELD_TYPE_IP: {
+        case ARKIME_FIELD_TYPE_IP: {
             uint32_t              asNum;
             char                 *asStr;
             int                   asLen;
@@ -1124,31 +1224,31 @@ void moloch_db_save_session(MolochSession_t *session, int final)
             char                 *rir;
 
             ikey = session->fields[pos]->ip;
-            moloch_db_geo_lookup6(session, *(struct in6_addr *)ikey, &g, &asNum, &asStr, &asLen, &rir);
+            arkime_db_geo_lookup6(session, *(struct in6_addr *)ikey, &g, &asNum, &asStr, &asLen, &rir);
             if (g) {
-                BSB_EXPORT_sprintf(jbsb, "\"%.*sGEO\":\"%2.2s\",", config.fields[pos]->dbFieldLen-2, config.fields[pos]->dbField, g);
+                BSB_EXPORT_sprintf(jbsb, "\"%.*sGEO\":\"%2.2s\",", config.fields[pos]->dbFieldLen - 2, config.fields[pos]->dbField, g);
             }
 
             if (asStr) {
-                BSB_EXPORT_sprintf(jbsb, "\"%.*sASN\":\"AS%u ", config.fields[pos]->dbFieldLen-2, config.fields[pos]->dbField, asNum);
-                moloch_db_js0n_str_unquoted(&jbsb, (unsigned char*)asStr, asLen, TRUE);
+                BSB_EXPORT_sprintf(jbsb, "\"%.*sASN\":\"AS%u ", config.fields[pos]->dbFieldLen - 2, config.fields[pos]->dbField, asNum);
+                arkime_db_js0n_str_unquoted(&jbsb, (uint8_t *)asStr, asLen, TRUE);
                 BSB_EXPORT_cstr(jbsb, "\",");
             }
 
             /*if (asStr) {
                 BSB_EXPORT_sprintf(jbsb, "\"as\":{\"number\":%u,\"full\":\"AS%u ", asNum, asNum);
-                moloch_db_js0n_str_unquoted(&jbsb, (unsigned char*)asStr, asLen, TRUE);
+                arkime_db_js0n_str_unquoted(&jbsb, (uint8_t *)asStr, asLen, TRUE);
                 BSB_EXPORT_cstr(jbsb, "\",\"organization\":{\"name\":\"");
-                moloch_db_js0n_str_unquoted(&jbsb, (unsigned char*)asStr, asLen, TRUE);
+                arkime_db_js0n_str_unquoted(&jbsb, (uint8_t *)asStr, asLen, TRUE);
                 BSB_EXPORT_cstr(jbsb, "\"}},");
             }*/
 
             if (rir) {
-                BSB_EXPORT_sprintf(jbsb, "\"%.*sRIR\":\"%s\",", config.fields[pos]->dbFieldLen-2, config.fields[pos]->dbField, rir);
+                BSB_EXPORT_sprintf(jbsb, "\"%.*sRIR\":\"%s\",", config.fields[pos]->dbFieldLen - 2, config.fields[pos]->dbField, rir);
             }
 
             if (IN6_IS_ADDR_V4MAPPED((struct in6_addr *)ikey)) {
-                uint32_t ip = MOLOCH_V6_TO_V4(*(struct in6_addr *)ikey);
+                uint32_t ip = ARKIME_V6_TO_V4(*(struct in6_addr *)ikey);
                 snprintf(ipsrc, sizeof(ipsrc), "%u.%u.%u.%u", ip & 0xff, (ip >> 8) & 0xff, (ip >> 16) & 0xff, (ip >> 24) & 0xff);
             } else {
                 inet_ntop(AF_INET6, ikey, ipsrc, sizeof(ipsrc));
@@ -1158,11 +1258,11 @@ void moloch_db_save_session(MolochSession_t *session, int final)
             if (freeField) {
                 g_free(session->fields[pos]->ip);
             }
-            }
-            break;
-        case MOLOCH_FIELD_TYPE_IP_GHASH: {
+        }
+        break;
+        case ARKIME_FIELD_TYPE_IP_GHASH: {
             ghash = session->fields[pos]->ghash;
-            if (flags & MOLOCH_FIELD_FLAG_CNT) {
+            if (flags & ARKIME_FIELD_FLAG_CNT) {
                 BSB_EXPORT_sprintf(jbsb, "\"%sCnt\":%u,", config.fields[pos]->dbField, g_hash_table_size(ghash));
             }
 
@@ -1176,13 +1276,13 @@ void moloch_db_save_session(MolochSession_t *session, int final)
             BSB_EXPORT_sprintf(jbsb, "\"%s\":[", config.fields[pos]->dbField);
             g_hash_table_iter_init (&iter, ghash);
             while (g_hash_table_iter_next (&iter, &ikey, NULL)) {
-                moloch_db_geo_lookup6(session, *(struct in6_addr *)ikey, &g[cnt], &asNum[cnt], &asStr[cnt], &asLen[cnt], &rir[cnt]);
+                arkime_db_geo_lookup6(session, *(struct in6_addr *)ikey, &g[cnt], &asNum[cnt], &asStr[cnt], &asLen[cnt], &rir[cnt]);
                 cnt++;
                 if (cnt >= MAX_IPS)
                     break;
 
                 if (IN6_IS_ADDR_V4MAPPED((struct in6_addr *)ikey)) {
-                    uint32_t ip = MOLOCH_V6_TO_V4(*(struct in6_addr *)ikey);
+                    uint32_t ip = ARKIME_V6_TO_V4(*(struct in6_addr *)ikey);
                     snprintf(ipsrc, sizeof(ipsrc), "%u.%u.%u.%u", ip & 0xff, (ip >> 8) & 0xff, (ip >> 16) & 0xff, (ip >> 24) & 0xff);
                 } else {
                     inet_ntop(AF_INET6, ikey, ipsrc, sizeof(ipsrc));
@@ -1193,7 +1293,7 @@ void moloch_db_save_session(MolochSession_t *session, int final)
             BSB_EXPORT_rewind(jbsb, 1); // Remove last comma
             BSB_EXPORT_cstr(jbsb, "],");
 
-            BSB_EXPORT_sprintf(jbsb, "\"%.*sGEO\":[", config.fields[pos]->dbFieldLen-2, config.fields[pos]->dbField);
+            BSB_EXPORT_sprintf(jbsb, "\"%.*sGEO\":[", config.fields[pos]->dbFieldLen - 2, config.fields[pos]->dbField);
             for (i = 0; i < cnt; i++) {
                 if (g[i]) {
                     BSB_EXPORT_sprintf(jbsb, "\"%2.2s\",", g[i]);
@@ -1204,11 +1304,11 @@ void moloch_db_save_session(MolochSession_t *session, int final)
             BSB_EXPORT_rewind(jbsb, 1); // Remove last comma
             BSB_EXPORT_cstr(jbsb, "],");
 
-            BSB_EXPORT_sprintf(jbsb, "\"%.*sASN\":[", config.fields[pos]->dbFieldLen-2, config.fields[pos]->dbField);
+            BSB_EXPORT_sprintf(jbsb, "\"%.*sASN\":[", config.fields[pos]->dbFieldLen - 2, config.fields[pos]->dbField);
             for (i = 0; i < cnt; i++) {
                 if (asStr[i]) {
                     BSB_EXPORT_sprintf(jbsb, "\"AS%u ", asNum[i]);
-                    moloch_db_js0n_str_unquoted(&jbsb, (unsigned char*)asStr[i], asLen[i], TRUE);
+                    arkime_db_js0n_str_unquoted(&jbsb, (uint8_t *)asStr[i], asLen[i], TRUE);
                     BSB_EXPORT_cstr(jbsb, "\",");
 
                 } else {
@@ -1218,7 +1318,7 @@ void moloch_db_save_session(MolochSession_t *session, int final)
             BSB_EXPORT_rewind(jbsb, 1); // Remove last comma
             BSB_EXPORT_cstr(jbsb, "],");
 
-            BSB_EXPORT_sprintf(jbsb, "\"%.*sRIR\":[", config.fields[pos]->dbFieldLen-2, config.fields[pos]->dbField);
+            BSB_EXPORT_sprintf(jbsb, "\"%.*sRIR\":[", config.fields[pos]->dbFieldLen - 2, config.fields[pos]->dbField);
             for (i = 0; i < cnt; i++) {
                 if (rir[i]) {
                     BSB_EXPORT_sprintf(jbsb, "\"%s\",", rir[i]);
@@ -1235,66 +1335,30 @@ void moloch_db_save_session(MolochSession_t *session, int final)
 
             break;
         }
-        case MOLOCH_FIELD_TYPE_CERTSINFO: {
-            MolochCertsInfoHashStd_t *cihash = session->fields[pos]->cihash;
+        case ARKIME_FIELD_TYPE_OBJECT: {
+            ArkimeFieldObjectHashStd_t *ohash = session->fields[pos]->ohash;
+            ArkimeFieldObjectSaveFunc saveCB = config.fields[pos]->object_save;
+            ArkimeFieldObjectFreeFunc freeCB = config.fields[pos]->object_free;
 
-            BSB_EXPORT_sprintf(jbsb, "\"certCnt\":%d,", HASH_COUNT(t_, *cihash));
-            BSB_EXPORT_cstr(jbsb, "\"cert\":[");
+            BSB_EXPORT_sprintf(jbsb, "\"%sCnt\":%d,", config.fields[pos]->dbField, HASH_COUNT(o_, *ohash));
+            BSB_EXPORT_sprintf(jbsb, "\"%s\":[", config.fields[pos]->dbField);
 
-            MolochCertsInfo_t *certs;
-            MolochString_t *string;
+            ArkimeFieldObject_t *object;
 
-            HASH_FORALL_POP_HEAD(t_, *cihash, certs,
-                BSB_EXPORT_u08(jbsb, '{');
-
-                BSB_EXPORT_sprintf(jbsb, "\"hash\":\"%s\",", certs->hash);
-
-                if (certs->publicAlgorithm)
-                    BSB_EXPORT_sprintf(jbsb, "\"publicAlgorithm\":\"%s\",", certs->publicAlgorithm);
-                if (certs->curve)
-                    BSB_EXPORT_sprintf(jbsb, "\"curve\":\"%s\",", certs->curve);
-
-                SAVE_STRING_HEAD(certs->issuer.commonName, "issuerCN");
-                SAVE_STRING_HEAD(certs->issuer.orgName, "issuerON");
-                SAVE_STRING_HEAD(certs->subject.commonName, "subjectCN");
-                SAVE_STRING_HEAD(certs->subject.orgName, "subjectON");
-
-                if (certs->serialNumber) {
-                    int k;
-                    BSB_EXPORT_cstr(jbsb, "\"serial\":\"");
-                    for (k = 0; k < certs->serialNumberLen; k++) {
-                        BSB_EXPORT_sprintf(jbsb, "%02x", certs->serialNumber[k]);
-                    }
-                    BSB_EXPORT_u08(jbsb, '"');
-                    BSB_EXPORT_u08(jbsb, ',');
-                }
-
-                SAVE_STRING_HEAD_CNT(certs->alt, "altCnt");
-                SAVE_STRING_HEAD(certs->alt, "alt");
-
-                BSB_EXPORT_sprintf(jbsb, "\"notBefore\":%" PRId64 ",", certs->notBefore*1000);
-                BSB_EXPORT_sprintf(jbsb, "\"notAfter\":%" PRId64 ",", certs->notAfter*1000);
-                if (certs->notAfter >= certs->notBefore) {
-                    BSB_EXPORT_sprintf(jbsb, "\"validDays\":%" PRId64 ",", ((int64_t)certs->notAfter - certs->notBefore)/(60*60*24));
-                    BSB_EXPORT_sprintf(jbsb, "\"remainingDays\":%" PRId64 ",", ((int64_t)certs->notAfter - currentTime.tv_sec)/(60*60*24));
-                }
-
-                BSB_EXPORT_rewind(jbsb, 1); // Remove last comma
-
-                moloch_field_certsinfo_free(certs);
-                i++;
-
-                BSB_EXPORT_u08(jbsb, '}');
+            HASH_FORALL_POP_HEAD2(o_, *ohash, object) {
+                saveCB(&jbsb, object, session);
+                freeCB(object);
                 BSB_EXPORT_u08(jbsb, ',');
-            );
-            MOLOCH_TYPE_FREE(MolochCertsInfoHashStd_t, cihash);
+            }
+            ARKIME_TYPE_FREE(ArkimeFieldObjectHashStd_t, ohash);
 
             BSB_EXPORT_rewind(jbsb, 1); // Remove last comma
             BSB_EXPORT_cstr(jbsb, "],");
         }
+        break;
         } /* switch */
         if (freeField) {
-            MOLOCH_TYPE_FREE(MolochField_t, session->fields[pos]);
+            ARKIME_TYPE_FREE(ArkimeField_t, session->fields[pos]);
             session->fields[pos] = 0;
         }
     }
@@ -1312,18 +1376,18 @@ void moloch_db_save_session(MolochSession_t *session, int final)
         goto cleanup;
     }
 
-    MOLOCH_THREAD_INCR_NUM(totalSessionBytes, (int)(BSB_WORK_PTR(jbsb)-dataPtr));
+    ARKIME_THREAD_INCR_NUM(totalSessionBytes, (int)(BSB_WORK_PTR(jbsb) - dataPtr));
 
     if (config.dryRun) {
         if (config.tests) {
             static int outputed;
 
-            MOLOCH_LOCK(outputed);
+            ARKIME_LOCK(outputed);
             outputed++;
             const int hlen = dataPtr - startPtr;
-            fprintf(stderr, "  %s{\"header\":%.*s,\n  \"body\":%.*s}\n", (outputed==1 ? "":","), hlen-1, dbInfo[thread].json, (int)(BSB_LENGTH(jbsb)-hlen-1), dbInfo[thread].json+hlen);
+            fprintf(stderr, "  %s{\"header\":%.*s,\n  \"body\":%.*s}\n", (outputed == 1 ? "" : ","), hlen - 1, dbInfo[thread].json, (int)(BSB_LENGTH(jbsb) - hlen - 1), dbInfo[thread].json + hlen);
             fflush(stderr);
-            MOLOCH_UNLOCK(outputed);
+            ARKIME_UNLOCK(outputed);
         } else if (config.debug) {
             LOG("%.*s\n", (int)BSB_LENGTH(jbsb), dbInfo[thread].json);
         }
@@ -1343,10 +1407,11 @@ void moloch_db_save_session(MolochSession_t *session, int final)
     }
 cleanup:
     dbInfo[thread].bsb = jbsb;
-    MOLOCH_UNLOCK(dbInfo[thread].lock);
+    ARKIME_UNLOCK(dbInfo[thread].lock);
 }
 /******************************************************************************/
-LOCAL uint64_t zero_atoll(char *v) {
+LOCAL uint64_t zero_atoll(const char *v)
+{
     if (v)
         return atoll(v);
     return 0;
@@ -1361,33 +1426,33 @@ LOCAL  uint64_t dbTotalSessions[NUMBER_OF_STATS];
 LOCAL  uint64_t dbTotalDropped[NUMBER_OF_STATS];
 
 
-LOCAL void moloch_db_load_stats()
+LOCAL void arkime_db_load_stats()
 {
     size_t             data_len;
     uint32_t           len;
     uint32_t           source_len;
-    unsigned char     *source = 0;
+    const uint8_t     *source = 0;
 
     char     stats_key[200];
     int      stats_key_len = 0;
     stats_key_len = snprintf(stats_key, sizeof(stats_key), "/%sstats/_doc/%s", config.prefix, config.nodeName);
 
-    unsigned char     *data = moloch_http_get(esServer, stats_key, stats_key_len, &data_len);
+    uint8_t           *data = arkime_http_get(esServer, stats_key, stats_key_len, &data_len);
 
     uint32_t           version_len;
-    unsigned char     *version = moloch_js0n_get(data, data_len, "_version", &version_len);
+    const uint8_t     *version = arkime_js0n_get(data, data_len, "_version", &version_len);
 
     if (!version_len || !version) {
         dbVersion = 0;
     } else {
         dbVersion = atol((char *)version);
     }
-    source = moloch_js0n_get(data, data_len, "_source", &source_len);
+    source = arkime_js0n_get(data, data_len, "_source", &source_len);
     if (source) {
-        dbTotalPackets[0]  = zero_atoll((char*)moloch_js0n_get(source, source_len, "totalPackets", &len));
-        dbTotalK[0]        = zero_atoll((char*)moloch_js0n_get(source, source_len, "totalK", &len));
-        dbTotalSessions[0] = dbTotalSessions[2] = zero_atoll((char*)moloch_js0n_get(source, source_len, "totalSessions", &len));
-        dbTotalDropped[0]  = zero_atoll((char*)moloch_js0n_get(source, source_len, "totalDropped", &len));
+        dbTotalPackets[0]  = zero_atoll((char *)arkime_js0n_get(source, source_len, "totalPackets", &len));
+        dbTotalK[0]        = zero_atoll((char *)arkime_js0n_get(source, source_len, "totalK", &len));
+        dbTotalSessions[0] = dbTotalSessions[2] = zero_atoll((char *)arkime_js0n_get(source, source_len, "totalSessions", &len));
+        dbTotalDropped[0]  = zero_atoll((char *)arkime_js0n_get(source, source_len, "totalDropped", &len));
 
         int i;
         for (i = 1; i < NUMBER_OF_STATS; i++) {
@@ -1401,14 +1466,14 @@ LOCAL void moloch_db_load_stats()
 }
 /******************************************************************************/
 #if defined(__APPLE__) && defined(__MACH__)
-LOCAL uint64_t moloch_db_memory_size()
+LOCAL uint64_t arkime_db_memory_size()
 {
     struct rusage usage;
     getrusage(RUSAGE_SELF, &usage);
     return usage.ru_maxrss;
 }
 #elif  defined(__linux__)
-LOCAL uint64_t moloch_db_memory_size()
+LOCAL uint64_t arkime_db_memory_size()
 {
     int fd = open("/proc/self/statm", O_RDONLY, 0);
     if (fd == -1)
@@ -1436,7 +1501,7 @@ LOCAL uint64_t moloch_db_memory_size()
     return getpagesize() * size;
 }
 #else
-LOCAL uint64_t moloch_db_memory_size()
+LOCAL uint64_t arkime_db_memory_size()
 {
     struct rusage usage;
     getrusage(RUSAGE_SELF, &usage);
@@ -1444,18 +1509,18 @@ LOCAL uint64_t moloch_db_memory_size()
 }
 #endif
 /******************************************************************************/
-LOCAL uint64_t moloch_db_memory_max()
+LOCAL uint64_t arkime_db_memory_max()
 {
     return (uint64_t)sysconf (_SC_PHYS_PAGES) * (uint64_t)sysconf (_SC_PAGESIZE);
 }
 
 /******************************************************************************/
-LOCAL uint64_t moloch_db_used_space()
+LOCAL uint64_t arkime_db_used_space()
 {
     if (config.pcapDirTemplate)
         return 0;
 
-    uint64_t   spaceM = 0;
+    uint64_t   spaceB = 0;
     static int nodeNameLen = 0;
 
     if (nodeNameLen == 0) {
@@ -1464,43 +1529,33 @@ LOCAL uint64_t moloch_db_used_space()
 
     int i;
     for (i = 0; config.pcapDir[i]; i++) {
-        GError   *error = NULL;
-        GDir     *dir = g_dir_open(config.pcapDir[i], 0, &error);
-        if (!dir || error) {
-            if (dir)
-                g_dir_close(dir);
-            if (error) {
-                g_error_free(error);
-            }
+        DIR *dir = opendir(config.pcapDir[i]);
+        if (!dir) {
             continue;
         }
+        int dfd = dirfd(dir);
 
-        const gchar *filename;
-        while ((filename = g_dir_read_name(dir))) {
+        struct dirent *entry;
+        while ((entry = readdir(dir))) {
             // Skip hidden files/directories
-            if (filename[0] == '.')
+            if (entry->d_name[0] == '.')
                 continue;
-            int len = strlen(filename);
-            if (len < nodeNameLen + 21 ||
-                filename[nodeNameLen] != '-' ||
-                memcmp(filename, config.nodeName, nodeNameLen) != 0 ||
-                memcmp(filename+nodeNameLen+16, ".pcap", 5) != 0) {
+            int len = strlen(entry->d_name);
+            if (len < nodeNameLen || memcmp(entry->d_name, config.nodeName, nodeNameLen) != 0) {
                 continue;
             }
 
-            gchar *fullfilename = g_build_filename (config.pcapDir[i], filename, NULL);
             struct stat sb;
-            if (stat(fullfilename, &sb) == 0) {
-                spaceM += sb.st_size;
+            if (fstatat(dfd, entry->d_name, &sb, 0) == 0) {
+                spaceB += sb.st_size;
             }
-            g_free(fullfilename);
         }
-        g_dir_close(dir);
+        closedir(dir);
     }
-    return spaceM/(1000*1000);
+    return spaceB / (1000 * 1000);
 }
 /******************************************************************************/
-LOCAL void moloch_db_update_stats(int n, gboolean sync)
+LOCAL void arkime_db_update_stats(int n, gboolean sync)
 {
     static uint64_t       lastPackets[NUMBER_OF_STATS];
     static uint64_t       lastBytes[NUMBER_OF_STATS];
@@ -1515,13 +1570,13 @@ LOCAL void moloch_db_update_stats(int n, gboolean sync)
     static uint64_t       lastDupDropped[NUMBER_OF_STATS];
     static struct rusage  lastUsage[NUMBER_OF_STATS];
     static struct timeval lastTime[NUMBER_OF_STATS];
-    static int            intervals[NUMBER_OF_STATS] = {1, 5, 60, 600};
+    static const int      intervals[NUMBER_OF_STATS] = {1, 5, 60, 600};
     static uint64_t       lastUsedSpaceM = 0;
     uint64_t              freeSpaceM = 0;
     uint64_t              totalSpaceM = 0;
     int                   i;
 
-    char *json = moloch_http_get_buffer(MOLOCH_HTTP_BUFFER_SIZE);
+    char *json = arkime_http_get_buffer(ARKIME_HTTP_BUFFER_SIZE);
     struct timeval currentTime;
 
     gettimeofday(&currentTime, NULL);
@@ -1530,16 +1585,16 @@ LOCAL void moloch_db_update_stats(int n, gboolean sync)
         lastTime[n] = startTime;
     }
 
-    if (n == 0) {
-        lastUsedSpaceM = moloch_db_used_space();
+    if (n == 1 || lastUsedSpaceM == 0) {
+        lastUsedSpaceM = arkime_db_used_space();
     }
 
-    uint64_t overloadDropped = moloch_packet_dropped_overload();
-    uint64_t totalDropped    = moloch_packet_dropped_packets();
-    uint64_t fragsDropped    = moloch_packet_dropped_frags();
-    uint64_t dupDropped      = packetStats[MOLOCH_PACKET_DUPLICATE_DROPPED];
-    uint64_t esDropped       = moloch_http_dropped_count(esServer);
-    uint64_t totalBytes      = moloch_packet_total_bytes();
+    uint64_t overloadDropped = arkime_packet_dropped_overload();
+    uint64_t totalDropped    = arkime_packet_dropped_packets();
+    uint64_t fragsDropped    = arkime_packet_dropped_frags();
+    uint64_t dupDropped      = packetStats[ARKIME_PACKET_DUPLICATE_DROPPED];
+    uint64_t esDropped       = arkime_http_dropped_count(esServer);
+    uint64_t totalBytes      = arkime_packet_total_bytes();
 
     // If totalDropped wrapped we pretend no drops this time
     if (totalDropped < lastDropped[n]) {
@@ -1549,8 +1604,8 @@ LOCAL void moloch_db_update_stats(int n, gboolean sync)
     for (i = 0; config.pcapDir[i]; i++) {
         struct statvfs vfs;
         statvfs(config.pcapDir[i], &vfs);
-        freeSpaceM += (uint64_t)(vfs.f_frsize/1000.0*vfs.f_bavail/1000.0);
-        totalSpaceM += (uint64_t)(vfs.f_frsize/1000.0*vfs.f_blocks/1000.0);
+        freeSpaceM += (uint64_t)((vfs.f_frsize / 1000.0) * (vfs.f_bavail / 1000.0));
+        totalSpaceM += (uint64_t)((vfs.f_frsize / 1000.0) * (vfs.f_blocks / 1000.0));
     }
 
     if (totalSpaceM == 0) {
@@ -1559,7 +1614,7 @@ LOCAL void moloch_db_update_stats(int n, gboolean sync)
     }
 
     const uint64_t cursec = currentTime.tv_sec;
-    uint64_t diffms = (currentTime.tv_sec - lastTime[n].tv_sec)*1000 + (currentTime.tv_usec/1000 - lastTime[n].tv_usec/1000);
+    uint64_t diffms = (currentTime.tv_sec - lastTime[n].tv_sec) * 1000 + (currentTime.tv_usec / 1000 - lastTime[n].tv_usec / 1000);
 
     // Prevent FPE
     if (diffms == 0)
@@ -1568,17 +1623,17 @@ LOCAL void moloch_db_update_stats(int n, gboolean sync)
     struct rusage usage;
     getrusage(RUSAGE_SELF, &usage);
 
-    uint64_t diffusage = (usage.ru_utime.tv_sec - lastUsage[n].ru_utime.tv_sec)*1000 + (usage.ru_utime.tv_usec/1000 - lastUsage[n].ru_utime.tv_usec/1000) +
-                         (usage.ru_stime.tv_sec - lastUsage[n].ru_stime.tv_sec)*1000 + (usage.ru_stime.tv_usec/1000 - lastUsage[n].ru_stime.tv_usec/1000);
+    uint64_t diffusage = (usage.ru_utime.tv_sec - lastUsage[n].ru_utime.tv_sec) * 1000 + (usage.ru_utime.tv_usec / 1000 - lastUsage[n].ru_utime.tv_usec / 1000) +
+                         (usage.ru_stime.tv_sec - lastUsage[n].ru_stime.tv_sec) * 1000 + (usage.ru_stime.tv_usec / 1000 - lastUsage[n].ru_stime.tv_usec / 1000);
 
     dbTotalPackets[n] += (totalPackets - lastPackets[n]);
     dbTotalSessions[n] += (totalSessions - lastSessions[n]);
     dbTotalDropped[n] += (totalDropped - lastDropped[n]);
-    dbTotalK[n] += (totalBytes - lastBytes[n])/1000;
+    dbTotalK[n] += (totalBytes - lastBytes[n]) / 1000;
 
-    uint64_t mem = moloch_db_memory_size();
-    double   memMax = moloch_db_memory_max();
-    float    memUse = mem/memMax*100.0;
+    uint64_t mem = arkime_db_memory_size();
+    double   memMax = arkime_db_memory_max();
+    float    memUse = mem / memMax * 100.0;
 
 #ifndef __SANITIZE_ADDRESS__
     if (config.maxMemPercentage != 100 && memUse > config.maxMemPercentage) {
@@ -1589,95 +1644,95 @@ LOCAL void moloch_db_update_stats(int n, gboolean sync)
     }
 #endif
 
-    int json_len = snprintf(json, MOLOCH_HTTP_BUFFER_SIZE,
-        "{"
-        "\"ver\": \"%s\","
-        "\"nodeName\": \"%s\","
-        "\"hostname\": \"%s\","
-        "\"interval\": %d,"
-        "\"currentTime\": %" PRIu64 ","
-        "\"usedSpaceM\": %" PRIu64 ","
-        "\"freeSpaceM\": %" PRIu64 ","
-        "\"freeSpaceP\": %.2f,"
-        "\"monitoring\": %u,"
-        "\"memory\": %" PRIu64 ","
-        "\"memoryP\": %.2f,"
-        "\"cpu\": %" PRIu64 ","
-        "\"diskQueue\": %u,"
-        "\"esQueue\": %u,"
-        "\"packetQueue\": %u,"
-        "\"fragsQueue\": %u,"
-        "\"frags\": %u,"
-        "\"needSave\": %u,"
-        "\"closeQueue\": %u,"
-        "\"totalPackets\": %" PRIu64 ","
-        "\"totalK\": %" PRIu64 ","
-        "\"totalSessions\": %" PRIu64 ","
-        "\"totalDropped\": %" PRIu64 ","
-        "\"tcpSessions\": %u,"
-        "\"udpSessions\": %u,"
-        "\"icmpSessions\": %u,"
-        "\"sctpSessions\": %u,"
-        "\"espSessions\": %u,"
-        "\"otherSessions\": %u,"
-        "\"deltaPackets\": %" PRIu64 ","
-        "\"deltaBytes\": %" PRIu64 ","
-        "\"deltaWrittenBytes\": %" PRIu64 ","
-        "\"deltaUnwrittenBytes\": %" PRIu64 ","
-        "\"deltaSessions\": %" PRIu64 ","
-        "\"deltaSessionBytes\": %" PRIu64 ","
-        "\"deltaDropped\": %" PRIu64 ","
-        "\"deltaFragsDropped\": %" PRIu64 ","
-        "\"deltaOverloadDropped\": %" PRIu64 ","
-        "\"deltaESDropped\": %" PRIu64 ","
-        "\"deltaDupDropped\": %" PRIu64 ","
-        "\"esHealthMS\": %" PRIu64 ","
-        "\"deltaMS\": %" PRIu64 ","
-        "\"startTime\": %" PRIu64
-        "}",
-        VERSION,
-        config.nodeName,
-        config.hostName,
-        intervals[n],
-        cursec,
-        lastUsedSpaceM,
-        freeSpaceM,
-        freeSpaceM*100.0/totalSpaceM,
-        moloch_session_monitoring(),
-        moloch_db_memory_size(),
-        memUse,
-        diffusage*10000/diffms,
-        moloch_writer_queue_length?moloch_writer_queue_length():0,
-        moloch_http_queue_length(esServer),
-        moloch_packet_outstanding(),
-        moloch_packet_frags_outstanding(),
-        moloch_packet_frags_size(),
-        moloch_session_need_save_outstanding(),
-        moloch_session_close_outstanding(),
-        dbTotalPackets[n],
-        dbTotalK[n],
-        dbTotalSessions[n],
-        dbTotalDropped[n],
-        moloch_session_watch_count(SESSION_TCP),
-        moloch_session_watch_count(SESSION_UDP),
-        moloch_session_watch_count(SESSION_ICMP),
-        moloch_session_watch_count(SESSION_SCTP),
-        moloch_session_watch_count(SESSION_ESP),
-        moloch_session_watch_count(SESSION_OTHER),
-        (totalPackets - lastPackets[n]),
-        (totalBytes - lastBytes[n]),
-        (writtenBytes - lastWrittenBytes[n]),
-        (unwrittenBytes - lastUnwrittenBytes[n]),
-        (totalSessions - lastSessions[n]),
-        (totalSessionBytes - lastSessionBytes[n]),
-        (totalDropped - lastDropped[n]),
-        (fragsDropped - lastFragsDropped[n]),
-        (overloadDropped - lastOverloadDropped[n]),
-        (esDropped - lastESDropped[n]),
-        (dupDropped - lastDupDropped[n]),
-        esHealthMS,
-        diffms,
-        (uint64_t)startTime.tv_sec);
+    int json_len = snprintf(json, ARKIME_HTTP_BUFFER_SIZE,
+                            "{"
+                            "\"ver\": \"%s\","
+                            "\"nodeName\": \"%s\","
+                            "\"hostname\": \"%s\","
+                            "\"interval\": %d,"
+                            "\"currentTime\": %" PRIu64 ","
+                            "\"usedSpaceM\": %" PRIu64 ","
+                            "\"freeSpaceM\": %" PRIu64 ","
+                            "\"freeSpaceP\": %.2f,"
+                            "\"monitoring\": %u,"
+                            "\"memory\": %" PRIu64 ","
+                            "\"memoryP\": %.2f,"
+                            "\"cpu\": %" PRIu64 ","
+                            "\"diskQueue\": %u,"
+                            "\"esQueue\": %u,"
+                            "\"packetQueue\": %u,"
+                            "\"fragsQueue\": %u,"
+                            "\"frags\": %u,"
+                            "\"needSave\": %u,"
+                            "\"closeQueue\": %u,"
+                            "\"totalPackets\": %" PRIu64 ","
+                            "\"totalK\": %" PRIu64 ","
+                            "\"totalSessions\": %" PRIu64 ","
+                            "\"totalDropped\": %" PRIu64 ","
+                            "\"tcpSessions\": %u,"
+                            "\"udpSessions\": %u,"
+                            "\"icmpSessions\": %u,"
+                            "\"sctpSessions\": %u,"
+                            "\"espSessions\": %u,"
+                            "\"otherSessions\": %u,"
+                            "\"deltaPackets\": %" PRIu64 ","
+                            "\"deltaBytes\": %" PRIu64 ","
+                            "\"deltaWrittenBytes\": %" PRIu64 ","
+                            "\"deltaUnwrittenBytes\": %" PRIu64 ","
+                            "\"deltaSessions\": %" PRIu64 ","
+                            "\"deltaSessionBytes\": %" PRIu64 ","
+                            "\"deltaDropped\": %" PRIu64 ","
+                            "\"deltaFragsDropped\": %" PRIu64 ","
+                            "\"deltaOverloadDropped\": %" PRIu64 ","
+                            "\"deltaESDropped\": %" PRIu64 ","
+                            "\"deltaDupDropped\": %" PRIu64 ","
+                            "\"esHealthMS\": %" PRIu64 ","
+                            "\"deltaMS\": %" PRIu64 ","
+                            "\"startTime\": %" PRIu64
+                            "}",
+                            VERSION,
+                            config.nodeName,
+                            config.hostName,
+                            intervals[n],
+                            cursec,
+                            lastUsedSpaceM,
+                            freeSpaceM,
+                            freeSpaceM * 100.0 / totalSpaceM,
+                            arkime_session_monitoring(),
+                            arkime_db_memory_size(),
+                            memUse,
+                            diffusage * 10000 / diffms,
+                            arkime_writer_queue_length ? arkime_writer_queue_length() : 0,
+                            arkime_http_queue_length(esServer),
+                            arkime_packet_outstanding(),
+                            arkime_packet_frags_outstanding(),
+                            arkime_packet_frags_size(),
+                            arkime_session_need_save_outstanding(),
+                            arkime_session_close_outstanding(),
+                            dbTotalPackets[n],
+                            dbTotalK[n],
+                            dbTotalSessions[n],
+                            dbTotalDropped[n],
+                            arkime_session_watch_count(SESSION_TCP),
+                            arkime_session_watch_count(SESSION_UDP),
+                            arkime_session_watch_count(SESSION_ICMP),
+                            arkime_session_watch_count(SESSION_SCTP),
+                            arkime_session_watch_count(SESSION_ESP),
+                            arkime_session_watch_count(SESSION_OTHER),
+                            (totalPackets - lastPackets[n]),
+                            (totalBytes - lastBytes[n]),
+                            (writtenBytes - lastWrittenBytes[n]),
+                            (unwrittenBytes - lastUnwrittenBytes[n]),
+                            (totalSessions - lastSessions[n]),
+                            (totalSessionBytes - lastSessionBytes[n]),
+                            (totalDropped - lastDropped[n]),
+                            (fragsDropped - lastFragsDropped[n]),
+                            (overloadDropped - lastOverloadDropped[n]),
+                            (esDropped - lastESDropped[n]),
+                            (dupDropped - lastDupDropped[n]),
+                            esHealthMS,
+                            diffms,
+                            (uint64_t)startTime.tv_sec);
 
     lastTime[n]            = currentTime;
     lastBytes[n]           = totalBytes;
@@ -1704,27 +1759,27 @@ LOCAL void moloch_db_update_stats(int n, gboolean sync)
             stats_key_len = snprintf(stats_key, sizeof(stats_key), "/%sstats/_doc/%s?version_type=external&version=%" PRIu64, config.prefix, config.nodeName, dbVersion);
         }
         if (sync) {
-            unsigned char *data = moloch_http_send_sync(esServer, "POST", stats_key, stats_key_len, json, json_len, NULL, NULL);
+            uint8_t *data = arkime_http_send_sync(esServer, "POST", stats_key, stats_key_len, json, json_len, NULL, NULL, NULL);
             if (data)
                 free(data);
-            moloch_http_free_buffer(json);
+            arkime_http_free_buffer(json);
         } else {
             // Dropable if the current time isn't first 2 seconds of each minute
             if ((cursec % 60) >= 2) {
-                moloch_http_schedule(esServer, "POST", stats_key, stats_key_len, json, json_len, NULL, MOLOCH_HTTP_PRIORITY_DROPABLE, NULL, NULL);
+                arkime_http_schedule(esServer, "POST", stats_key, stats_key_len, json, json_len, NULL, ARKIME_HTTP_PRIORITY_DROPABLE, NULL, NULL);
             } else {
-                moloch_http_schedule(esServer, "POST", stats_key, stats_key_len, json, json_len, NULL, MOLOCH_HTTP_PRIORITY_BEST, NULL, NULL);
+                arkime_http_schedule(esServer, "POST", stats_key, stats_key_len, json, json_len, NULL, ARKIME_HTTP_PRIORITY_BEST, NULL, NULL);
             }
         }
     } else {
         char key[200];
-        int key_len = snprintf(key, sizeof(key), "/%sdstats/_doc/%s-%d-%d", config.prefix, config.nodeName, (int)(currentTime.tv_sec/intervals[n])%1440, intervals[n]);
-        moloch_http_schedule(esServer, "POST", key, key_len, json, json_len, NULL, MOLOCH_HTTP_PRIORITY_DROPABLE, NULL, NULL);
+        int key_len = snprintf(key, sizeof(key), "/%sdstats/_doc/%s-%d-%d", config.prefix, config.nodeName, (int)(currentTime.tv_sec / intervals[n]) % 1440, intervals[n]);
+        arkime_http_schedule(esServer, "POST", key, key_len, json, json_len, NULL, ARKIME_HTTP_PRIORITY_DROPABLE, NULL, NULL);
     }
 }
 /******************************************************************************/
 // Runs on main thread
-LOCAL gboolean moloch_db_flush_gfunc (gpointer user_data )
+LOCAL gboolean arkime_db_flush_gfunc (gpointer user_data )
 {
     int             thread;
     struct timeval  currentTime;
@@ -1732,7 +1787,7 @@ LOCAL gboolean moloch_db_flush_gfunc (gpointer user_data )
     gettimeofday(&currentTime, NULL);
 
     for (thread = 0; thread < config.packetThreads; thread++) {
-        MOLOCH_LOCK(dbInfo[thread].lock);
+        ARKIME_LOCK(dbInfo[thread].lock);
         if (dbInfo[thread].json && BSB_LENGTH(dbInfo[thread].bsb) > 0 &&
             ((currentTime.tv_sec - dbInfo[thread].lastSave) >= config.dbFlushTimeout || user_data == (gpointer)1)) {
 
@@ -1741,18 +1796,18 @@ LOCAL gboolean moloch_db_flush_gfunc (gpointer user_data )
 
             dbInfo[thread].json = 0;
             dbInfo[thread].lastSave = currentTime.tv_sec;
-            MOLOCH_UNLOCK(dbInfo[thread].lock);
+            ARKIME_UNLOCK(dbInfo[thread].lock);
             // Unlock and then send buffer
             sendBulkFunc(json, len);
         } else {
-            MOLOCH_UNLOCK(dbInfo[thread].lock);
+            ARKIME_UNLOCK(dbInfo[thread].lock);
         }
     }
 
-    return TRUE;
+    return G_SOURCE_CONTINUE;
 }
 /******************************************************************************/
-LOCAL void moloch_db_health_check_cb(int UNUSED(code), unsigned char *data, int data_len, gpointer uw)
+LOCAL void arkime_db_health_check_cb(int UNUSED(code), uint8_t *data, int data_len, gpointer uw)
 {
     if (code != 200) {
         LOG("WARNING - Couldn't perform Elasticsearch health check");
@@ -1760,18 +1815,18 @@ LOCAL void moloch_db_health_check_cb(int UNUSED(code), unsigned char *data, int 
     }
 
     uint32_t           status_len;
-    unsigned char     *status;
+    const uint8_t     *status;
     struct timespec    stopHealthCheck;
 
     clock_gettime(CLOCK_MONOTONIC, &stopHealthCheck);
 
-    esHealthMS = (stopHealthCheck.tv_sec - startHealthCheck.tv_sec)*1000 +
-                 (stopHealthCheck.tv_nsec - startHealthCheck.tv_nsec)/1000000L;
+    esHealthMS = (stopHealthCheck.tv_sec - startHealthCheck.tv_sec) * 1000 +
+                 (stopHealthCheck.tv_nsec - startHealthCheck.tv_nsec) / 1000000L;
 
     if (*data == '[')
-        status = moloch_js0n_get(data+1, data_len-2, "status", &status_len);
+        status = arkime_js0n_get(data + 1, data_len - 2, "status", &status_len);
     else
-        status = moloch_js0n_get(data, data_len, "status", &status_len);
+        status = arkime_js0n_get(data, data_len, "status", &status_len);
 
     if (!status) {
         LOG("WARNING - Couldn't find status in '%.*s'", data_len, data);
@@ -1784,67 +1839,67 @@ LOCAL void moloch_db_health_check_cb(int UNUSED(code), unsigned char *data, int 
 /******************************************************************************/
 
 // Runs on main thread
-LOCAL gboolean moloch_db_health_check (gpointer user_data )
+LOCAL gboolean arkime_db_health_check (gpointer user_data )
 {
-    moloch_http_schedule(esServer, "GET", "/_cat/health?format=json", -1, NULL, 0, NULL, MOLOCH_HTTP_PRIORITY_DROPABLE, moloch_db_health_check_cb, user_data);
+    arkime_http_schedule(esServer, "GET", "/_cat/health?format=json", -1, NULL, 0, NULL, ARKIME_HTTP_PRIORITY_DROPABLE, arkime_db_health_check_cb, user_data);
     clock_gettime(CLOCK_MONOTONIC, &startHealthCheck);
-    return TRUE;
+    return G_SOURCE_CONTINUE;
 }
 /******************************************************************************/
-typedef struct moloch_seq_request {
+typedef struct arkime_seq_request {
     char               *name;
-    MolochSeqNum_cb     func;
+    ArkimeSeqNum_cb     func;
     gpointer            uw;
-} MolochSeqRequest_t;
+} ArkimeSeqRequest_t;
 
-void moloch_db_get_sequence_number(char *name, MolochSeqNum_cb func, gpointer uw);
-LOCAL void moloch_db_get_sequence_number_cb(int UNUSED(code), unsigned char *data, int data_len, gpointer uw)
+LOCAL void arkime_db_get_sequence_number(const char *name, ArkimeSeqNum_cb func, gpointer uw);
+LOCAL void arkime_db_get_sequence_number_cb(int UNUSED(code), uint8_t *data, int data_len, gpointer uw)
 {
-    MolochSeqRequest_t *r = uw;
+    ArkimeSeqRequest_t *r = uw;
     uint32_t            version_len;
 
-    unsigned char *version = moloch_js0n_get(data, data_len, "_version", &version_len);
+    const uint8_t *version = arkime_js0n_get(data, data_len, "_version", &version_len);
 
     if (!version_len || !version) {
         LOG("ERROR - Couldn't fetch sequence: %.*s", data_len, data);
-        moloch_db_get_sequence_number(r->name, r->func, r->uw);
+        arkime_db_get_sequence_number(r->name, r->func, r->uw);
     } else {
         if (r->func)
-            r->func(atoi((char*)version), r->uw);
+            r->func(atoi((char * )version), r->uw);
     }
 
     g_free(r->name);
-    MOLOCH_TYPE_FREE(MolochSeqRequest_t, r);
+    ARKIME_TYPE_FREE(ArkimeSeqRequest_t, r);
 }
 /******************************************************************************/
-void moloch_db_get_sequence_number(char *name, MolochSeqNum_cb func, gpointer uw)
+LOCAL void arkime_db_get_sequence_number(const char *name, ArkimeSeqNum_cb func, gpointer uw)
 {
-    char                key[100];
+    char                key[200];
     int                 key_len;
-    MolochSeqRequest_t *r = MOLOCH_TYPE_ALLOC(MolochSeqRequest_t);
-    char               *json = moloch_http_get_buffer(MOLOCH_HTTP_BUFFER_SIZE);
+    ArkimeSeqRequest_t *r = ARKIME_TYPE_ALLOC(ArkimeSeqRequest_t);
+    char               *json = arkime_http_get_buffer(ARKIME_HTTP_BUFFER_SIZE);
 
     r->name = g_strdup(name);
     r->func = func;
     r->uw   = uw;
 
     key_len = snprintf(key, sizeof(key), "/%ssequence/_doc/%s", config.prefix, name);
-    int json_len = snprintf(json, MOLOCH_HTTP_BUFFER_SIZE, "{}");
-    moloch_http_schedule(esServer, "POST", key, key_len, json, json_len, NULL, MOLOCH_HTTP_PRIORITY_BEST, moloch_db_get_sequence_number_cb, r);
+    int json_len = snprintf(json, ARKIME_HTTP_BUFFER_SIZE, "{}");
+    arkime_http_schedule(esServer, "POST", key, key_len, json, json_len, NULL, ARKIME_HTTP_PRIORITY_BEST, arkime_db_get_sequence_number_cb, r);
 }
 /******************************************************************************/
-uint32_t moloch_db_get_sequence_number_sync(char *name)
+LOCAL uint32_t arkime_db_get_sequence_number_sync(const char *name)
 {
 
     while (1) {
-        char key[100];
+        char key[200];
         int key_len = snprintf(key, sizeof(key), "/%ssequence/_doc/%s", config.prefix, name);
 
         size_t data_len;
-        uint8_t *data = moloch_http_send_sync(esServer, "POST", key, key_len, "{}", 2, NULL, &data_len);
+        uint8_t *data = arkime_http_send_sync(esServer, "POST", key, key_len, "{}", 2, NULL, &data_len, NULL);
 
         uint32_t version_len;
-        uint8_t *version = moloch_js0n_get(data, data_len, "_version", &version_len);
+        const uint8_t *version = arkime_js0n_get(data, data_len, "_version", &version_len);
 
         if (!version_len || !version) {
             LOG("ERROR - Couldn't fetch sequence: %d %.*s", (int)data_len, (int)data_len, data);
@@ -1864,32 +1919,32 @@ uint32_t moloch_db_get_sequence_number_sync(char *name)
     }
 }
 /******************************************************************************/
-LOCAL void moloch_db_fn_seq_cb(uint32_t newSeq, gpointer UNUSED(uw))
+LOCAL void arkime_db_fn_seq_cb(uint32_t newSeq, gpointer UNUSED(uw))
 {
-    MOLOCH_LOCK(nextFileNum);
+    ARKIME_LOCK(nextFileNum);
     nextFileNum = newSeq;
-    MOLOCH_UNLOCK(nextFileNum);
+    ARKIME_UNLOCK(nextFileNum);
 }
 /******************************************************************************/
-LOCAL void moloch_db_load_file_num()
+LOCAL void arkime_db_load_file_num()
 {
     char               key[200];
     int                key_len;
     size_t             data_len;
-    unsigned char     *data;
+    uint8_t           *data;
     uint32_t           found_len;
-    unsigned char     *found = 0;
+    const uint8_t     *found = 0;
 
     /* First see if we have the new style number or not */
     key_len = snprintf(key, sizeof(key), "/%ssequence/_doc/fn-%s", config.prefix, config.nodeName);
-    data = moloch_http_get(esServer, key, key_len, &data_len);
+    data = arkime_http_get(esServer, key, key_len, &data_len);
 
-    found = moloch_js0n_get(data, data_len, "found", &found_len);
+    found = arkime_js0n_get(data, data_len, "found", &found_len);
     if (found && memcmp("true", found, 4) != 0) {
         free(data);
 
         key_len = snprintf(key, sizeof(key), "/%ssequence/_doc/fn-%s?version_type=external&version=100", config.prefix, config.nodeName);
-        data = moloch_http_send_sync(esServer, "POST", key, key_len, "{}", 2, NULL, NULL);
+        data = arkime_http_send_sync(esServer, "POST", key, key_len, "{}", 2, NULL, NULL, NULL);
     }
     if (data)
         free(data);
@@ -1897,7 +1952,7 @@ LOCAL void moloch_db_load_file_num()
     if (!config.pcapReadOffline) {
         /* If doing a live file create a file number now */
         snprintf(key, sizeof(key), "fn-%s", config.nodeName);
-        nextFileNum = moloch_db_get_sequence_number_sync(key);
+        nextFileNum = arkime_db_get_sequence_number_sync(key);
     }
 }
 char *ltrim(char *s) 
@@ -1927,7 +1982,7 @@ char *trim(char *s)
 /******************************************************************************/
 // Modified From https://github.com/phaag/nfdump/blob/master/bin/flist.c
 // Copyright (c) 2014, Peter Haag
-LOCAL void moloch_db_mkpath(char *path)
+LOCAL void arkime_db_mkpath(char *path)
 {
     struct stat sb;
     char *slash = path;
@@ -1955,15 +2010,21 @@ LOCAL void moloch_db_mkpath(char *path)
     }
 }
 /******************************************************************************/
-char *moloch_db_create_file_full(time_t firstPacket, const char *name, uint64_t size, int locked, uint32_t *id, ...)
+/* For var args: field, value
+ * field=="indexFilename", value has #NUM# replaced with outputId
+ * field starts with #, and value is NOT ARKIME_VAR_ARG_INT_SKIP, output ', ${field+1}: ${value}'
+ * value starts with { or [, and value is NOT ARKIME_VAR_ARG_STR_SKIP, output ', ${field}:${value}'
+ * value is NOT ARKIME_VAR_ARG_STR_SKIP, output ', ${field}:"${value}"'
+ */
+char *arkime_db_create_file_full(time_t firstPacket, const char *name, uint64_t size, int locked, uint32_t *id, ...)
 {
     static GRegex     *numRegex;
     static GRegex     *numHexRegex;
-    char               key[100];
+    char               key[200];
     int                key_len;
     uint32_t           num;
     char               filename[1024];
-    char              *json = moloch_http_get_buffer(MOLOCH_HTTP_BUFFER_SIZE);
+    char              *json = arkime_http_get_buffer(ARKIME_HTTP_BUFFER_SIZE);
     BSB                jbsb;
     const uint64_t     fp = firstPacket;
 
@@ -1972,18 +2033,18 @@ char *moloch_db_create_file_full(time_t firstPacket, const char *name, uint64_t 
         numHexRegex = g_regex_new("#NUMHEX#", 0, 0, 0);
     }
 
-    BSB_INIT(jbsb, json, MOLOCH_HTTP_BUFFER_SIZE);
+    BSB_INIT(jbsb, json, ARKIME_HTTP_BUFFER_SIZE);
 
-    MOLOCH_LOCK(nextFileNum);
+    ARKIME_LOCK(nextFileNum);
     snprintf(key, sizeof(key), "fn-%s", config.nodeName);
     if (nextFileNum == 0) {
         /* If doing an offline file OR the last async call hasn't returned, just get a sync filenum */
-        num = moloch_db_get_sequence_number_sync(key);
+        num = arkime_db_get_sequence_number_sync(key);
     } else {
         /* If doing a live file, use current file num and schedule the next one */
         num = nextFileNum;
         nextFileNum = 0; /* Don't reuse number */
-        moloch_db_get_sequence_number(key, moloch_db_fn_seq_cb, 0);
+        arkime_db_get_sequence_number(key, arkime_db_fn_seq_cb, 0);
     }
 
 
@@ -1992,7 +2053,7 @@ char *moloch_db_create_file_full(time_t firstPacket, const char *name, uint64_t 
 
     if (name && name[0] != '.') {
         char *name1 = g_regex_replace_literal(numRegex, name, -1, 0, numstr, 0, NULL);
-        name = g_regex_replace_literal(numHexRegex, name1, -1, 0, (char *)moloch_char_to_hexstr[num%256], 0, NULL);
+        name = g_regex_replace_literal(numHexRegex, name1, -1, 0, (char *)arkime_char_to_hexstr[num % 256], 0, NULL);
         g_free(name1);
 
         BSB_EXPORT_sprintf(jbsb, "{\"num\":%d, \"name\":\"%s\", \"first\":%" PRIu64 ", \"node\":\"%s\", \"filesize\":%" PRIu64 ", \"locked\":%d", num, name, fp, config.nodeName, size, locked);
@@ -2000,7 +2061,7 @@ char *moloch_db_create_file_full(time_t firstPacket, const char *name, uint64_t 
     } else {
 
         uint16_t flen = strlen(config.pcapDir[config.pcapDirPos]);
-        if (flen >= sizeof(filename)-1) {
+        if (flen >= sizeof(filename) - 1) {
             LOGEXIT("ERROR - pcapDir '%s' string length is too large", config.pcapDir[config.pcapDirPos]);
         }
 
@@ -2013,10 +2074,10 @@ char *moloch_db_create_file_full(time_t firstPacket, const char *name, uint64_t 
             int tlen;
 
             // pcapDirTemplate must start with /, checked in config.c
-            if (filename[flen-1] == '/')
+            if (filename[flen - 1] == '/')
                 flen--;
 
-            if ((tlen = strftime(filename+flen, sizeof(filename)-flen-1, config.pcapDirTemplate, &tmp)) == 0) {
+            if ((tlen = strftime(filename + flen, sizeof(filename) - flen - 1, config.pcapDirTemplate, &tmp)) == 0) {
                 LOGEXIT("ERROR - Couldn't form filename: %s %s", config.pcapDir[config.pcapDirPos], config.pcapDirTemplate);
             }
             flen += tlen;
@@ -2033,8 +2094,7 @@ char *moloch_db_create_file_full(time_t firstPacket, const char *name, uint64_t 
                 if (config.debug)
                     LOG("%s has %0.2f%% free", config.pcapDir[i], 100 * ((double)vfs.f_bavail / (double)vfs.f_blocks));
 
-                if ((double)vfs.f_bavail / (double)vfs.f_blocks >= maxFreeSpacePercent)
-                {
+                if ((double)vfs.f_bavail / (double)vfs.f_blocks >= maxFreeSpacePercent) {
                     maxFreeSpacePercent = (double)vfs.f_bavail / (double)vfs.f_blocks;
                     config.pcapDirPos = i;
                 }
@@ -2051,8 +2111,7 @@ char *moloch_db_create_file_full(time_t firstPacket, const char *name, uint64_t 
                 statvfs(config.pcapDir[i], &vfs);
                 if (config.debug)
                     LOG("%s has %" PRIu64 " megabytes available", config.pcapDir[i], (uint64_t)vfs.f_bavail * (uint64_t)vfs.f_frsize / (1000 * 1000));
-                if ((uint64_t)vfs.f_bavail * (uint64_t)vfs.f_frsize >= maxFreeSpaceBytes)
-                {
+                if ((uint64_t)vfs.f_bavail * (uint64_t)vfs.f_frsize >= maxFreeSpaceBytes) {
                     maxFreeSpaceBytes = (uint64_t)vfs.f_bavail * (uint64_t)vfs.f_frsize;
                     config.pcapDirPos = i;
                 }
@@ -2066,20 +2125,20 @@ char *moloch_db_create_file_full(time_t firstPacket, const char *name, uint64_t 
                 config.pcapDirPos = 0;
         }
 
-        if (filename[flen-1] == '/') {
+        if (filename[flen - 1] == '/') {
             flen--;
         }
 
         struct stat sb;
         if (stat(filename, &sb)) {
-            moloch_db_mkpath(filename);
+            arkime_db_mkpath(filename);
         }
 
         if (!name) {
             name = ".pcap";
         }
 
-        snprintf(filename+flen, sizeof(filename) - flen, "/%s-%02d%02d%02d-%08u%s", config.nodeName, tmp.tm_year%100, tmp.tm_mon+1, tmp.tm_mday, num, name);
+        snprintf(filename + flen, sizeof(filename) - flen, "/%s-%02d%02d%02d-%08u%s", config.nodeName, tmp.tm_year % 100, tmp.tm_mon + 1, tmp.tm_mday, num, name);
         name = 0;
 
         BSB_EXPORT_sprintf(jbsb, "{\"num\":%d, \"name\":\"%s\", \"first\":%" PRIu64 ", \"node\":\"%s\", \"locked\":%d", num, filename, fp, config.nodeName, locked);
@@ -2089,39 +2148,45 @@ char *moloch_db_create_file_full(time_t firstPacket, const char *name, uint64_t 
     va_list  args;
     va_start(args, id);
     while (1) {
-        char *field = va_arg(args, char *);
+        const char *field = va_arg(args, char *);
         if (!field)
             break;
 
-        char *value = va_arg(args, char *);
+        const char *value = va_arg(args, char *);
         if (!value)
             break;
 
-        if (value == MOLOCH_VAR_ARG_SKIP)
-            continue;
 
-
-        BSB_EXPORT_sprintf(jbsb, ", \"%s\": ", field);
+        if (field[0] == '#') {
+            if (value == ARKIME_VAR_ARG_INT_SKIP)
+                continue;
+            BSB_EXPORT_sprintf(jbsb, ", \"%s\": ", field + 1);
+        } else {
+            if (value == ARKIME_VAR_ARG_STR_SKIP)
+                continue;
+            BSB_EXPORT_sprintf(jbsb, ", \"%s\": ", field);
+        }
 
         // HACK: But need num as we create this
         if (strcmp(field, "indexFilename") == 0) {
             char *value1 = g_regex_replace_literal(numRegex, value, -1, 0, numstr, 0, NULL);
             BSB_EXPORT_sprintf(jbsb, "\"%s\"", value1);
             g_free(value1);
-        } else if ((long)value < 32) {
+        } else if (field[0] == '#') {
             BSB_EXPORT_sprintf(jbsb, "%ld", (long)value);
-        } else if (*value == '{' || *value == '[')
+        } else if (*value == '{' || *value == '[') {
             BSB_EXPORT_sprintf(jbsb, "%s", value);
-        else
+        } else {
             BSB_EXPORT_sprintf(jbsb, "\"%s\"", value);
+        }
     }
     va_end(args);
 
     BSB_EXPORT_u08(jbsb, '}');
 
-    moloch_http_schedule(esServer, "POST", key, key_len, json, BSB_LENGTH(jbsb), NULL, MOLOCH_HTTP_PRIORITY_BEST, NULL, NULL);
+    arkime_http_schedule(esServer, "POST", key, key_len, json, BSB_LENGTH(jbsb), NULL, ARKIME_HTTP_PRIORITY_BEST, NULL, NULL);
 
-    MOLOCH_UNLOCK(nextFileNum);
+    ARKIME_UNLOCK(nextFileNum);
 
     if (config.logFileCreation)
         LOG("Creating file %u with key >%s< using >%.*s<", num, key, (int)BSB_LENGTH(jbsb), json);
@@ -2134,41 +2199,41 @@ char *moloch_db_create_file_full(time_t firstPacket, const char *name, uint64_t 
     return g_strdup(filename);
 }
 /******************************************************************************/
-char *moloch_db_create_file(time_t firstPacket, const char *name, uint64_t size, int locked, uint32_t *id)
+char *arkime_db_create_file(time_t firstPacket, const char *name, uint64_t size, int locked, uint32_t *id)
 {
-    return moloch_db_create_file_full(firstPacket, name, size, locked, id, (char *)NULL);
+    return arkime_db_create_file_full(firstPacket, name, size, locked, id, (char *)NULL);
 }
 /******************************************************************************/
-LOCAL void moloch_db_check()
+LOCAL void arkime_db_check()
 {
     size_t             data_len;
     char               key[1000];
     int                key_len;
     char               tname[100];
-    unsigned char     *data;
+    uint8_t           *data;
 
     snprintf(tname, sizeof(tname), "%ssessions3_template", config.prefix);
 
     key_len = snprintf(key, sizeof(key), "/_template/%s?filter_path=**._meta", tname);
-    data = moloch_http_get(esServer, key, key_len, &data_len);
+    data = arkime_http_get(esServer, key, key_len, &data_len);
 
     if (!data || data_len == 0) {
         LOGEXIT("ERROR - Couldn't load version information, database (%s) might be down or not initialized.", config.elasticsearch);
     }
 
     uint32_t           template_len;
-    unsigned char     *template = 0;
+    const uint8_t     *template = 0;
 
-    template = moloch_js0n_get(data, data_len, tname, &template_len);
-    if(!template || template_len == 0) {
+    template = arkime_js0n_get(data, data_len, tname, &template_len);
+    if (!template || template_len == 0) {
         LOGEXIT("ERROR - Couldn't load version information, database might be down or out of date.  Run \"db/db.pl host:port upgrade\"");
     }
 
     uint32_t           mappings_len;
-    unsigned char     *mappings = 0;
+    const uint8_t     *mappings = 0;
 
-    mappings = moloch_js0n_get(template, template_len, "mappings", &mappings_len);
-    if(!mappings || mappings_len == 0) {
+    mappings = arkime_js0n_get(template, template_len, "mappings", &mappings_len);
+    if (!mappings || mappings_len == 0) {
         LOGEXIT("ERROR - Couldn't load version information, database might be down or out of date.  Run \"db/db.pl host:port upgrade\"");
     }
 
@@ -2181,34 +2246,35 @@ LOCAL void moloch_db_check()
     }
 
     uint32_t           meta_len;
-    unsigned char     *meta = 0;
-    meta = moloch_js0n_get(mappings, mappings_len, "_meta", &meta_len);
-    if(!meta || meta_len == 0) {
+    const uint8_t     *meta = 0;
+
+    meta = arkime_js0n_get(mappings, mappings_len, "_meta", &meta_len);
+    if (!meta || meta_len == 0) {
         LOGEXIT("ERROR - Couldn't load version information, database might be down or out of date.  Run \"db/db.pl host:port upgrade\"");
     }
 
     uint32_t           version_len = 0;
-    unsigned char     *version = 0;
+    const uint8_t     *version = 0;
 
-    version = moloch_js0n_get(meta, meta_len, "molochDbVersion", &version_len);
+    version = arkime_js0n_get(meta, meta_len, "molochDbVersion", &version_len);
 
     if (!version)
         LOGEXIT("ERROR - Database version couldn't be found, have you run \"db/db.pl host:port init\"");
 
-    if (atoi((char*)version) < MOLOCH_MIN_DB_VERSION) {
-        LOGEXIT("ERROR - Database version '%.*s' is too old, needs to be at least (%d), run \"db/db.pl host:port upgrade\"", version_len, version, MOLOCH_MIN_DB_VERSION);
+    if (atoi((char * )version) < ARKIME_MIN_DB_VERSION) {
+        LOGEXIT("ERROR - Database version '%.*s' is too old, needs to be at least (%d), run \"db/db.pl host:port upgrade\"", version_len, version, ARKIME_MIN_DB_VERSION);
     }
     free(data);
 }
 
 /******************************************************************************/
-LOCAL void moloch_db_free_mmdb(MMDB_s *geo)
+LOCAL void arkime_db_free_mmdb(MMDB_s *geo)
 {
     MMDB_close(geo);
     free(geo);
 }
 /******************************************************************************/
-LOCAL void moloch_db_load_geo_country(char *name)
+LOCAL void arkime_db_load_geo_country(const char *name)
 {
     MMDB_s  *country = malloc(sizeof(MMDB_s));
     int status = MMDB_open(name, MMDB_MODE_MMAP, country);
@@ -2217,12 +2283,12 @@ LOCAL void moloch_db_load_geo_country(char *name)
     }
     if (geoCountry) {
         LOG("Loading new version of country file");
-        moloch_free_later(geoCountry, (GDestroyNotify) moloch_db_free_mmdb);
+        arkime_free_later(geoCountry, (GDestroyNotify) arkime_db_free_mmdb);
     }
     geoCountry = country;
 }
 /******************************************************************************/
-LOCAL void moloch_db_load_geo_asn(char *name)
+LOCAL void arkime_db_load_geo_asn(const char *name)
 {
     MMDB_s  *asn = malloc(sizeof(MMDB_s));
     int status = MMDB_open(name, MMDB_MODE_MMAP, asn);
@@ -2231,12 +2297,12 @@ LOCAL void moloch_db_load_geo_asn(char *name)
     }
     if (geoASN) {
         LOG("Loading new version of asn file");
-        moloch_free_later(geoASN, (GDestroyNotify) moloch_db_free_mmdb);
+        arkime_free_later(geoASN, (GDestroyNotify) arkime_db_free_mmdb);
     }
     geoASN = asn;
 }
 /******************************************************************************/
-LOCAL void moloch_db_load_rir(char *name)
+LOCAL void arkime_db_load_rir(const char *name)
 {
     FILE *fp;
     char line[1000];
@@ -2244,9 +2310,10 @@ LOCAL void moloch_db_load_rir(char *name)
         CONFIGEXIT("Couldn't open RIR from %s", name);
     }
 
-    while(fgets(line, sizeof(line), fp)) {
-        int   cnt = 0, quote = 0, num = 0;
-        char *ptr, *start;
+    while (fgets(line, sizeof(line), fp)) {
+        int cnt = 0, quote = 0, num = 0;
+        const char *start;
+        char *ptr;
 
         for (start = ptr = line; *ptr != 0; ptr++) {
             if (*ptr == '"') {
@@ -2267,7 +2334,7 @@ LOCAL void moloch_db_load_rir(char *name)
                 gchar **parts = g_strsplit(start, ".", 0);
                 if (parts[0] && parts[1] && *parts[1]) {
                     if (rirs[num])
-                        moloch_free_later(rirs[num], g_free);
+                        arkime_free_later(rirs[num], g_free);
                     rirs[num] = g_ascii_strup(parts[1], -1);
                 }
                 g_strfreev(parts);
@@ -2276,18 +2343,18 @@ LOCAL void moloch_db_load_rir(char *name)
             }
 
             cnt++;
-            start = ptr+1;
+            start = ptr + 1;
         }
     }
     fclose(fp);
 }
 /******************************************************************************/
-LOCAL void moloch_db_free_oui(patricia_tree_t *oui)
+LOCAL void arkime_db_free_oui(patricia_tree_t *oui)
 {
     Destroy_Patricia(oui, g_free);
 }
 /******************************************************************************/
-LOCAL void moloch_db_load_oui(char *name)
+LOCAL void arkime_db_load_oui(const char *name)
 {
     if (ouiTree)
         LOG("Loading new version of oui file");
@@ -2301,7 +2368,7 @@ LOCAL void moloch_db_load_oui(char *name)
         exit(1);
     }
 
-    while(fgets(line, sizeof(line), fp)) {
+    while (fgets(line, sizeof(line), fp)) {
         char *hash = strchr(line, '#');
         if (hash)
             *hash = 0;
@@ -2309,7 +2376,7 @@ LOCAL void moloch_db_load_oui(char *name)
         // Trim
         int len = strlen(line);
         if (len < 4) continue;
-        while (len > 0 && isspace(line[len-1]) )
+        while (len > 0 && isspace(line[len - 1]) )
             len--;
         line[len] = 0;
 
@@ -2319,7 +2386,7 @@ LOCAL void moloch_db_load_oui(char *name)
             CONFIGEXIT("OUI file %s bad line '%s'", name, line);
         }
 
-        char *str = NULL;
+        const char *str = NULL;
         if (parts[2]) {
             if (parts[2][0])
                 str = parts[2];
@@ -2345,10 +2412,10 @@ LOCAL void moloch_db_load_oui(char *name)
         parts[0][j] = 0;
 
         // Convert to binary
-        unsigned char buf[16];
+        uint8_t buf[16];
         len = strlen(parts[0]);
-        for (i=0, j=0; i < len && j < 8; i += 2, j++) {
-            buf[j] = moloch_hex_to_char[(int)parts[0][i]][(int)parts[0][i+1]];
+        for (i = 0, j = 0; i < len && j < 8; i += 2, j++) {
+            buf[j] = arkime_hex_to_char[(int)parts[0][i]][(int)parts[0][i + 1]];
         }
 
         // Create node
@@ -2366,13 +2433,13 @@ LOCAL void moloch_db_load_oui(char *name)
 
     // Save old tree to free later and flip to new tree
     if (ouiTree)
-        moloch_free_later(ouiTree, (GDestroyNotify) moloch_db_free_oui);
+        arkime_free_later(ouiTree, (GDestroyNotify) arkime_db_free_oui);
     ouiTree = oui;
 }
 /******************************************************************************/
-void moloch_db_oui_lookup(int field, MolochSession_t *session, const uint8_t *mac)
+void arkime_db_oui_lookup(int field, ArkimeSession_t *session, const uint8_t *mac)
 {
-    patricia_node_t *node;
+    const patricia_node_t *node;
 
     if (!ouiTree)
         return;
@@ -2380,130 +2447,159 @@ void moloch_db_oui_lookup(int field, MolochSession_t *session, const uint8_t *ma
     if ((node = patricia_search_best3 (ouiTree, mac, 48)) == NULL)
         return;
 
-    moloch_field_string_add(field, session, node->data, -1, TRUE);
+    arkime_field_string_add(field, session, node->data, -1, TRUE);
 }
 /******************************************************************************/
-LOCAL void moloch_db_load_fields()
+LOCAL void arkime_db_load_fields()
 {
     size_t                 data_len;
     char                   key[100];
     int                    key_len;
 
     key_len = snprintf(key, sizeof(key), "/%sfields/_search?size=3000", config.prefix);
-    unsigned char     *data = moloch_http_get(esServer, key, key_len, &data_len);
+    uint8_t           *data = arkime_http_get(esServer, key, key_len, &data_len);
 
     if (!data) {
+        LOGEXIT("ERROR - Couldn't download %sfields, database (%s) might be down or not initialized.", config.prefix, config.elasticsearch);
         return;
     }
 
     uint32_t           hits_len;
-    unsigned char     *hits = 0;
-    hits = moloch_js0n_get(data, data_len, "hits", &hits_len);
+    const uint8_t     *hits = 0;
+    hits = arkime_js0n_get(data, data_len, "hits", &hits_len);
     if (!hits) {
+        LOGEXIT("ERROR - Couldn't download %sfields, database (%s) might be down or not initialized.", config.prefix, config.elasticsearch);
         free(data);
         return;
     }
 
     uint32_t           ahits_len;
-    unsigned char     *ahits = 0;
-    ahits = moloch_js0n_get(hits, hits_len, "hits", &ahits_len);
+    const uint8_t     *ahits = 0;
+    ahits = arkime_js0n_get(hits, hits_len, "hits", &ahits_len);
 
     if (!ahits) {
+        LOGEXIT("ERROR - Couldn't download %sfields, database (%s) might be down or not initialized.", config.prefix, config.elasticsearch);
         free(data);
         return;
     }
 
-    uint32_t out[2*8000];
+    uint32_t out[2 * 8000];
     memset(out, 0, sizeof(out));
     js0n(ahits, ahits_len, out, sizeof(out));
     int i;
-    for (i = 0; out[i]; i+= 2) {
+    for (i = 0; out[i]; i += 2) {
         uint32_t           id_len;
-        unsigned char     *id = 0;
-        id = moloch_js0n_get(ahits+out[i], out[i+1], "_id", &id_len);
+        const uint8_t     *id = 0;
+        id = arkime_js0n_get(ahits + out[i], out[i + 1], "_id", &id_len);
 
         uint32_t           source_len;
-        unsigned char     *source = 0;
-        source = moloch_js0n_get(ahits+out[i], out[i+1], "_source", &source_len);
+        const uint8_t     *source = 0;
+        source = arkime_js0n_get(ahits + out[i], out[i + 1], "_source", &source_len);
         if (!source) {
             continue;
         }
 
-        moloch_field_define_json(id, id_len, source, source_len);
+        arkime_field_define_json(id, id_len, source, source_len);
     }
     free(data);
 }
 /******************************************************************************/
-void moloch_db_add_field(char *group, char *kind, char *expression, char *friendlyName, char *dbField, char *help, int haveap, va_list ap)
+LOCAL BSB   fieldBSB;
+LOCAL int   fieldBSBTimeout;
+LOCAL gboolean arkime_db_fieldsbsb_timeout(gpointer user_data)
 {
-    char                   key[100];
-    int                    key_len;
-    BSB                    bsb;
-
+    if (fieldBSB.buf && BSB_LENGTH(fieldBSB) > 0) {
+        if (user_data == 0)
+            arkime_http_schedule(esServer, "POST", "/_bulk", 6, (char *)fieldBSB.buf, BSB_LENGTH(fieldBSB), NULL, ARKIME_HTTP_PRIORITY_BEST, NULL, NULL);
+        else {
+            uint8_t       *data = arkime_http_send_sync(esServer, "POST", "/_bulk", 6, (char *)fieldBSB.buf, BSB_LENGTH(fieldBSB), NULL, NULL, NULL);
+            arkime_http_free_buffer(fieldBSB.buf);
+            if (data)
+                free(data);
+        }
+        BSB_INIT(fieldBSB, arkime_http_get_buffer(config.dbBulkSize), config.dbBulkSize);
+    }
+    fieldBSBTimeout = 0;
+    return G_SOURCE_REMOVE;
+}
+/******************************************************************************/
+LOCAL void arkime_db_fieldbsb_make()
+{
+    if (!fieldBSB.buf) {
+        BSB_INIT(fieldBSB, arkime_http_get_buffer(config.dbBulkSize), config.dbBulkSize);
+        fieldBSBTimeout = g_timeout_add_seconds(1, arkime_db_fieldsbsb_timeout, 0);
+    } else if (BSB_REMAINING(fieldBSB) < 1000) {
+        g_source_remove(fieldBSBTimeout);
+        arkime_db_fieldsbsb_timeout(0);
+        fieldBSBTimeout = g_timeout_add_seconds(1, arkime_db_fieldsbsb_timeout, 0);
+    }
+}
+/******************************************************************************/
+void arkime_db_add_field(const char *group, const char *kind, const char *expression, const char *friendlyName, const char *dbField, const char *help, int haveap, va_list ap)
+{
     if (config.dryRun)
         return;
 
-    char                  *json = moloch_http_get_buffer(10000);
+    arkime_db_fieldbsb_make();
 
-    BSB_INIT(bsb, json, 10000);
-
-    key_len = snprintf(key, sizeof(key), "/%sfields/_doc/%s", config.prefix, expression);
-
-    BSB_EXPORT_sprintf(bsb, "{\"friendlyName\": \"%s\", \"group\": \"%s\", \"help\": \"%s\", \"dbField2\": \"%s\", \"type\": \"%s\"",
-             friendlyName,
-             group,
-             help,
-             dbField,
-             kind);
+    BSB_EXPORT_sprintf(fieldBSB, "{\"index\": {\"_index\": \"%sfields\", \"_id\": \"%s\"}}\n", config.prefix, expression);
+    BSB_EXPORT_sprintf(fieldBSB, "{\"friendlyName\": \"%s\", \"group\": \"%s\", \"help\": \"%s\", \"dbField2\": \"%s\", \"type\": \"%s\"",
+                       friendlyName,
+                       group,
+                       help,
+                       dbField,
+                       kind);
 
     if (haveap) {
         while (1) {
-            char *field = va_arg(ap, char *);
+            const char *field = va_arg(ap, char *);
             if (!field)
                 break;
 
-            char *value = va_arg(ap, char *);
+            const char *value = va_arg(ap, char *);
             if (!value)
                 break;
 
-            BSB_EXPORT_sprintf(bsb, ", \"%s\": ", field);
+            BSB_EXPORT_sprintf(fieldBSB, ", \"%s\": ", field);
             if (*value == '{' || *value == '[')
-                BSB_EXPORT_sprintf(bsb, "%s", value);
+                BSB_EXPORT_sprintf(fieldBSB, "%s", value);
             else
-                BSB_EXPORT_sprintf(bsb, "\"%s\"", value);
+                BSB_EXPORT_sprintf(fieldBSB, "\"%s\"", value);
         }
     }
 
-    BSB_EXPORT_u08(bsb, '}');
-    moloch_http_schedule(esServer, "POST", key, key_len, json, BSB_LENGTH(bsb), NULL, MOLOCH_HTTP_PRIORITY_NORMAL, NULL, NULL);
+    BSB_EXPORT_cstr(fieldBSB, "}\n");
 }
 /******************************************************************************/
-void moloch_db_update_field(char *expression, char *name, char *value)
+void arkime_db_delete_field(const char *expression)
 {
-    char                   key[1000];
-    int                    key_len;
-    BSB                    bsb;
-
     if (config.dryRun)
         return;
 
-    char                  *json = moloch_http_get_buffer(1000);
+    arkime_db_fieldbsb_make();
 
-    BSB_INIT(bsb, json, 1000);
-
-    key_len = snprintf(key, sizeof(key), "/%sfields/_doc/%s/_update", config.prefix, expression);
-
-    BSB_EXPORT_sprintf(bsb, "{\"doc\": {\"%s\":", name);
-    if (*value == '[') {
-        BSB_EXPORT_sprintf(bsb, "%s", value);
-    } else {
-        moloch_db_js0n_str(&bsb, (unsigned char*)value, TRUE);
-    }
-    BSB_EXPORT_sprintf(bsb, "}}");
-    moloch_http_schedule(esServer, "POST", key, key_len, json, BSB_LENGTH(bsb), NULL, MOLOCH_HTTP_PRIORITY_NORMAL, NULL, NULL);
+    BSB_EXPORT_sprintf(fieldBSB, "{\"delete\": {\"_index\": \"%sfields\", \"_id\": \"%s\"}}\n", config.prefix, expression);
 }
 /******************************************************************************/
-void moloch_db_update_filesize(uint32_t fileid, uint64_t filesize, uint64_t packetsSize, uint32_t packets)
+void arkime_db_update_field(const char *expression, const char *name, const char *value)
+{
+    if (config.dryRun)
+        return;
+
+    arkime_db_fieldbsb_make();
+
+    BSB_EXPORT_sprintf(fieldBSB, "{\"update\": {\"_index\": \"%sfields\", \"_id\": \"%s\"}}\n", config.prefix, expression);
+
+    BSB_EXPORT_sprintf(fieldBSB, "{\"doc\": {\"%s\":", name);
+    if (*value == '[') {
+        BSB_EXPORT_sprintf(fieldBSB, "%s", value);
+    } else {
+        arkime_db_js0n_str(&fieldBSB, (uint8_t *)value, TRUE);
+    }
+    BSB_EXPORT_cstr(fieldBSB, "}}\n");
+}
+/******************************************************************************/
+void arkime_db_update_filesize(uint32_t fileid, uint64_t filesize, uint64_t packetsSize, uint32_t packets)
 {
     char                   key[1000];
     int                    key_len;
@@ -2512,18 +2608,18 @@ void moloch_db_update_filesize(uint32_t fileid, uint64_t filesize, uint64_t pack
     if (config.dryRun)
         return;
 
-    char                  *json = moloch_http_get_buffer(2000);
+    char                  *json = arkime_http_get_buffer(2000);
 
-    key_len = snprintf(key, sizeof(key), "/%sfiles/_doc/%s-%u/_update", config.prefix, config.nodeName, fileid);
+    key_len = snprintf(key, sizeof(key), "/%sfiles/_update/%s-%u", config.prefix, config.nodeName, fileid);
 
     json_len = snprintf(json, 2000, "{\"doc\": {\"filesize\": %" PRIu64 ", \"packetsSize\": %" PRIu64 ", \"packets\": %u}}", filesize, packetsSize, packets);
     if (config.debug)
         LOG("Updated %s-%u with %s", config.nodeName, fileid, json);
 
-    moloch_http_schedule(esServer, "POST", key, key_len, json, json_len, NULL, MOLOCH_HTTP_PRIORITY_DROPABLE, NULL, NULL);
+    arkime_http_schedule(esServer, "POST", key, key_len, json, json_len, NULL, ARKIME_HTTP_PRIORITY_DROPABLE, NULL, NULL);
 }
 /******************************************************************************/
-gboolean moloch_db_file_exists(const char *filename, uint32_t *outputId)
+gboolean arkime_db_file_exists(const char *filename, uint32_t *outputId)
 {
     size_t                 data_len;
     char                   key[2000];
@@ -2531,10 +2627,10 @@ gboolean moloch_db_file_exists(const char *filename, uint32_t *outputId)
 
     key_len = snprintf(key, sizeof(key), "/%sfiles/_search?rest_total_hits_as_int&size=1&sort=num:desc&q=node:%s+AND+name:\"%s\"", config.prefix, config.nodeName, filename);
 
-    unsigned char *data = moloch_http_get(esServer, key, key_len, &data_len);
+    uint8_t *data = arkime_http_get(esServer, key, key_len, &data_len);
 
     uint32_t           hits_len;
-    unsigned char     *hits = moloch_js0n_get(data, data_len, "hits", &hits_len);
+    const uint8_t     *hits = arkime_js0n_get(data, data_len, "hits", &hits_len);
 
     if (!hits_len || !hits) {
         free(data);
@@ -2542,7 +2638,7 @@ gboolean moloch_db_file_exists(const char *filename, uint32_t *outputId)
     }
 
     uint32_t           total_len;
-    unsigned char     *total = moloch_js0n_get(hits, hits_len, "total", &total_len);
+    const uint8_t     *total = arkime_js0n_get(hits, hits_len, "total", &total_len);
 
     if (!total_len || !total) {
         free(data);
@@ -2555,22 +2651,22 @@ gboolean moloch_db_file_exists(const char *filename, uint32_t *outputId)
     }
 
     if (outputId) {
-        hits = moloch_js0n_get(data, data_len, "hits", &hits_len);
+        hits = arkime_js0n_get(data, data_len, "hits", &hits_len);
 
         uint32_t           hit_len;
-        unsigned char     *hit = moloch_js0n_get(hits, hits_len, "hits", &hit_len);
+        const uint8_t     *hit = arkime_js0n_get(hits, hits_len, "hits", &hit_len);
 
         uint32_t           source_len;
-        unsigned char     *source = 0;
+        const uint8_t     *source = 0;
 
         /* Remove array wrapper */
-        source = moloch_js0n_get(hit+1, hit_len-2, "_source", &source_len);
+        source = arkime_js0n_get(hit + 1, hit_len - 2, "_source", &source_len);
 
         uint32_t           len;
-        unsigned char     *value;
+        const uint8_t     *value;
 
-        if ((value = moloch_js0n_get(source, source_len, "num", &len))) {
-            *outputId = atoi((char*)value);
+        if ((value = arkime_js0n_get(source, source_len, "num", &len))) {
+            *outputId = atoi((char *)value);
         } else {
             LOGEXIT("ERROR - Files check has no num field in %.*s", source_len, source);
         }
@@ -2580,26 +2676,26 @@ gboolean moloch_db_file_exists(const char *filename, uint32_t *outputId)
     return TRUE;
 }
 /******************************************************************************/
-int moloch_db_can_quit()
+int arkime_db_can_quit()
 {
     int thread;
     for (thread = 0; thread < config.packetThreads; thread++) {
         // Make sure we can lock, that means a save isn't in progress
-        MOLOCH_LOCK(dbInfo[thread].lock);
+        ARKIME_LOCK(dbInfo[thread].lock);
         if (dbInfo[thread].json && BSB_LENGTH(dbInfo[thread].bsb) > 0) {
-            MOLOCH_UNLOCK(dbInfo[thread].lock);
+            ARKIME_UNLOCK(dbInfo[thread].lock);
 
-            moloch_db_flush_gfunc((gpointer)1);
+            arkime_db_flush_gfunc((gpointer)1);
             if (config.debug)
                 LOG ("Can't quit, sJson[%d] %u", thread, (uint32_t)BSB_LENGTH(dbInfo[thread].bsb));
             return 1;
         }
-        MOLOCH_UNLOCK(dbInfo[thread].lock);
+        ARKIME_UNLOCK(dbInfo[thread].lock);
     }
 
-    if (moloch_http_queue_length(esServer) > 0) {
+    if (arkime_http_queue_length(esServer) > 0) {
         if (config.debug)
-            LOG ("Can't quit, moloch_http_queue_length(esServer) %d", moloch_http_queue_length(esServer));
+            LOG ("Can't quit, arkime_http_queue_length(esServer) %d", arkime_http_queue_length(esServer));
         return 1;
     }
 
@@ -2609,7 +2705,7 @@ int moloch_db_can_quit()
 /* Use a thread for sending the stats instead of main thread so that if http is
  * being slow we still try and send event
  */
-LOCAL void *moloch_db_stats_thread(void *UNUSED(threadp))
+LOCAL void *arkime_db_stats_thread(void *UNUSED(threadp))
 {
     uint64_t       lastTime[4] = {0, 0, 0, 0};
     struct timeval currentTime;
@@ -2624,7 +2720,7 @@ LOCAL void *moloch_db_stats_thread(void *UNUSED(threadp))
 
         for (int i = 0; i < 4; i++) {
             if (currentTime.tv_sec - lastTime[i] >= times[i]) {
-                moloch_db_update_stats(i, 0);
+                arkime_db_update_stats(i, 0);
                 lastTime[i] = currentTime.tv_sec;
             }
         }
@@ -2633,21 +2729,21 @@ LOCAL void *moloch_db_stats_thread(void *UNUSED(threadp))
 }
 /******************************************************************************/
 LOCAL  guint timers[10];
-void moloch_db_init()
+void arkime_db_init()
 {
     if (config.tests) {
-        MOLOCH_LOCK(outputed);
+        ARKIME_LOCK(outputed);
         fprintf(stderr, "{\"sessions3\": [\n");
         fflush(stderr);
-        MOLOCH_UNLOCK(outputed);
+        ARKIME_UNLOCK(outputed);
     }
     if (!config.dryRun) {
-        esServer = moloch_http_create_server(config.elasticsearch, config.maxESConns, config.maxESRequests, config.compressES);
+        esServer = arkime_http_create_server(config.elasticsearch, config.maxESConns, config.maxESRequests, config.compressES);
 
         static char *headers[4] = {"Content-Type: application/json", "Expect:", NULL, NULL};
 
-        char* elasticsearchAPIKey = moloch_config_str(NULL, "elasticsearchAPIKey", NULL);
-        char* elasticsearchBasicAuth = moloch_config_str(NULL, "elasticsearchBasicAuth", NULL);
+        const char *elasticsearchAPIKey = arkime_config_str(NULL, "elasticsearchAPIKey", NULL);
+        const char *elasticsearchBasicAuth = arkime_config_str(NULL, "elasticsearchBasicAuth", NULL);
         if (elasticsearchAPIKey) {
             static char auth[1024];
             snprintf(auth, sizeof(auth), "Authorization: ApiKey %s", elasticsearchAPIKey);
@@ -2664,32 +2760,32 @@ void moloch_db_init()
             headers[2] = auth;
         }
 
-        moloch_http_set_headers(esServer, headers);
-        moloch_http_set_print_errors(esServer);
+        arkime_http_set_headers(esServer, headers);
+        arkime_http_set_print_errors(esServer);
 
-        int maxRetries = moloch_config_int(NULL, "esMaxRetries", 2, 0, 10);
-        moloch_http_set_retries(esServer, maxRetries);
+        int maxRetries = arkime_config_int(NULL, "esMaxRetries", 2, 0, 10);
+        arkime_http_set_retries(esServer, maxRetries);
 
-        char* clientCert = moloch_config_str(NULL, "esClientCert", NULL);
-        char* clientKey = moloch_config_str(NULL, "esClientKey", NULL);
-        char* clientKeyPass = moloch_config_str(NULL, "esClientKeyPass", NULL);
-        moloch_http_set_client_cert(esServer, clientCert, clientKey, clientKeyPass);
+        char *clientCert = arkime_config_str(NULL, "esClientCert", NULL);
+        char *clientKey = arkime_config_str(NULL, "esClientKey", NULL);
+        char *clientKeyPass = arkime_config_str(NULL, "esClientKeyPass", NULL);
+        arkime_http_set_client_cert(esServer, clientCert, clientKey, clientKeyPass);
 
-        esBulkQuery = moloch_config_str(NULL, "esBulkQuery", "/_bulk");
+        esBulkQuery = arkime_config_str(NULL, "esBulkQuery", "/_bulk");
         esBulkQueryLen = strlen(esBulkQuery);
 
-        moloch_db_health_check((gpointer)1L);
+        arkime_db_health_check((gpointer)1L);
     }
     myPid = getpid() & 0xffff;
     gettimeofday(&startTime, NULL);
     if (!config.dryRun) {
-        moloch_db_check();
-        moloch_db_load_file_num();
-        moloch_db_load_stats();
-        moloch_db_load_fields();
+        arkime_db_check();
+        arkime_db_load_file_num();
+        arkime_db_load_stats();
+        arkime_db_load_fields();
     }
 
-    moloch_add_can_quit(moloch_db_can_quit, "DB");
+    arkime_add_can_quit(arkime_db_can_quit, "DB");
 
     // Find the first geo file that exists in our list and use that one.
     // If none could be loaded, and setting not blank, print out warning
@@ -2698,7 +2794,7 @@ void moloch_db_init()
     if (config.geoLite2Country && config.geoLite2Country[0]) {
         for (i = 0; config.geoLite2Country[i]; i++) {
             if (stat(config.geoLite2Country[i], &sb) == 0) {
-                moloch_config_monitor_file("country file", config.geoLite2Country[i], moloch_db_load_geo_country);
+                arkime_config_monitor_file("country file", config.geoLite2Country[i], arkime_db_load_geo_country);
                 break;
             }
         }
@@ -2709,7 +2805,7 @@ void moloch_db_init()
     if (config.geoLite2ASN && config.geoLite2ASN[0]) {
         for (i = 0; config.geoLite2ASN[i]; i++) {
             if (stat(config.geoLite2ASN[i], &sb) == 0) {
-                moloch_config_monitor_file("asn file", config.geoLite2ASN[i], moloch_db_load_geo_asn);
+                arkime_config_monitor_file("asn file", config.geoLite2ASN[i], arkime_db_load_geo_asn);
                 break;
             }
         }
@@ -2718,65 +2814,86 @@ void moloch_db_init()
         }
     }
     if (config.ouiFile)
-        moloch_config_monitor_file_msg("oui file", config.ouiFile, moloch_db_load_oui, "ERROR - Maybe try running " CONFIG_PREFIX " /bin/moloch_update_geo.sh");
+        arkime_config_monitor_file_msg("oui", config.ouiFile, arkime_db_load_oui, "- FIX by running " CONFIG_PREFIX "/bin/" PACKAGE "_update_geo.sh");
     if (config.rirFile)
-        moloch_config_monitor_file_msg("rir file", config.rirFile, moloch_db_load_rir, "ERROR - Maybe try running " CONFIG_PREFIX " /bin/moloch_update_geo.sh");
+        arkime_config_monitor_file_msg("rir", config.rirFile, arkime_db_load_rir, "- FIX by running " CONFIG_PREFIX "/bin/" PACKAGE "_update_geo.sh");
 
     if (!config.dryRun) {
         int t = 0;
         if (!config.noStats) {
-            g_thread_unref(g_thread_new("moloch-stats", &moloch_db_stats_thread, NULL));
+            g_thread_unref(g_thread_new("arkime-stats", &arkime_db_stats_thread, NULL));
         }
-        timers[t++] = g_timeout_add_seconds(  1, moloch_db_flush_gfunc, 0);
-        if (moloch_config_boolean(NULL, "dbEsHealthCheck", TRUE)) {
-            timers[t++] = g_timeout_add_seconds( 30, moloch_db_health_check, 0);
+        timers[t++] = g_timeout_add_seconds(  1, arkime_db_flush_gfunc, 0);
+        if (arkime_config_boolean(NULL, "dbEsHealthCheck", TRUE)) {
+            timers[t++] = g_timeout_add_seconds( 30, arkime_db_health_check, 0);
         }
     }
 
-    ecsEventProvider = moloch_config_str(NULL, "ecsEventProvider", NULL);
+    ecsEventProvider = arkime_config_str(NULL, "ecsEventProvider", NULL);
+    ecsEventDataset = arkime_config_str(NULL, "ecsEventDataset", NULL);
 
     int thread;
     for (thread = 0; thread < config.packetThreads; thread++) {
-        MOLOCH_LOCK_INIT(dbInfo[thread].lock);
+        ARKIME_LOCK_INIT(dbInfo[thread].lock);
         dbInfo[thread].prefixTime = -1;
     }
 }
 /******************************************************************************/
-void moloch_db_exit()
+void arkime_db_exit()
 {
     if (!config.dryRun) {
+        if (fieldBSBTimeout)
+            g_source_remove(fieldBSBTimeout);
+
+        if (fieldBSB.buf && BSB_LENGTH(fieldBSB) > 0) {
+            arkime_db_fieldsbsb_timeout((gpointer)1);
+        }
+
+        if (fieldBSB.buf) {
+            arkime_http_free_buffer(fieldBSB.buf);
+            fieldBSB.buf = 0;
+        }
+
         for (int i = 0; timers[i]; i++) {
             g_source_remove(timers[i]);
         }
 
-        moloch_db_flush_gfunc((gpointer)1);
+        arkime_db_flush_gfunc((gpointer)1);
         dbExit = 1;
         if (!config.noStats) {
-            moloch_db_update_stats(0, 1);
+            arkime_db_update_stats(0, 1);
         }
-        unsigned char *data = moloch_http_get(esServer, "/_refresh", 9, NULL);
+        uint8_t *data = arkime_http_get(esServer, "/_refresh", 9, NULL);
         if (data)
             free(data);
-        moloch_http_free_server(esServer);
+        arkime_http_free_server(esServer);
     }
 
     if (config.tests) {
         usleep(10000);
-        MOLOCH_LOCK(outputed);
+        ARKIME_LOCK(outputed);
         fprintf(stderr, "]}\n");
         fflush(stderr);
-        MOLOCH_UNLOCK(outputed);
+        ARKIME_UNLOCK(outputed);
     }
 
     if (ipTree4) {
-        Destroy_Patricia(ipTree4, moloch_db_free_local_ip);
-        Destroy_Patricia(ipTree6, moloch_db_free_local_ip);
+        arkime_db_free_override_ips(ipTree4);
+        arkime_db_free_override_ips(ipTree6);
         ipTree4 = 0;
         ipTree6 = 0;
     }
 
     if (config.debug) {
-        LOG("totalPackets: %" PRId64 " totalSessions: %" PRId64 " writtenBytes: %" PRId64 " unwrittenBytes: %" PRId64,
-             totalPackets, totalSessions, writtenBytes, unwrittenBytes);
+        LOG("totalPackets: %" PRId64 " totalSessions: %" PRId64 " writtenBytes: %" PRId64 " unwrittenBytes: %" PRId64 " pstats: %" PRIu64 "/%" PRIu64 "/%" PRIu64 "/%" PRIu64 "/%" PRIu64 "/%" PRIu64 "/%" PRIu64,
+            totalPackets, totalSessions, writtenBytes, unwrittenBytes,
+            packetStats[ARKIME_PACKET_DO_PROCESS],
+            packetStats[ARKIME_PACKET_IP_DROPPED],
+            packetStats[ARKIME_PACKET_OVERLOAD_DROPPED],
+            packetStats[ARKIME_PACKET_CORRUPT],
+            packetStats[ARKIME_PACKET_UNKNOWN],
+            packetStats[ARKIME_PACKET_IPPORT_DROPPED],
+            packetStats[ARKIME_PACKET_DUPLICATE_DROPPED]
+           );
     }
 }

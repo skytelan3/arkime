@@ -1,3 +1,7 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="container-fluid">
     <Alert :initialAlert="alertMessage"
@@ -25,12 +29,17 @@
 
     <b-tabs content-class="mt-3"
       :dark="getTheme ==='dark'">
-      <b-tab title="Sources" active>
+      <b-tab
+        title="Sources"
+        @click="clickTab('sources')"
+        :active="activeTab === 'sources'">
         <div v-if="sourceStats.length > 0">
           <b-table striped hover small borderless
             :dark="getTheme ==='dark'"
             :items="sourceStats"
-            :fields="sourceTableFields">
+            :fields="sourceTableFields"
+            :sort-by.sync="sortBySources"
+            :sort-desc.sync="sortDescSources">
           </b-table>
         </div>
         <div v-else-if="searchTerm"
@@ -41,12 +50,17 @@
           </div>
         </div>
       </b-tab>
-      <b-tab title="Types">
+      <b-tab
+        title="Types"
+        @click="clickTab('types')"
+        :active="activeTab === 'types'">
         <div v-if="typeStats.length > 0">
           <b-table striped hover small borderless
             :dark="getTheme ==='dark'"
             :items="typeStats"
-            :fields="typeTableFields">
+            :fields="typeTableFields"
+            :sort-by.sync="sortByTypes"
+            :sort-desc.sync="sortDescTypes">
           </b-table>
         </div>
         <div v-else-if="searchTerm"
@@ -112,10 +126,21 @@ export default {
       sourceTableFields: [],
       typeTableFields: [],
       startTime: undefined,
-      searchTerm: ''
+      searchTerm: '',
+      sortBySources: 'source',
+      sortDescSources: false,
+      sortByTypes: 'type',
+      sortDescTypes: false,
+      activeTab: 'sources'
     };
   },
   mounted () {
+    // set active tab
+    const hash = location.hash.substring(1, location.hash.length);
+    if (hash === 'types') {
+      this.activeTab = 'types';
+    }
+
     this.loadResourceStats();
     this.setLoadInterval();
   },
@@ -141,7 +166,7 @@ export default {
           } else {
             this.sourceStats = data.sources;
             Object.keys(this.sourceStats[0]).forEach(key => {
-              const obj = { key: key, sortable: true };
+              const obj = { key, sortable: true };
               if (key !== 'source') {
                 obj.formatter = (value) => value.toString().replace(/\B(?<!\.\d*)(?=(\d{3})+(?!\d))/g, ',');
                 obj.tdClass = 'text-right';
@@ -157,7 +182,7 @@ export default {
           } else {
             this.typeStats = data.types;
             Object.keys(this.typeStats[0]).forEach(key => {
-              const obj = { key: key, sortable: true };
+              const obj = { key, sortable: true };
               if (key !== 'type') {
                 obj.formatter = (value) => value.toString().replace(/\B(?<!\.\d*)(?=(\d{3})+(?!\d))/g, ',');
                 obj.tdClass = 'text-right';
@@ -188,6 +213,10 @@ export default {
         searchTimeout = null;
         this.loadResourceStats();
       }, 500);
+    },
+    clickTab (tab) {
+      location.hash = tab;
+      this.activeTab = tab;
     }
   },
   beforeDestroy () {

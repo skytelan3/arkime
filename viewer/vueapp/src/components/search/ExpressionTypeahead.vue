@@ -1,3 +1,7 @@
+<!--
+Copyright Yahoo Inc.
+SPDX-License-Identifier: Apache-2.0
+-->
 <template>
 
   <div class="mb-1"
@@ -25,7 +29,7 @@
         placeholder="Search"
         v-model="expression"
         v-caret-pos="caretPos"
-        v-focus-input="focusInput"
+        v-focus="focusInput"
         @input="debounceExprChange"
         @keydown.enter.prevent.stop="enterClick"
         @keydown.esc.tab.enter.down.up.prevent.stop="keyup($event)"
@@ -148,8 +152,8 @@
 import UserService from '../users/UserService';
 import FieldService from './FieldService';
 import CaretPos from '../utils/CaretPos';
-import FocusInput from '../utils/FocusInput';
 import { mixin as clickaway } from 'vue-clickaway';
+import Focus from '../../../../../common/vueapp/Focus';
 
 let tokens;
 let timeout;
@@ -159,7 +163,7 @@ const operations = ['==', '!=', '<', '<=', '>', '>='];
 export default {
   name: 'ExpressionTypeahead',
   mixins: [clickaway],
-  directives: { CaretPos, FocusInput },
+  directives: { CaretPos, Focus },
   data: function () {
     return {
       activeIdx: -1,
@@ -572,6 +576,25 @@ export default {
         this.results = this.findMatch(lastToken, views);
       }
 
+      // autocomplete variables
+      if (/^(\$)/.test(lastToken)) {
+        this.loadingValues = true;
+        let url = 'api/shortcuts?fieldFormat=true&map=true';
+        if (field && field.type) {
+          url += `&fieldType=${field.type}`;
+        }
+        this.$http.get(url).then((response) => {
+          this.loadingValues = false;
+          const escapedToken = lastToken.replaceAll('$', '\\$');
+          this.results = this.findMatch(escapedToken, response.data);
+        }).catch((error) => {
+          this.loadingValues = false;
+          this.loadingError = error.text || error;
+        });
+
+        return;
+      }
+
       // Don't try and autocomplete these fields
       if (field.noFacet || field.regex || field.type.match(/textfield/)) { return; }
 
@@ -622,29 +645,10 @@ export default {
         }
       }
 
-      // autocomplete variables
-      if (/^(\$)/.test(lastToken)) {
-        this.loadingValues = true;
-        let url = 'api/shortcuts?fieldFormat=true&map=true';
-        if (field && field.type) {
-          url += `&fieldType=${field.type}`;
-        }
-        this.$http.get(url).then((response) => {
-          this.loadingValues = false;
-          const escapedToken = lastToken.replace('$', '\\$');
-          this.results = this.findMatch(escapedToken, response.data);
-        }).catch((error) => {
-          this.loadingValues = false;
-          this.loadingError = error.text || error;
-        });
-
-        return;
-      }
-
       // autocomplete other values after 2 chars
-      if (lastToken.trim().length >= 2) {
+      if (lastToken.trim().length >= 2 && lastToken[0] !== '"') {
         const params = { // build parameters for getting value(s)
-          autocomplete: true,
+          autocomplete: lastToken,
           field: field.dbField
         };
 
@@ -656,7 +660,8 @@ export default {
           params.stopTime = this.$route.query.stopTime;
         }
 
-        if (field.type === 'ip') {
+        if (field.type === 'integer') {
+        } else if (field.type === 'ip') {
           params.expression = token + '==' + lastToken;
         } else {
           params.expression = token + '==' + lastToken + '*';

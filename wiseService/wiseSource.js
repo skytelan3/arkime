@@ -3,24 +3,15 @@
  *
  * Copyright 2012-2016 AOL Inc. All rights reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this Software except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
  */
 'use strict';
 
 const csv = require('csv');
-const request = require('request');
+const axios = require('axios');
 const fs = require('fs');
 const iptrie = require('iptrie');
+const ArkimeUtil = require('../common/arkimeUtil');
 
 /**
  * All sources need to have the WISESource as their top base class.
@@ -154,7 +145,7 @@ class WISESource {
       const pos = this.api.addField(line);
       const match = line.match(/shortcut:([^;]+)/);
       if (match) {
-        this.shortcuts[match[1]] = { pos: pos, mod: 0 };
+        this.shortcuts[match[1]] = { pos, mod: 0 };
         const kind = line.match(/kind:([^;]+)/);
         if (kind) {
           if (kind[1] === 'lotermfield') {
@@ -231,15 +222,15 @@ class WISESource {
       const args = [];
       const parts = lines[l].split(';');
       for (let p = 1; p < parts.length; p++) {
-        const kv = splitRemain(parts[p], '=', 1);
+        const kv = ArkimeUtil.splitRemain(parts[p], '=', 1);
         if (kv.length !== 2) {
           console.log('WARNING -', this.section, "- ignored extra piece '" + parts[p] + "' from line '" + lines[l] + "'");
           continue;
         }
         if (this.shortcuts[kv[0]] !== undefined) {
           args.push(this.shortcuts[kv[0]].pos);
-        } else if (WISESource.field2Pos[kv[0]]) {
-          args.push(WISESource.field2Pos[kv[0]]);
+        } else if (WISESource.field2Pos.has(kv[0])) {
+          args.push(WISESource.field2Pos.get(kv[0]));
         } else {
           args.push(this.api.addField('field:' + kv[0]));
         }
@@ -260,27 +251,10 @@ class WISESource {
    * @param {function} setCb - the function to call for each row found
    * @param {function} endCB - all done parsing
    */
-  parseJSON (body, setCb, endCb) {
+  parseJSONArray (json, setCb, endCb) {
     try {
-      let json = JSON.parse(body);
-
       if (this.keyPath === undefined) {
         return endCb('No keyPath set');
-      }
-
-      if (this.arrayPath !== undefined) {
-        const arrayPath = this.arrayPath.split('.');
-        for (let i = 0; i < arrayPath.length; i++) {
-          json = json[arrayPath[i]];
-          if (!json) {
-            return endCb(`Couldn't find ${arrayPath[i]} in results`);
-          }
-        }
-      }
-
-      // The rest of the code assumes an array
-      if (!Array.isArray(json)) {
-        json = [json];
       }
 
       const keyPath = this.keyPath.split('.');
@@ -347,6 +321,59 @@ class WISESource {
     }
   }
 
+  // ----------------------------------------------------------------------------
+  /**
+   * Util function to parse JSON formatted data
+   * @param {string} body - the raw JSON data
+   * @param {function} setCb - the function to call for each row found
+   * @param {function} endCB - all done parsing
+   */
+  parseJSON (body, setCb, endCb) {
+    try {
+      let json = JSON.parse(body);
+
+      if (this.arrayPath !== undefined) {
+        const arrayPath = this.arrayPath.split('.');
+        for (let i = 0; i < arrayPath.length; i++) {
+          json = json[arrayPath[i]];
+          if (!json) {
+            return endCb(`Couldn't find ${arrayPath[i]} in results`);
+          }
+        }
+      }
+
+      // The rest of the code assumes an array
+      if (!Array.isArray(json)) {
+        json = [json];
+      }
+
+      return this.parseJSONArray(json, setCb, endCb);
+    } catch (e) {
+      endCb(e);
+    }
+  }
+
+  // ----------------------------------------------------------------------------
+  /**
+   * Util function to parse JSONL formatted data
+   * @param {string} body - the raw JSONL data
+   * @param {function} setCb - the function to call for each row found
+   * @param {function} endCB - all done parsing
+   */
+  parseJSONL (body, setCb, endCb) {
+    const json = body.toString().split('\n').reduce((acc, line) => {
+      try {
+        if (line.trim() !== '') {
+          acc.push(JSON.parse(line));
+        }
+      } catch (e) {
+        console.log(this.section, `Skipping bad JSON line: ${line}`);
+      }
+      return acc;
+    }, []);
+    return this.parseJSONArray(json, setCb, endCb);
+  }
+
   /** The encoded tags result if options.tagsSetting was set to true */
   tagsResult;
 
@@ -380,6 +407,8 @@ class WISESource {
       this.parse = this.parseTagger;
     } else if (this.format === 'json') {
       this.parse = this.parseJSON;
+    } else if (this.format === 'jsonl') {
+      this.parse = this.parseJSONL;
     } else {
       throw new Error(`${this.section} - ERROR not loading unknown data format - ${this.format}`);
     }
@@ -402,9 +431,9 @@ class WISESource {
   static emptyResult = Buffer.alloc(1);
 
   // ----------------------------------------------------------------------------
-  static field2Pos = {};
-  static field2Info = {};
-  static pos2Field = {};
+  static field2Pos = new Map();
+  static field2Info = new Map();
+  static pos2Field = new Map();
 
   // ----------------------------------------------------------------------------
   /**
@@ -495,7 +524,7 @@ class WISESource {
       const len = results[offset + 1];
       const value = results.toString('utf8', offset + 2, offset + 2 + len - 1);
       offset += 2 + len;
-      collection.push({ field: WISESource.pos2Field[pos], len: len - 1, value: value });
+      collection.push({ field: WISESource.pos2Field.get(pos), len: len - 1, value });
     }
 
     return JSON.stringify(collection).replace(/},{/g, '},\n{');
@@ -522,21 +551,21 @@ class WISESource {
         headers['If-Modified-Since'] = stat.mtime.toUTCString();
       }
     }
-    let statusCode;
-    console.log(url);
-    request({ url: url, headers: headers })
-      .on('response', function (response) {
-        statusCode = response.statusCode;
-        if (response.statusCode === 200) {
-          this.pipe(fs.createWriteStream(file));
-        }
-      })
-      .on('error', (error) => {
-        console.log(error);
-      })
-      .on('end', () => {
-        setTimeout(cb, 100, statusCode);
+    axios({
+      method: 'GET',
+      url,
+      responseType: 'stream',
+      headers
+    }).then((response) => {
+      response.data.pipe(fs.createWriteStream(file)).on('close', () => {
+        setTimeout(cb, 100, 200);
       });
+    }).catch((err) => {
+      if (err?.response?.status !== 304) {
+        console.log(err);
+      }
+      setTimeout(cb, 100, err?.response?.status ?? 404);
+    });
   };
 
   // ----------------------------------------------------------------------------
@@ -601,15 +630,3 @@ class WISESource {
  */
 
 module.exports = WISESource;
-
-// ----------------------------------------------------------------------------
-// https://coderwall.com/p/pq0usg/javascript-string-split-that-ll-return-the-remainder
-function splitRemain (str, separator, limit) {
-  str = str.split(separator);
-  if (str.length <= limit) { return str; }
-
-  const ret = str.splice(0, limit);
-  ret.push(str.join(separator));
-
-  return ret;
-}

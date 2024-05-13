@@ -5,26 +5,10 @@
     "type": "git",
     "url": "https://github.com/arkime/arkime.git"
   },
-  "dependencies": {
-    "compression": "^1.6.2",
-    "fs-ext": "^2.0.0",
-    "method-override": "^2.3.6",
-    "multer": "^1.2.0",
-    "peek-stream": "^1.1.1",
-    "pngjs": "^3.3.3",
-    "re2": "^1.17.3",
-    "save-svg-as-png": "^1.4.5",
-    "serve-favicon": "^2.3.0",
-    "through2": "^2.0.1"
-  },
   "devDependencies": {
-    "d3": "^5.16.0",
+    "d3": "^7.7.0",
     "jquery": "^3.6.0",
-    "qs": "^6.9.4",
-    "sanitize-html": "^2.3.2",
-    "vue-clickaway": "^2.2.2",
-    "vue-clipboard2": "^0.3.0",
-    "vue-color": "^2.4.6"
+    "save-svg-as-png": "^1.4.17"
   },
   "scripts": {
     "bundle": "cd ../ && npm run viewer:bundle",
@@ -36,13 +20,21 @@
     "test": "cd ../ && npm run viewer:testui"
   },
   "engines": {
-    "node": ">= 6.0.0",
+    "node": ">= 18.15.0 < 21",
     "npm": ">= 3.0.0"
   },
   "nodemonConfig": {
+    "ext": "js,json,jade,pug,styl",
     "ignore": [
-      "node_modules/*",
-      "vueapp/*"
+      "node_modules",
+      "vueapp"
+    ],
+    "watch": [
+      ".",
+      "./views/",
+      "../common/",
+      "../tests/config.test.ini",
+      "../capture/parsers/"
     ]
   },
   "browserslist": [
