@@ -661,18 +661,7 @@ class SessionAPIs {
       });
     }
 
-    let packetPos;
-    let fields;
-    try
-    {
-      packetPos = session.fields.packetPos;
-      fields = session.fields;
-    }
-    catch (e)
-    {
-      packetPos = session._source.packetPos;
-      fields = session._source;
-    }
+    const fields = session.fields;
 
     let fileNum;
     let itemPos = 0;

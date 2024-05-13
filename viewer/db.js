@@ -522,19 +522,6 @@ Db.getSession = async (id, options, cb) => {
     }
     delete session._source;
     fixSessionFields(session.fields, unflatten);
-    let packetPos;
-    let fields;
-    try
-    {
-      packetPos = session.fields.packetPos;
-      fields = session.fields;
-    }
-    catch (e)
-    {
-      packetPos = session._source.packetPos;
-      fields = session._source;
-    }
-
     if (!optionsReplaced && options.fields && !options.fields.includes('packetPos')) {
       return cb(null, session);
     }
@@ -558,18 +545,6 @@ Db.search = async (index, type, query, options, cb) => {
     options = undefined;
   }
   query.profile = internals.esProfile;
-
-  let bodyQuery;
-  if (Config.get('elasticsearchVersion', 7) == 6)
-  {
-    bodyQuery = JSON.parse(JSON.stringify(query));
-    bodyQuery._source = query.fields;
-    delete bodyQuery.fields;
-  }
-  else
-  {
-    bodyQuery = query;
-  }
 
   const params = {
     index: fixIndex(index),
@@ -1211,16 +1186,7 @@ async function getShortcutsVersion () {
   });
 
   // get version of the first index (always want the first and only index returned)
-  let shortcutVersion = 0;
-  try
-  {
-    shortcutVersion = doc[Object.keys(doc)[0]]?.mappings?._meta?.version;
-  }
-  catch (e)
-  {
-    shortcutVersion = doc[Object.keys(doc)[0]]?.mappings?._doc?._meta?.version;
-  }
-  return shortcutVersion || 0;
+  return doc[Object.keys(doc)[0]]?.mappings?._meta?.version || 0;
 }
 // updates the shortcuts index version in the remote db so that the local
 // db knows to sync the shortcuts (remote db = user's es)
