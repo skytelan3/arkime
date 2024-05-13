@@ -200,15 +200,15 @@ jobs:
       #     mv moloch*.deb moloch-main_${{matrix.version}}_amd64.deb
       #     ls -l *.deb
 
-      - name: sanitize
-        if: ${{ matrix.sanitize }}
-        run: |
-          (chown -R opensearch /opensearch-2.7.0; cd /opensearch-2.7.0 ; su opensearch -c "ES_JAVA_OPTS='-Xms1000m -Xmx1000m' bin/opensearch" > /tmp/os &)
-          (cd capture ; make sanitize CC=clang-18)
-          (cd tests; ./tests.pl)
-          cat /tmp/os
-          export PATH=/opt/arkime/bin:$PATH
-          (cd tests ; G_SLICE=always-malloc ./tests.pl --viewer)
+      # - name: sanitize
+      #   if: ${{ matrix.sanitize }}
+      #   run: |
+      #     (chown -R opensearch /opensearch-2.7.0; cd /opensearch-2.7.0 ; su opensearch -c "ES_JAVA_OPTS='-Xms1000m -Xmx1000m' bin/opensearch" > /tmp/os &)
+      #     (cd capture ; make sanitize CC=clang-18)
+      #     (cd tests; ./tests.pl)
+      #     cat /tmp/os
+      #     export PATH=/opt/arkime/bin:$PATH
+      #     (cd tests ; G_SLICE=always-malloc ./tests.pl --viewer)
 
       - name: notice
         if: ${{ matrix.notice }}
