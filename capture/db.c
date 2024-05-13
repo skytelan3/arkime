@@ -667,7 +667,7 @@ void arkime_db_save_session(ArkimeSession_t *session, int final)
             snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02dh%02d", tmp.tm_year % 100, tmp.tm_mon + 1, tmp.tm_mday, (tmp.tm_hour / 12) * 12);
             break;
         case ARKIME_ROTATE_DAILY:
-            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02d%02d%02d", tmp.tm_year % 100, tmp.tm_mon + 1, tmp.tm_mday);
+            snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%04d.%02d.%02d", tmp.tm_year + 1900, tmp.tm_mon + 1, tmp.tm_mday);
             break;
         case ARKIME_ROTATE_WEEKLY:
             snprintf(dbInfo[thread].prefix, sizeof(dbInfo[thread].prefix), "%02dw%02d", tmp.tm_year % 100, tmp.tm_yday / 7);
