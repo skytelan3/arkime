@@ -18,8 +18,8 @@ pcapDir=PCAP_DIR_LIST
 viewPort = 8005
 
 # IP에 따라 AS 번호 매핑
-geoLite2Country = ARKIME_INSTALL_DIR/etc/GeoLite2-Country.mmdb
-geoLite2ASN = ARKIME_INSTALL_DIR/etc/GeoLite2-ASN.mmdb
+geoLite2Country = ARKIME_INSTALL_DIR/etc/geo/GeoLite2-Country.mmdb
+geoLite2ASN = ARKIME_INSTALL_DIR/etc/geo/GeoLite2-ASN.mmdb
 rirFile = ARKIME_INSTALL_DIR/etc/ipv4-address-space.csv
 
 # MAC 주소에 따른 제조사 정보

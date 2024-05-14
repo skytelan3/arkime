@@ -18,7 +18,7 @@ install:
 	$(INSTALL) parliament.ini.sample $(etcdir)/
 	$(INSTALL) parliament.env.example $(etcdir)/
 	$(INSTALL) env.example $(etcdir)/
-	$(INSTALL) ipv4-address-space.csv.sample %(etcdir)/
+	$(INSTALL) ipv4-address-space.csv.sample $(etcdir)/
 
 	@mkdir $(geodir)
 	$(INSTALL) $(geodir)/GeoLite2-ASN.mmdb $(geodir)/
