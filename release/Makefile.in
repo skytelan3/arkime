@@ -1,5 +1,6 @@
 INSTALL        = @INSTALL@
 etcdir         = @prefix@/etc
+geodir		   = @prefix@/geo
 
 all:
 clean:
@@ -7,16 +8,22 @@ check:
 
 install:
 	$(INSTALL) install.sh @prefix@
-	$(INSTALL) config.watchtek $(etcdir)/
 	$(INSTALL) README.txt @prefix@
 	$(INSTALL) ../LICENSE @prefix@
 	@mkdir -p $(etcdir) @prefix@/logs
+	$(INSTALL) config.watchtek $(etcdir)/
 	$(INSTALL) config.ini.sample $(etcdir)/
 	$(INSTALL) wise.ini.sample $(etcdir)/
 	$(INSTALL) cont3xt.ini.sample $(etcdir)/
 	$(INSTALL) parliament.ini.sample $(etcdir)/
 	$(INSTALL) parliament.env.example $(etcdir)/
 	$(INSTALL) env.example $(etcdir)/
+	$(INSTALL) ipv4-address-space.csv.sample %(etcdir)/
+
+	@mkdir $(geodir)
+	$(INSTALL) $(geodir)/GeoLite2-ASN.mmdb $(geodir)/
+	$(INSTALL) $(geodir)/GeoLite2-Country.mmdb $(geodir)/
+	
 
 	sed -e "s,BUILD_ARKIME_INSTALL_DIR,@prefix@,g" < arkimecont3xt.systemd.service > @prefix@/etc/arkimecont3xt.systemd.service
 	sed -e "s,BUILD_ARKIME_INSTALL_DIR,@prefix@,g" < arkimecapture.systemd.service > @prefix@/etc/arkimecapture.systemd.service

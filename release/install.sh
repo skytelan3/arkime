@@ -23,6 +23,8 @@ sed -i "s/ELASTICSEARCH_IPPORT/$ELASTICSEARCH_IPPORT/g" config.ini
 sed -i "s/INTERFACE_LIST/$INTERFACE_LIST/g" config.ini
 sed -i "s@PCAP_DIR_LIST@$PCAP_DIR_LIST@g" config.ini
 
+mv ipv4-address-space.csv.sample ipv4-address-space.csv
+
 echo "################################"
 echo "Elasticsearch INIT"
 echo "################################"
