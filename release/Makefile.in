@@ -6,6 +6,7 @@ clean:
 check:
 
 install:
+	$(INSTALL) install.sh @prefix@
 	$(INSTALL) README.txt @prefix@
 	$(INSTALL) ../LICENSE @prefix@
 	@mkdir -p $(etcdir) @prefix@/logs

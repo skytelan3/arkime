@@ -489,6 +489,8 @@ typedef struct arkime_config {
     char      sessionIdMode;
 
     char     *hostIp;
+    gboolean  watchallDefaultField;
+    gboolean  removeAtTimestamp;
 } ArkimeConfig_t;
 
 typedef struct {

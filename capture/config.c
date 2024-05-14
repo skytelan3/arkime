@@ -821,6 +821,8 @@ void arkime_config_load()
     config.enablePacketDedup     = arkime_config_boolean(NULL, "enablePacketDedup", TRUE);
 
     config.hostIp                = arkime_config_str(keyfile, "hostIp", NULL);
+    config.watchallDefaultField  = arkime_config_boolean(keyfile, "watchallDefaultField", FALSE);
+    config.removeAtTimestamp  = arkime_config_boolean(keyfile, "removeAtTimestamp", FALSE);
 
     config.maxStreams[SESSION_TCP] = MAX(100, maxStreams / config.packetThreads * 1.25);
     config.maxStreams[SESSION_UDP] = MAX(100, maxStreams / config.packetThreads / 20);

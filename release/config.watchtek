@@ -1,0 +1,96 @@
+[default]
+######### Arkime WatchAll 설정 #########
+watchallDefaultField=enable
+removeAtTimestamp=true
+
+######### 필수 확인 정보 #########
+# Elasticsearch 주소를 입력하세요.
+elasticsearch=http://ELASTICSEARCH_IPPORT
+
+# 관제 대상 인터페이스로 ; 로 구분하여 여러개 입력 가능
+interface=INTERFACE_LIST
+
+# 패킷 파일 저장 위치로 저장 공간이 널널한 곳을 지정할 것
+pcapDir=PCAP_DIR_LIST
+
+# Arkime Web port
+viewPort = 8005
+
+# IP에 따라 AS 번호 매핑
+geoLite2Country = ARKIME_INSTALL_DIR/etc/GeoLite2-Country.mmdb
+geoLite2ASN = ARKIME_INSTALL_DIR/etc/GeoLite2-ASN.mmdb
+rirFile = ARKIME_INSTALL_DIR/etc/ipv4-address-space.csv
+
+# MAC 주소에 따른 제조사 정보
+ouiFile = ARKIME_INSTALL_DIR/etc/oui.txt
+
+# 플러그인과 파서 정보
+parsersDir=ARKIME_INSTALL_DIR/parsers
+pluginsDir=ARKIME_INSTALL_DIR/plugins
+
+# 변경 불필요.
+rootPlugins=kafka.so
+
+# Kafka 주소
+kafkaBootstrapServers=KAFKA_IPPORT
+kafkaTopic=TMS-input
+# arkime이 식별될 IP. 트래픽 정보 수집 시, deviceIp에 아래 IP 정보가 들어가게 됨
+hostIp=ARKIME_IP
+
+
+######### 선택 확인 정보 #########
+# 설정된 숫자 만큼 여유 공간이 남을 때, 패킷 파일 삭제
+freeSpaceG = 5%
+
+# Pcap 파일 작성 디렉토리에 권한 문제 발생 시, 아래 수정 요구됨
+# User to drop privileges to. The pcapDir must be writable by this user or group below
+dropUser=nobody
+# Group to drop privileges to. The pcapDir must be writable by this group or user above
+dropGroup=daemon
+
+# 패킷 수집 스레드 수
+packetThreads=2
+
+# 제외할 네트워크 정보 
+#bpf=not port 9200
+# See https://arkime.com/rulesformat
+#rulesFiles=ARKIME_INSTALL_DIR/etc/arkime.rules
+
+
+######### 수정 불필요 정보 #########
+passwordSecret = watchall
+httpRealm = Moloch
+# Specify the max number of indices we calculate spidata for.
+# ES will blow up if we allow the spiData to search too many indices.
+spiDataMaxIndices=4
+# Semicolon ';' seperated list of SMTP Headers that have ips, need to have the terminating colon ':'
+smtpIpHeaders=X-Originating-IP:;X-Barracuda-Apparent-Source-IP:
+# ADVANCED - How is pcap written to disk
+#  simple          = use O_DIRECT if available, writes in pcapWriteSize chunks,
+#                    a file per packet thread.
+#  simple-nodirect = don't use O_DIRECT.  Required for zfs and others
+pcapWriteMethod=simple
+# ADVANCED - Number of packets to ask libnids/libpcap to read per poll/spin
+# Increasing may hurt stats and ES performance
+# Decreasing may cause more dropped packets
+packetsPerPoll = 50000
+# DEBUG - Write to stdout unknown protocols
+logUnknownProtocols = false
+# headers-http-request is used to configure request headers to index
+[headers-http-request]
+referer=type:string;count:true;unique:true
+authorization=type:string;count:true
+content-type=type:string;count:true
+origin=type:string
+# headers-http-response is used to configure http response headers to index
+[headers-http-response]
+location=type:string
+server=type:string
+content-type=type:string;count:true
+# headers-email is used to configure email headers to index
+[headers-email]
+x-priority=type:integer
+authorization=type:string
+
+# WARNING: This is an ini file with sections, most likely you don't want to put a setting here.
+#          New settings usually go near the top in the [default] section, or in [nodename] sections.

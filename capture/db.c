@@ -757,22 +757,21 @@ void arkime_db_save_session(ArkimeSession_t *session, int final)
                     ((uint64_t)session->lastPacket.tv_sec) * 1000 + ((uint64_t)session->lastPacket.tv_usec) / 1000,
                     timediff,
                     session->ipProtocol);
-
-    BSB_EXPORT_sprintf(jbsb,
-                    "\"arkime\": {"
-                    "\"index\": \"%ssessions3-%s\","
-                    "\"id\": \"%s\","
-                    "\"timestamp\":%" PRIu64
-                    "},",
-                    config.prefix,
-                    dbInfo[thread].prefix,
-                    id,
-                    ((uint64_t)currentTime.tv_sec)*1000 + ((uint64_t)currentTime.tv_usec)/1000
-                    );
-
+    
     // WatchTek CustomField
-    if (config.hostIp)
+    if (config.watchallDefaultField)
     {
+        BSB_EXPORT_sprintf(jbsb,
+                        "\"arkime\": {"
+                        "\"index\": \"%ssessions3-%s\","
+                        "\"id\": \"%s\","
+                        "\"timestamp\":%" PRIu64
+                        "},",
+                        config.prefix,
+                        dbInfo[thread].prefix,
+                        id,
+                        ((uint64_t)currentTime.tv_sec)*1000 + ((uint64_t)currentTime.tv_usec)/1000
+                        );
         BSB_EXPORT_sprintf(jbsb, "\"deviceIp\": \"%s\",", config.hostIp);
     }
     
@@ -820,6 +819,13 @@ void arkime_db_save_session(ArkimeSession_t *session, int final)
             BSB_EXPORT_ptr(jbsb, arkime_char_to_hexstr[(uint8_t)session->firstBytes[1][i]], 2);
         }
         BSB_EXPORT_cstr(jbsb, "\",");
+    }
+
+    if (config.removeAtTimestamp)
+    {
+        BSB_EXPORT_sprintf(jbsb,
+                    "\"@timestamp\":%" PRIu64 ",",
+                    ((uint64_t)currentTime.tv_sec) * 1000 + ((uint64_t)currentTime.tv_usec) / 1000);
     }
 
     if (session->ipProtocol) {
