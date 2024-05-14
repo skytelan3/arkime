@@ -6210,16 +6210,6 @@ sub dbCheck {
             $errstr .= sprintf ("    REMOVE 'index.cache.field.type'\n");
         }
 
-        if (!($ISWINDOWS))
-        {
-            if (!(exists $nodeStat->{process}->{max_file_descriptors}) || int($nodeStat->{process}->{max_file_descriptors}) < 4000) {
-                $errstr .= sprintf ("  INCREASE max file descriptors in /etc/security/limits.conf and restart all ES node\n");
-                $errstr .= sprintf ("                (change root to the user that runs ES)\n");
-                $errstr .= sprintf ("          root hard nofile 128000\n");
-                $errstr .= sprintf ("          root soft nofile 128000\n");
-            }
-        }
-
         if ($errstr) {
             $error = 1;
             logmsg ("\nERROR: On node ", $node->{name}, " machine ", ($node->{hostname} || $node->{host}), " in file ", $node->{settings}->{config}, "\n");
