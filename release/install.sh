@@ -16,12 +16,6 @@ echo "################################"
 cd $ARKIME_INSTALL_DIR/etc
 rm -rf config.ini
 cp config.watchtek config.ini
-rm -rf /etc/systemd/system/arkimecapture.service
-rm -rf /etc/systemd/system/arkimeviewer.service
-cp arkimecapture.systemd.service /etc/systemd/system/arkimecapture.service
-cp arkimeviewer.systemd.service /etc/systemd/system/arkimeviewer.service
-sed -i "s@ARKIME_INSTALL_DIR@$ARKIME_INSTALL_DIR@g" /etc/systemd/system/arkimecapture.service
-sed -i "s@ARKIME_INSTALL_DIR@$ARKIME_INSTALL_DIR@g" /etc/systemd/system/arkimeviewer.service
 sed -i "s@ARKIME_INSTALL_DIR@$ARKIME_INSTALL_DIR@g" config.ini
 sed -i "s/ARKIME_IP/$ARKIME_IP/g" config.ini
 sed -i "s/KAFKA_IPPORT/$KAFKA_IPPORT/g" config.ini

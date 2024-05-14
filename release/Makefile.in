@@ -7,6 +7,7 @@ check:
 
 install:
 	$(INSTALL) install.sh @prefix@
+	$(INSTALL) config.watchtek $(etcdir)/
 	$(INSTALL) README.txt @prefix@
 	$(INSTALL) ../LICENSE @prefix@
 	@mkdir -p $(etcdir) @prefix@/logs
