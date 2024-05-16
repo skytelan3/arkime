@@ -1,6 +1,6 @@
 INSTALL        = @INSTALL@
 etcdir         = @prefix@/etc
-geodir		   = @prefix@/geo
+geodir		   = $(etcdir)/geo
 
 all:
 clean:
