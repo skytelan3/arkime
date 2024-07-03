@@ -154,7 +154,7 @@ jobs:
           (cd .. ; git clone https://github.com/arkime/ja4)
           cp ../ja4/ja4plus.c capture/plugins
           (cd capture/plugins; make)
-          (cd ../ja4; git reset --hard a76163d4fdb72449b858c5e90fbc4b5e95deb8c9; make)
+          (cd ../ja4; make)
           (cd tests; ./tests.pl --extra "-o plugins=ja4plus.so" ../../ja4/pcap/*.pcap)
           mv capture/plugins/ja4plus.so ja4plus.amd64.so
           rm -f capture/plugins/ja4plus.c
