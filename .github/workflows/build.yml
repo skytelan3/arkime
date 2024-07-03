@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: [el8]
+        version: [el8, el9, ubuntu2004, ubuntu2204, ubuntu2404, arch, al2023, debian12]
         include:
           - version: el8
             container: andywick/arkime-build-8:5.0.0-2
@@ -152,7 +152,6 @@ jobs:
         if: ${{ matrix.ja4plus }}
         run: |
           (cd .. ; git clone https://github.com/arkime/ja4)
-          (cd ja4 ; a706842acb92ab01627e8b7af6930cdda95ba4bb)
           cp ../ja4/ja4plus.c capture/plugins
           (cd capture/plugins; make)
           (cd ../ja4; git reset --hard a706842acb92ab01627e8b7af6930cdda95ba4bb; make)
